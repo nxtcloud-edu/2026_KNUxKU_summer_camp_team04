@@ -1,0 +1,15 @@
+{
+  "problem_id": "func_find_max",
+  "title": "최댓값 찾기",
+  "concept": ["loop", "function", "comparison"],
+  "check_type": "function_call",
+  "function_name": "find_max",
+  "code_template": "def find_max(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[3, 1, 4, 1, 5]], "expected": 5, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-5, -1, -10]], "expected": -1, "category": "all_negative" },
+    { "input": [[7]], "expected": 7, "category": "single_element" }
+  ]
+}

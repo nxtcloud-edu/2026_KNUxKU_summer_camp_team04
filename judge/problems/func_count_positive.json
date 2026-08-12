@@ -1,0 +1,15 @@
+{
+  "problem_id": "func_count_positive",
+  "title": "양수 개수 세기",
+  "concept": ["loop", "function", "conditional"],
+  "check_type": "function_call",
+  "function_name": "count_positive",
+  "code_template": "def count_positive(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[1, -2, 3, -4, 5]], "expected": 3, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-1, -2, -3]], "expected": 0, "category": "no_positive" },
+    { "input": [[0, 0, 0]], "expected": 0, "category": "zero_case" }
+  ]
+}
