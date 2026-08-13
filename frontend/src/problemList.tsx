@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
@@ -48,7 +49,7 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
   }, [page, pageCount])
 
   const recommendations = useMemo(() => {
-    const unfinished = problems.filter((problem) => !localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`))
+    const unfinished = problems.filter((problem) => getLearningProgress(problem.problem_id)?.status !== 'COMPLETED')
     const pool = unfinished.length >= 3 ? unfinished : problems
     const beginnerFirst = [...pool].sort((a, b) => Number(!a.problem_id.startsWith('func_')) - Number(!b.problem_id.startsWith('func_')))
     return beginnerFirst.slice(0, 3)
@@ -130,7 +131,7 @@ function RecommendedProblem({ problem, rank, onClick }: { problem: ProblemSummar
 
 function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; number: number; onClick: () => void }) {
   const functionType = problem.problem_id.startsWith('func_')
-  const checkpointed = Boolean(localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`))
+  const progress = getLearningProgress(problem.problem_id)
   return (
     <button className="problem-row" onClick={onClick}>
       <span className="problem-row-number">{String(number).padStart(2, '0')}</span>
@@ -138,7 +139,7 @@ function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; num
         <strong>{problem.title}</strong>
         <small>{functionType ? '함수형' : '입출력형'} · {problem.concept.length ? problem.concept.join(' · ') : 'Python 기초'}</small>
       </span>
-      {checkpointed && <span className="checkpoint-state"><CheckCircle2 size={14} /> 학습 중</span>}
+      {progress && <span className={`checkpoint-state ${progress.status === 'COMPLETED' ? 'completed' : ''}`}><CheckCircle2 size={14} /> {progress.status === 'COMPLETED' ? '학습 완료' : '학습 중'}</span>}
       <ChevronRight className="problem-arrow" size={17} />
     </button>
   )

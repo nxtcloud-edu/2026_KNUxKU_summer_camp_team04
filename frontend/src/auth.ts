@@ -1,5 +1,7 @@
 import { apiRequest, isApiConfigured, setAccessToken } from './api'
 
+const LOCAL_USER_KEY = 'tutory:local-user'
+
 export type UserRole = 'student' | 'educator'
 
 export type AuthUser = {
@@ -20,7 +22,7 @@ type AuthResponse = {
 }
 
 export async function loginUser(email: string, password: string, role: UserRole): Promise<AuthUser> {
-  requireAuthApi()
+  if (!isApiConfigured) return persistLocalUser(normalizeUser(undefined, email, role))
   const response = await apiRequest<AuthResponse>('/auth/login', {
     method: 'POST',
     auth: false,
@@ -31,7 +33,7 @@ export async function loginUser(email: string, password: string, role: UserRole)
 }
 
 export async function signupUser(name: string, email: string, password: string, role: UserRole): Promise<AuthUser> {
-  requireAuthApi()
+  if (!isApiConfigured) return persistLocalUser(normalizeUser(undefined, email, role, name))
   const response = await apiRequest<AuthResponse>('/auth/signup', {
     method: 'POST',
     auth: false,
@@ -48,17 +50,18 @@ export async function logoutUser() {
     })
   }
   setAccessToken('')
+  localStorage.removeItem(LOCAL_USER_KEY)
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
-  if (!isApiConfigured) return null
+  if (!isApiConfigured) return getLocalUser()
   const response = await apiRequest<Partial<AuthUser> | AuthResponse>('/auth/me')
   if (isAuthResponse(response)) return normalizeUser(response.user, '', 'student')
   return normalizeUser(response, '', 'student')
 }
 
 export async function requestPasswordReset(email: string) {
-  requireAuthApi()
+  if (!isApiConfigured) return
   await apiRequest('/auth/password-reset/request', {
     method: 'POST',
     auth: false,
@@ -66,14 +69,23 @@ export async function requestPasswordReset(email: string) {
   })
 }
 
-function requireAuthApi() {
-  if (!isApiConfigured) {
-    throw new Error('인증 API가 연결되지 않았습니다. frontend/.env의 VITE_API_BASE_URL을 확인해 주세요.')
-  }
-}
-
 function persistToken(response: AuthResponse) {
   setAccessToken(response.access_token ?? response.token ?? '')
+}
+
+function persistLocalUser(user: AuthUser) {
+  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(user))
+  return user
+}
+
+function getLocalUser(): AuthUser | null {
+  try {
+    const saved = localStorage.getItem(LOCAL_USER_KEY)
+    return saved ? JSON.parse(saved) as AuthUser : null
+  } catch {
+    localStorage.removeItem(LOCAL_USER_KEY)
+    return null
+  }
 }
 
 function normalizeUser(payload: (Partial<AuthUser> & { role?: string }) | undefined, email: string, fallbackRole: UserRole, fallbackName = ''): AuthUser {
@@ -99,4 +111,3 @@ function normalizeUser(payload: (Partial<AuthUser> & { role?: string }) | undefi
 function isAuthResponse(value: Partial<AuthUser> | AuthResponse): value is AuthResponse {
   return 'user' in value || 'access_token' in value || 'token' in value
 }
-
