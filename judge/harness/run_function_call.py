@@ -48,16 +48,19 @@ print(json.dumps({"actual": actual}))
 """
 
 
-def _run_child(script: str, args: list):
+def _run_child(script: str, args: list, timeout_sec: float):
     """자식 프로세스를 실행하고 stdout 마지막 줄을 JSON으로 파싱해 반환한다.
-    비정상 종료/파싱 실패 시 None을 반환한다 (호출부에서 실패로 처리)."""
+    비정상 종료/파싱 실패 시 None을 반환한다 (호출부에서 실패로 처리).
+    자식이 timeout_sec을 넘기면 subprocess.TimeoutExpired를 그대로 던진다
+    (호출부가 TIME_LIMIT으로 처리하도록)."""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        capture_output=True, text=True,
+        timeout=timeout_sec,
+    )
+    if proc.returncode != 0:
+        return None
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", script, *args],
-            capture_output=True, text=True,
-        )
-        if proc.returncode != 0:
-            return None
         return json.loads(proc.stdout.strip().splitlines()[-1])
     except Exception:
         return None
@@ -70,8 +73,14 @@ def main(payload_path: str) -> None:
     student_code = payload["student_code"]
     function_name = payload["function_name"]
     test_cases = payload["test_cases"]
+    time_limit_sec = payload["time_limit_sec"]  # 테스트케이스 1개당 제한시간
 
-    check = _run_child(_CHECK_RUNNER, [student_code, function_name])
+    try:
+        check = _run_child(_CHECK_RUNNER, [student_code, function_name], time_limit_sec)
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"error": "timeout"}))
+        return
+
     if not check or not check.get("ok"):
         print(json.dumps({
             "error": "runtime",
@@ -81,7 +90,15 @@ def main(payload_path: str) -> None:
 
     results = []
     for tc in test_cases:
-        call_result = _run_child(_CALL_RUNNER, [student_code, function_name, json.dumps(tc["input"])])
+        try:
+            call_result = _run_child(
+                _CALL_RUNNER, [student_code, function_name, json.dumps(tc["input"])], time_limit_sec
+            )
+        except subprocess.TimeoutExpired:
+            # 테스트 하나가 제한시간을 넘기면 전체 제출을 TIME_LIMIT으로 즉시
+            # 판정한다 (실제 저지들의 일반적인 TLE 판정과 동일 — 남은 테스트는 생략).
+            print(json.dumps({"error": "timeout"}))
+            return
         passed = call_result is not None and call_result.get("actual") == tc["expected"]
         results.append({"category": tc.get("category"), "passed": passed})
 

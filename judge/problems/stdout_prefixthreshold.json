@@ -4,6 +4,8 @@
   "concept": [],
   "check_type": "stdout_match",
   "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
   "public_test_cases": [
     {
       "stdin": "10\n",

@@ -20,6 +20,7 @@ def main(payload_path: str) -> None:
 
     student_code = payload["student_code"]
     test_cases = payload["test_cases"]
+    time_limit_sec = payload["time_limit_sec"]  # 테스트케이스 1개당 제한시간
 
     results = []
     for tc in test_cases:
@@ -29,10 +30,16 @@ def main(payload_path: str) -> None:
                 input=tc["stdin"],
                 capture_output=True,
                 text=True,
+                timeout=time_limit_sec,
             )
             actual = proc.stdout.rstrip("\n")
             expected = tc["expected_stdout"].rstrip("\n")
             passed = proc.returncode == 0 and actual == expected
+        except subprocess.TimeoutExpired:
+            # 테스트 하나가 제한시간을 넘기면 전체 제출을 TIME_LIMIT으로 즉시
+            # 판정한다 (실제 저지들의 일반적인 TLE 판정과 동일 — 남은 테스트는 생략).
+            print(json.dumps({"error": "timeout"}))
+            return
         except Exception:
             passed = False
         results.append({"category": tc.get("category"), "passed": passed})

@@ -85,15 +85,22 @@ def convert_one(problem_dir: Path) -> dict:
             hidden_cases.append(case)
 
     problem_id = "stdout_" + re.sub(r"^\d+_", "", problem_dir.name)
-    return {
+    data = {
         "problem_id": problem_id,
         "title": title,
         "concept": [],
         "check_type": "stdout_match",
         "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
-        "public_test_cases": public_cases,
-        "hidden_test_cases": hidden_cases,
     }
+    # init.yml의 time_limit(초)/memory_limit(KB)이 있으면 그대로 옮겨 담는다.
+    # (time_limit_sec은 "테스트케이스 1개당" 제한시간 — judge_service.py 참고)
+    if "time_limit" in cfg:
+        data["time_limit_sec"] = cfg["time_limit"]
+    if "memory_limit" in cfg:
+        data["memory_limit_mb"] = round(cfg["memory_limit"] / 1024)
+    data["public_test_cases"] = public_cases
+    data["hidden_test_cases"] = hidden_cases
+    return data
 
 
 def main(source_dirs: list) -> None:

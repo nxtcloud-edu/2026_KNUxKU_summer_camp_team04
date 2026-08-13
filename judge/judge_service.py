@@ -17,8 +17,18 @@ from docker.errors import DockerException
 
 PROBLEMS_DIR = Path(__file__).parent / "problems"
 SANDBOX_IMAGE = "judge-sandbox"
-TIMEOUT_SEC = 5
-MEM_LIMIT = "128m"
+
+# 문제 JSON에 time_limit_sec/memory_limit_mb가 없을 때 쓰는 기본값.
+DEFAULT_TIME_LIMIT_SEC = 5
+DEFAULT_MEM_LIMIT_MB = 128
+
+# time_limit_sec은 "테스트케이스 1개당" 제한시간이다 (하네스가 테스트케이스마다
+# 서브프로세스를 새로 띄워서 그 안에서 개별적으로 적용함). 컨테이너 전체
+# 타임아웃(CONTAINER_*)은 하네스가 어떤 이유로든 멈춰버리는 경우를 잡는
+# 안전망일 뿐이라, 테스트 개수만큼 여유를 넉넉히 두고 상한을 건다.
+CONTAINER_TIMEOUT_OVERHEAD_SEC = 5
+CONTAINER_TIMEOUT_CAP_SEC = 30
+
 PIDS_LIMIT = 64
 CPU_LIMIT_NANO = 1_000_000_000  # 1 vCPU로 제한 (무한루프가 호스트 코어를 통째로 잡는 것 방지)
 
@@ -74,6 +84,9 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
         test_cases += problem.get("hidden_test_cases", [])
     total = len(test_cases)
 
+    time_limit_sec = problem.get("time_limit_sec", DEFAULT_TIME_LIMIT_SEC)
+    mem_limit_mb = problem.get("memory_limit_mb", DEFAULT_MEM_LIMIT_MB)
+
     # 1) 문법 오류는 컨테이너를 띄우기 전에 먼저 걸러낸다 (비용 절감)
     try:
         compile(student_code, "<student_code>", "exec")
@@ -81,12 +94,12 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
         return {"passed": 0, "total": total, "status": "SYNTAX_ERROR", "message": str(e)}
 
     # 2) 샌드박스 컨테이너에서 실행
-    outcome = _run_in_sandbox(check_type, student_code, problem, test_cases)
+    outcome = _run_in_sandbox(check_type, student_code, problem, test_cases, time_limit_sec, mem_limit_mb)
 
     if outcome["status"] == "TIME_LIMIT":
         return {
             "passed": 0, "total": total, "status": "TIME_LIMIT",
-            "message": f"{TIMEOUT_SEC}초 내에 실행이 끝나지 않았습니다.",
+            "message": f"{time_limit_sec}초 내에 실행이 끝나지 않았습니다.",
         }
     if outcome["status"] == "RUNTIME_ERROR":
         return {
@@ -104,7 +117,10 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
     return response
 
 
-def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_cases: list) -> dict:
+def _run_in_sandbox(
+    check_type: str, student_code: str, problem: dict, test_cases: list,
+    time_limit_sec: float, mem_limit_mb: float,
+) -> dict:
     """격리된 컨테이너에서 학생 코드를 실행하고 결과를 반환한다.
 
     반환값은 {"status": "OK", "results": [...]} 또는
@@ -115,7 +131,16 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
     except DockerException as e:
         return {"status": "RUNTIME_ERROR", "message": f"Docker 데몬에 연결할 수 없습니다: {e}"}
 
-    payload = {"student_code": student_code, "test_cases": test_cases}
+    # time_limit_sec은 하네스가 테스트케이스마다 개별 적용하는 "테스트 1개당" 제한.
+    # 컨테이너 전체 타임아웃은 그걸 어기지 않는 선에서, 하네스가 예상 밖으로
+    # 멈춰버리는 경우를 잡는 안전망으로만 넉넉하게 잡는다.
+    container_timeout = min(
+        CONTAINER_TIMEOUT_CAP_SEC,
+        time_limit_sec * max(len(test_cases), 1) + CONTAINER_TIMEOUT_OVERHEAD_SEC,
+    )
+    mem_limit_str = f"{int(mem_limit_mb)}m"
+
+    payload = {"student_code": student_code, "test_cases": test_cases, "time_limit_sec": time_limit_sec}
     if check_type == "function_call":
         payload["function_name"] = problem["function_name"]
 
@@ -130,8 +155,8 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
                 command=["/payload/payload.json"],
                 volumes={tmp_dir: {"bind": "/payload", "mode": "ro"}},
                 network_disabled=True,
-                mem_limit=MEM_LIMIT,
-                memswap_limit=MEM_LIMIT,  # mem_limit만 걸면 스왑으로 최대 2배까지 우회 가능해서 동일 값으로 스왑 차단
+                mem_limit=mem_limit_str,
+                memswap_limit=mem_limit_str,  # mem_limit만 걸면 스왑으로 최대 2배까지 우회 가능해서 동일 값으로 스왑 차단
                 nano_cpus=CPU_LIMIT_NANO,
                 pids_limit=PIDS_LIMIT,
                 read_only=True,
@@ -150,7 +175,7 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
 
         try:
             try:
-                container.wait(timeout=TIMEOUT_SEC)
+                container.wait(timeout=container_timeout)
             except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
                 # 지정 시간 내에 컨테이너가 안 끝난 경우만 TIME_LIMIT으로 처리.
                 # 그 외 예외(진짜 버그)까지 여기서 삼켜서 TIME_LIMIT으로 오분류하지 않도록
@@ -171,6 +196,8 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
         return {"status": "RUNTIME_ERROR", "message": logs}
 
     if "error" in harness_result:
+        if harness_result["error"] == "timeout":
+            return {"status": "TIME_LIMIT"}
         return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
 
     return {"status": "OK", "results": harness_result["results"]}
