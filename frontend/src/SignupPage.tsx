@@ -1,4 +1,5 @@
-import { Check, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { Check, Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { useState } from 'react'
 
 type SignupPageProps = {
   onSignup: () => void
@@ -6,6 +7,8 @@ type SignupPageProps = {
 }
 
 function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
+  const [showPassword, setShowPassword] = useState(false)
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     onSignup()
@@ -13,10 +16,9 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-panel signup-panel">
+      <section className="auth-panel">
         <a className="auth-brand" href="#" aria-label="TUTORY 홈">
           <img src="/TUTORY_logo.svg" alt="" />
-          <span>TUTORY</span>
         </a>
 
         <div className="auth-heading">
@@ -46,7 +48,20 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
             <span>비밀번호</span>
             <div>
               <LockKeyhole size={17} />
-              <input type="password" placeholder="8자 이상 입력하세요" minLength={8} required />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="8자 이상 입력하세요"
+                minLength={8}
+                required
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
             </div>
           </label>
 

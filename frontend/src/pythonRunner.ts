@@ -14,6 +14,12 @@ export type ExecutionResult = {
   duration: number
 }
 
+export type TraceStep = {
+  iteration: number
+  line: number
+  locals: Record<string, string | number | boolean | null>
+}
+
 let runtimePromise: Promise<PyodideInterface> | null = null
 
 export function preparePython() {
@@ -77,6 +83,45 @@ json.dumps(__codetrace_results)
       duration: performance.now() - startedAt,
     }
   }
+}
+
+export async function runTrace(code: string): Promise<TraceStep[]> {
+  const pyodide = await preparePython()
+  const serializedCode = JSON.stringify(code)
+  const script = `
+import json
+
+__trace_steps = []
+__trace_iteration = 0
+
+def __trace(frame, event, arg):
+    global __trace_iteration
+    if frame.f_code.co_filename != "<trace-activity>" or event != "line":
+        return __trace
+    # The loop header is reached again after the body has updated total.
+    if frame.f_lineno == 3 and "i" in frame.f_locals:
+        __trace_iteration += 1
+        __trace_steps.append({
+            "iteration": __trace_iteration,
+            "line": 4,
+            "locals": {
+                "i": frame.f_locals.get("i"),
+                "total": frame.f_locals.get("total"),
+            },
+        })
+    return __trace
+
+import sys
+sys.settrace(__trace)
+try:
+    exec(compile(${serializedCode}, "<trace-activity>", "exec"), {})
+finally:
+    sys.settrace(None)
+
+json.dumps(__trace_steps)
+`
+  const value = await pyodide.runPythonAsync(script)
+  return JSON.parse(String(value)) as TraceStep[]
 }
 
 function cleanPythonError(message: string) {
