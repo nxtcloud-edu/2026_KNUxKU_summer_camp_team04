@@ -1,6 +1,6 @@
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Info, LockKeyhole, Mail, Play, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import { loginUser, requestPasswordReset, type UserRole } from './auth'
+import { loginUser, type UserRole } from './auth'
 import { ApiError } from './api'
 
 type LoginPageProps = {
@@ -149,9 +149,24 @@ function LoginPage({ onLogin, onSignupClick, onBack, notice = '' }: LoginPagePro
   )
 }
 
+/**
+ * 로그인 실패 문구.
+ *
+ * **"가입되지 않은 아이디입니다" 라고 단정하면 안 된다.** 백엔드는 이메일이
+ * 없을 때와 비밀번호가 틀렸을 때 **똑같은 401**(`INVALID_CREDENTIALS`)을 준다.
+ * 의도된 설계다 -- 구분해서 알려주면 "이 이메일은 가입되어 있다"를 확인시켜 주는
+ * 계정 열거(account enumeration)가 된다
+ * (`backend/app/errors.py` 의 `InvalidCredentials` 독스트링,
+ *  `plans/FRONTEND_INTEGRATION.md` §0).
+ *
+ * 실용적으로도 틀린다: 비밀번호를 잘못 입력한 사용자에게 "가입되지 않았다"고
+ * 하면 회원가입으로 갔다가 409(이미 가입된 이메일)를 받고 막힌다.
+ *
+ * 그래서 원인을 단정하지 않으면서 처음 온 사람에게 다음 행동만 안내한다.
+ */
 function getLoginErrorMessage(error: unknown) {
   if (error instanceof ApiError && error.status === 401) {
-    return '가입되지 않은 아이디입니다. 회원가입을 진행해주세요.'
+    return '이메일 또는 비밀번호가 올바르지 않아요. 처음이시면 회원가입을 진행해주세요.'
   }
   return error instanceof Error ? error.message : '로그인에 실패했습니다.'
 }
