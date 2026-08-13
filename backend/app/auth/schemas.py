@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.enums import UserRole
 from app.models import User
 from app.schemas_common import UtcDatetime
 
@@ -45,6 +46,10 @@ def next_badge(total_earned: int) -> Badge | None:
 class SignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     email: EmailStr
+    # 역할은 요청으로 받되 **가입 게이트를 통과해야 한다** --
+    # EDUCATOR 는 기관 초대 코드가 필수다 (auth/service.resolve_organization).
+    role: UserRole = UserRole.STUDENT
+    invite_code: str | None = Field(default=None, max_length=64)
     # 8자 미만은 거부한다. 상한은 bcrypt pre-hash 때문에 기술적으로는 불필요하지만
     # 비정상적으로 긴 입력을 해싱하는 비용을 막는다.
     password: str = Field(min_length=8, max_length=128)
@@ -61,6 +66,8 @@ class UserRead(BaseModel):
     nickname: str
     email: str
     avatar_url: str | None
+    role: UserRole
+    organization_id: str | None
     acorn_balance: int
     total_acorns_earned: int
 
@@ -72,6 +79,8 @@ class UserRead(BaseModel):
             nickname=u.nickname,
             email=u.email,
             avatar_url=u.avatar_url,
+            role=UserRole(u.role),
+            organization_id=u.organization_id,
             acorn_balance=u.acorn_balance,
             total_acorns_earned=u.total_acorns_earned,
         )
@@ -98,6 +107,8 @@ class ProfileRead(UserRead):
             nickname=u.nickname,
             email=u.email,
             avatar_url=u.avatar_url,
+            role=UserRole(u.role),
+            organization_id=u.organization_id,
             acorn_balance=u.acorn_balance,
             total_acorns_earned=u.total_acorns_earned,
             current_badge=current_badge(u.total_acorns_earned),

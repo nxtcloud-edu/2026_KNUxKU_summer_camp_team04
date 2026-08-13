@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.router import router as agent_router
 from app.auth.router import router as auth_router
+from app.educator.router import router as educator_router
 from app.config import get_settings
 from app.db import init_db
 from app.errors import register_error_handlers
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(users_router)
+    app.include_router(educator_router)
     app.include_router(problems_router)
     app.include_router(sessions_router)
     app.include_router(trace_router)

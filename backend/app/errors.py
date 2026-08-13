@@ -70,6 +70,50 @@ class NotAuthenticated(AppError):
         super().__init__(message)
 
 
+class Forbidden(AppError):
+    """역할이 모자란 경우. 리소스 소유권 문제는 404를 쓴다(존재를 숨기려고)."""
+
+    status_code = 403
+    code = "FORBIDDEN"
+
+    def __init__(self, message: str = "권한이 없습니다.") -> None:
+        super().__init__(message)
+
+
+class InvalidInviteCode(AppError):
+    status_code = 422
+    code = "INVALID_INVITE_CODE"
+
+    def __init__(self, message: str = "초대 코드가 올바르지 않습니다.") -> None:
+        super().__init__(message)
+
+
+class CourseNotFound(AppError):
+    """소유하지 않은 강의도 여기로 온다. 존재 여부를 알려주지 않는다."""
+
+    status_code = 404
+    code = "COURSE_NOT_FOUND"
+
+    def __init__(self, course_id: str) -> None:
+        super().__init__("강의를 찾을 수 없습니다.", course_id=course_id)
+
+
+class StudentNotInCourse(AppError):
+    status_code = 404
+    code = "STUDENT_NOT_IN_COURSE"
+
+    def __init__(self, student_id: str) -> None:
+        super().__init__("이 강의에 등록된 학생이 아닙니다.", student_id=student_id)
+
+
+class AlreadyEnrolled(AppError):
+    status_code = 409
+    code = "ALREADY_ENROLLED"
+
+    def __init__(self) -> None:
+        super().__init__("이미 등록된 학생입니다.")
+
+
 class EmailAlreadyRegistered(AppError):
     status_code = 409
     code = "EMAIL_ALREADY_REGISTERED"
