@@ -91,3 +91,76 @@ class Evaluation(BaseModel):
     effectiveness_score: float = Field(ge=0.0, le=1.0)
     notes: str
     follow_up_needed: bool
+
+
+# ---------------------------------------------------------------------------
+# 오답/복습 기반 문제 생성 (기존 튜터 파이프라인과는 별개 기능).
+#
+# LLM 호출을 복습 횟수에 비례하지 않게 하기 위해 4계층으로 나뉜다: 문제 뱅크
+# 검색(LLM 0회) -> 코스메틱 변주(LLM 1회, 저렴) -> 인스턴스 랜덤화(LLM 0회,
+# 코드) -> 새 구조적 템플릿 생성(LLM, 다양성 예산 소진 시에만 드물게).
+# 아래 스키마는 그중 가장 무거운 마지막 계층, ProblemTemplate 생성 + judge
+# 검증에 쓰인다.
+# ---------------------------------------------------------------------------
+
+
+class ReviewRequest(BaseModel):
+    """오답/복습 기반 새 문제 생성 요청.
+
+    학생이 어떤 개념에서 반복 오답을 냈는지를 담아 problem_generator_agent에
+    넘긴다. 이 요청 자체는 상위 정책(문제 뱅크 검색 등)이 이미 "새로 생성해야
+    한다"고 판단한 뒤에만 만들어진다고 가정한다.
+    """
+
+    student_id: str
+    concept: str = Field(description="복습 대상 개념 (예: 'loop', 'recursion')")
+    missed_problem_ids: list[str] = Field(default_factory=list)
+    difficulty_hint: Literal["easier", "same", "harder"] = "same"
+
+
+class TestCaseInput(BaseModel):
+    """검증 전 테스트케이스 입력.
+
+    expected/expected_stdout을 일부러 갖지 않는다 — LLM이 계산한 값은
+    신뢰하지 않고, judge가 reference_solution을 실제로 실행한 출력을 정답으로
+    확정하기 때문 (judge_validator.validate_template 참고).
+    """
+
+    __test__ = False  # pytest가 이름이 Test로 시작한다고 테스트 클래스로 오인하는 것 방지
+
+    category: str
+    is_hidden: bool = False
+    input: list | None = Field(default=None, description="function_call용 positional args")
+    stdin: str | None = Field(default=None, description="stdout_match용 표준입력")
+
+
+class ProblemTemplate(BaseModel):
+    """LLM이 한 번의 구조화 출력으로 생성하는 문제 템플릿.
+
+    problem_generator_agent가 반환하는 형태이며, judge_validator가 이걸 받아
+    judge 샌드박스에서 reference_solution을 실행해 검증한다.
+    """
+
+    concept: list[str]
+    title: str
+    description: str
+    check_type: Literal["function_call", "stdout_match"]
+    function_name: str | None = None
+    code_template: str
+    reference_solution: str = Field(description="judge 샌드박스에서 실제로 실행해 정답을 확정할 코드")
+    test_case_inputs: list[TestCaseInput]
+    time_limit_sec: float | None = None
+    memory_limit_mb: float | None = None
+
+
+class ValidationReport(BaseModel):
+    """judge_validator.validate_template()의 출력.
+
+    problem_json은 judge의 problems/*.json과 동일한 스키마(problem_id 제외 —
+    저장 시점에 호출자가 부여)이며, is_valid=True일 때만 채워진다.
+    """
+
+    is_valid: bool
+    problem_json: dict | None = None
+    error_message: str | None = None
+    failed_categories: list[str] = Field(default_factory=list)

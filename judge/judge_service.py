@@ -39,6 +39,14 @@ HARNESS_BY_CHECK_TYPE = {
     "stdout_match": "/harness/run_stdout_match.py",
 }
 
+# check_type별로 "정답과 비교하지 않고 실제 출력만 캡처"하는 하네스.
+# 문제 생성 파이프라인이 레퍼런스 정답 코드를 실행해 expected 값을 확정할 때 씀
+# (capture_reference_outputs 참고). 채점용 HARNESS_BY_CHECK_TYPE와는 별도.
+CAPTURE_HARNESS_BY_CHECK_TYPE = {
+    "function_call": "/harness/run_capture_call.py",
+    "stdout_match": "/harness/run_capture_stdout.py",
+}
+
 
 class UnsupportedCheckTypeError(Exception):
     """문제의 check_type에 대응하는 하네스가 없을 때."""
@@ -82,7 +90,17 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
     mode="run"    -> public_test_cases만 채점
     mode="submit" -> public_test_cases + hidden_test_cases 전체 채점
     """
-    problem = load_problem(problem_id)
+    return run_judge_for_problem(student_code, load_problem(problem_id), mode)
+
+
+def run_judge_for_problem(student_code: str, problem: dict, mode: str = "run") -> dict:
+    """`run_judge`의 핵심 로직. 문제를 problem_id가 아니라 dict로 직접 받는다.
+
+    problems/*.json으로 아직 저장되지 않은 문제(예: agent가 생성한 후보 문제를
+    파일로 쓰기 전에 레퍼런스 코드로 미리 검증하는 경우)를 채점할 때 씀.
+    `run_judge`는 이 함수에 `load_problem(problem_id)` 결과를 넘기는 얇은
+    래퍼일 뿐이라, 둘의 채점 로직/응답 스펙은 항상 동일하다.
+    """
     check_type = problem["check_type"]
     if check_type not in HARNESS_BY_CHECK_TYPE:
         raise UnsupportedCheckTypeError(f"지원하지 않는 check_type입니다: {check_type}")
@@ -129,28 +147,112 @@ def _run_in_sandbox(
     check_type: str, student_code: str, problem: dict, test_cases: list,
     time_limit_sec: float, mem_limit_mb: float,
 ) -> dict:
-    """격리된 컨테이너에서 학생 코드를 실행하고 결과를 반환한다.
+    """격리된 컨테이너에서 학생 코드를 채점 하네스로 실행하고 결과를 반환한다.
 
     반환값은 {"status": "OK", "results": [...]} 또는
     {"status": "TIME_LIMIT"} / {"status": "RUNTIME_ERROR", "message": str} 중 하나.
+    """
+    payload = {"student_code": student_code, "test_cases": test_cases, "time_limit_sec": time_limit_sec}
+    if check_type == "function_call":
+        payload["function_name"] = problem["function_name"]
+
+    container_timeout = _container_timeout(time_limit_sec, len(test_cases))
+    harness_result = _run_container(HARNESS_BY_CHECK_TYPE[check_type], payload, container_timeout, mem_limit_mb)
+
+    if harness_result.get("status") in ("TIME_LIMIT", "RUNTIME_ERROR"):
+        return harness_result
+    if "error" in harness_result:
+        if harness_result["error"] == "timeout":
+            return {"status": "TIME_LIMIT"}
+        return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
+
+    return {"status": "OK", "results": harness_result["results"]}
+
+
+def capture_reference_outputs(
+    reference_code: str,
+    check_type: str,
+    test_case_inputs: list,
+    function_name: str | None = None,
+    time_limit_sec: float = DEFAULT_TIME_LIMIT_SEC,
+    memory_limit_mb: float = DEFAULT_MEM_LIMIT_MB,
+) -> dict:
+    """레퍼런스 정답 코드를 샌드박스에서 실행해 "실제로 나온 출력"을 캡처한다.
+
+    문제 생성 파이프라인 전용. LLM이 문제를 만들 때 같이 내놓는 expected/
+    expected_stdout은 LLM이 손으로 계산한 값이라 틀릴 수 있으므로 신뢰하지
+    않는다 — 대신 아직 expected가 없는 입력값들(test_case_inputs, 예:
+    stdout_match면 [{"stdin": "...", "category": "..."}])을 레퍼런스 코드로
+    실제 실행시켜 나온 결과를 "진짜 expected"로 채택한다. run_judge와 달리
+    정답 비교를 하지 않고 실행 결과만 그대로 반환한다 — 이걸 problems/*.json
+    스키마의 expected/expected_stdout으로 채택할지는 호출자(agent)가 결정한다.
+
+    학생 코드 채점과 동일한 Docker 격리(network_disabled/read_only/비루트 등)를
+    그대로 적용한다 — 레퍼런스 코드도 LLM이 만든 것이라 무조건 신뢰하지 않는다.
+
+    반환값: {"status": "OK", "outputs": [{"category": ..., "output": ...} 또는
+    {"category": ..., "error": ...}, ...]} 또는 {"status": "SYNTAX_ERROR"|
+    "TIME_LIMIT"|"RUNTIME_ERROR", "message": str}.
+    """
+    if check_type not in CAPTURE_HARNESS_BY_CHECK_TYPE:
+        raise UnsupportedCheckTypeError(f"지원하지 않는 check_type입니다: {check_type}")
+
+    # 채점 때와 동일하게, 컨테이너를 띄우기 전에 문법 오류부터 걸러낸다.
+    try:
+        compile(reference_code, "<reference_solution>", "exec")
+    except SyntaxError as e:
+        return {"status": "SYNTAX_ERROR", "message": str(e)}
+
+    payload = {
+        "student_code": reference_code,
+        "test_case_inputs": test_case_inputs,
+        "time_limit_sec": time_limit_sec,
+    }
+    if check_type == "function_call":
+        payload["function_name"] = function_name
+
+    container_timeout = _container_timeout(time_limit_sec, len(test_case_inputs))
+    harness_result = _run_container(
+        CAPTURE_HARNESS_BY_CHECK_TYPE[check_type], payload, container_timeout, memory_limit_mb
+    )
+
+    if harness_result.get("status") in ("TIME_LIMIT", "RUNTIME_ERROR"):
+        return harness_result
+    if "error" in harness_result:
+        if harness_result["error"] == "timeout":
+            return {"status": "TIME_LIMIT"}
+        return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
+
+    return {"status": "OK", "outputs": harness_result["outputs"]}
+
+
+def _container_timeout(time_limit_sec: float, test_case_count: int) -> float:
+    """컨테이너 전체 타임아웃(안전망)을 계산한다.
+
+    time_limit_sec은 하네스가 테스트케이스마다 개별 적용하는 "테스트 1개당"
+    제한. 컨테이너 전체 타임아웃은 그걸 어기지 않는 선에서, 하네스가 예상
+    밖으로 멈춰버리는 경우를 잡는 안전망으로만 넉넉하게 잡는다.
+    """
+    return min(
+        CONTAINER_TIMEOUT_CAP_SEC,
+        time_limit_sec * max(test_case_count, 1) + CONTAINER_TIMEOUT_OVERHEAD_SEC,
+    )
+
+
+def _run_container(harness_path: str, payload: dict, container_timeout: float, mem_limit_mb: float) -> dict:
+    """지정된 하네스 스크립트로 격리 컨테이너를 띄우고, 하네스가 stdout에 출력한
+    JSON 결과를 그대로 반환한다. 채점 하네스(run_judge)와 캡처 하네스
+    (capture_reference_outputs)가 이 실행/격리 로직을 공유한다.
+
+    반환값: 하네스가 출력한 JSON dict (예: {"results": [...]} / {"outputs": [...]} /
+    {"error": "timeout"}) 또는 {"status": "TIME_LIMIT"} / {"status": "RUNTIME_ERROR", "message": str}.
     """
     try:
         client = docker.from_env()
     except DockerException as e:
         return {"status": "RUNTIME_ERROR", "message": f"Docker 데몬에 연결할 수 없습니다: {e}"}
 
-    # time_limit_sec은 하네스가 테스트케이스마다 개별 적용하는 "테스트 1개당" 제한.
-    # 컨테이너 전체 타임아웃은 그걸 어기지 않는 선에서, 하네스가 예상 밖으로
-    # 멈춰버리는 경우를 잡는 안전망으로만 넉넉하게 잡는다.
-    container_timeout = min(
-        CONTAINER_TIMEOUT_CAP_SEC,
-        time_limit_sec * max(len(test_cases), 1) + CONTAINER_TIMEOUT_OVERHEAD_SEC,
-    )
     mem_limit_str = f"{int(mem_limit_mb)}m"
-
-    payload = {"student_code": student_code, "test_cases": test_cases, "time_limit_sec": time_limit_sec}
-    if check_type == "function_call":
-        payload["function_name"] = problem["function_name"]
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         payload_path = Path(tmp_dir) / "payload.json"
@@ -159,7 +261,7 @@ def _run_in_sandbox(
         try:
             container = client.containers.run(
                 SANDBOX_IMAGE,
-                entrypoint=["python", HARNESS_BY_CHECK_TYPE[check_type]],
+                entrypoint=["python", harness_path],
                 command=["/payload/payload.json"],
                 volumes={tmp_dir: {"bind": "/payload", "mode": "ro"}},
                 network_disabled=True,
@@ -199,13 +301,6 @@ def _run_in_sandbox(
         return {"status": "RUNTIME_ERROR", "message": "컨테이너에서 출력이 없습니다."}
 
     try:
-        harness_result = json.loads(logs.splitlines()[-1])
+        return json.loads(logs.splitlines()[-1])
     except json.JSONDecodeError:
         return {"status": "RUNTIME_ERROR", "message": logs}
-
-    if "error" in harness_result:
-        if harness_result["error"] == "timeout":
-            return {"status": "TIME_LIMIT"}
-        return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
-
-    return {"status": "OK", "results": harness_result["results"]}
