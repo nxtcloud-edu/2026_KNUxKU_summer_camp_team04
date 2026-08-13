@@ -149,6 +149,25 @@ def test_generate_retries_up_to_max_then_returns_last_failure():
     assert fake_agent.structured_output.call_count == problem_generator_agent.MAX_RETRIES + 1
 
 
+def test_generate_survives_structured_output_raising():
+    """회귀 테스트: LLM이 스키마에 안 맞는 응답을 내면 agent.structured_output()
+    자체가 예외를 던진다 (실제로 관찰됨 — test_case_inputs를 리스트가 아니라
+    range() 표현식이 섞인 문자열로 반환한 사례). 이걸 못 잡으면 generate()가
+    그냥 죽어서 재시도 루프가 통째로 무의미해진다."""
+    request = ReviewRequest(student_id="s1", concept="loop")
+    fake_agent = MagicMock()
+    fake_agent.structured_output.side_effect = [
+        ValueError("1 validation error for ProblemTemplate: test_case_inputs must be a list"),
+        _template(),
+    ]
+
+    with patch.object(problem_generator_agent, "validate_template", return_value=ValidationReport(is_valid=True, problem_json={})):
+        report = problem_generator_agent.generate(request, fake_agent)
+
+    assert report.is_valid is True
+    assert fake_agent.structured_output.call_count == 2
+
+
 def test_generate_recovers_on_a_later_attempt():
     """1차 시도가 실패해도, 재시도에서 성공하면 거기서 멈추고 그 결과를 반환한다
     (항상 즉시 성공/항상 실패만 테스트하면 중간 회복 경로가 안 잡힘)."""

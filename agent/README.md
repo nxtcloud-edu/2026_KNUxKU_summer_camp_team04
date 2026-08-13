@@ -111,7 +111,93 @@ class AgentProtocol(Protocol):
 미러가 어긋나면 `tests/test_backend_adapter.py`가 backend 소스를 텍스트로 파싱해
 비교하다가 실패합니다 (backend를 import하지는 않습니다).
 
-### 연결 방법 A: backend에서 한 줄 (권장, 이 폴더 작업 범위 밖)
+> ### ⚠️ 먼저 읽으세요: 같은 프로세스에 넣는 길은 막혀 있습니다
+>
+> 아래 "연결 방법 A/B"는 둘 다 **backend 프로세스 안에서** 파이프라인을 돌리는
+> 방식인데, 그러려면 backend venv에 `strands-agents`가 있어야 합니다. 그게
+> **불가능합니다**:
+>
+> ```
+> strands-agents 1.52.0   ->  starlette 1.6.0 을 끌어온다
+> backend fastapi 0.115.6 ->  starlette<0.42.0 을 요구한다
+> ```
+>
+> 실제로 설치해서 확인했습니다 — 설치하면 backend가 깨지고, 설치하지 않으면
+> 첫 `decide()`에서 `ModuleNotFoundError: No module named 'strands'`가 나서
+> 어댑터 폴백에 걸려 **항상 WAIT만** 반환합니다(= 사실상 미연결).
+>
+> **그래서 지금 쓰는 배선은 아래 "연결 방법 C: 별도 프로세스 + HTTP"입니다.**
+> A/B는 이 의존성 충돌이 해소되는 날을 위해 남겨둡니다.
+
+### 연결 방법 C: 별도 프로세스 + HTTP (**현재 사용 중**)
+
+agent를 자기 venv를 가진 **별도 프로세스**로 띄우고, backend는 HTTP로만 부릅니다.
+judge가 `main.py`로 자기 로직을 감싸 노출하는 것과 같은 패턴입니다.
+
+```bash
+# 터미널 1 — agent 서비스 (자기 venv, strands 여기에만 있으면 됨)
+cd agent
+python -m uvicorn tutor_agent.service:app --port 8100
+
+# 터미널 2 — backend (strands 불필요, httpx로 부르기만 함)
+cd backend
+PYTHONPATH=../agent/src python -m uvicorn tutor_agent.backend_entry:app --port 8000
+```
+
+`backend_entry.install()`이 `get_agent`를 `http_client.HttpAgentClient`로 치환하고,
+기동 시 `GET /health`로 서비스가 떠 있는지 확인해 로그를 남깁니다.
+(`AGENT_WIRING=inprocess`로 두면 예전 A/B 방식인 `TutorAgentAdapter`를 씁니다.)
+
+#### 서비스 API 계약 (`src/tutor_agent/service.py`)
+
+| 메서드 | 경로 | 요청 | 응답 |
+|---|---|---|---|
+| GET | `/health` | — | `{"status":"ok","service":"tutor_agent","agent":"tutor_agent"}` |
+| POST | `/decide` | backend `AgentContext` 필드 그대로 | backend `AgentDecision` (`action`은 문자열) |
+| POST | `/generate-problem` | `ReviewRequest` | `ValidationReport` (judge 검증 통과분만) |
+
+`/decide`는 **5xx를 내지 않습니다.** 파이프라인이 어떻게 실패하든 파싱 가능한
+WAIT 결정을 돌려줍니다. 전 필드에 기본값이 있어 backend가 `AgentContext`에
+필드를 추가해도 422로 떨어지지 않습니다.
+
+`/generate-problem`은 실시간 개입 경로가 **아닙니다** (오답 기반 복습 문제 생성).
+LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 경로에 끼워넣지 마세요.
+아직 호출자가 없고, 나중에 붙일 때 서비스 구조를 다시 손대지 않으려고 미리 열어뒀습니다.
+
+#### 환경변수 (backend 프로세스 쪽)
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `AGENT_SERVICE_URL` | `http://localhost:8100` | agent 서비스 주소 |
+| `AGENT_SERVICE_TIMEOUT_SECONDS` | `45` | 읽기 타임아웃 (아래 지연 시간 참고) |
+| `AGENT_SERVICE_CONNECT_TIMEOUT_SECONDS` | `0.5` | 연결 타임아웃 (서비스가 꺼져 있을 때 빨리 포기) |
+| `AGENT_WIRING` | `http` | `http` \| `inprocess` |
+
+#### ⏱️ 지연 시간 — **팀 결정이 필요합니다**
+
+로컬 실측 (Anthropic 다이렉트 API):
+
+| 상황 | `POST /sessions/{id}/submit` 응답 시간 |
+|---|---|
+| 평범한 제출 (Monitor 미발화) | **3.3 ~ 3.5초** (agent 호출 없음) |
+| Monitor 발화 → agent 호출 | **32초** |
+
+파이프라인이 LLM을 4번 순차 호출(state → guidance → action → evaluation)하기
+때문입니다. 대부분의 제출은 agent를 아예 안 부르므로 영향이 없지만, 발화된
+순간의 30초는 학생 입장에서 깁니다.
+
+근본 해결은 **"채점 결과는 즉시 반환하고 agent 결정은 별도 채널로 나중에 전달"**
+인데, backend 라우터와 frontend 수신부를 같이 고쳐야 해서 agent/ 혼자 정할 수
+없습니다. 그때가 오면 `http_client`는 그대로 두고 호출 지점만 백그라운드로
+옮기면 됩니다.
+
+코드 수정 없이 가능한 중간 완화책:
+- `evaluation` 단계는 결정을 바꾸지 않고 메타데이터만 붙입니다
+  (`backend_adapter.to_agent_decision` 참고). 빼면 약 1/4가 줄어듭니다.
+- `AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면 그냥 WAIT"로 흘려보냅니다 —
+  개입을 포기하는 대신 응답 속도를 지키는 선택입니다.
+
+### 연결 방법 A: backend에서 한 줄 (⛔ 지금은 불가 — 위 의존성 충돌 참고)
 
 `backend/app/agent/__init__.py::get_agent()`의 폴백 분기에 `llm` 분기를 넣으면 됩니다.
 
@@ -151,7 +237,12 @@ def get_agent() -> AgentProtocol:
 성공하고 실패는 WAIT 폴백으로만 나타납니다 (`sys.modules['strands'] = None`으로
 차단한 상태에서 import 성공 + `decide() → WAIT`을 확인했습니다).
 
-### 연결 방법 B: backend를 **한 줄도 안 고치고** 띄우기
+### 연결 방법 B: backend를 **한 줄도 안 고치고** 띄우기 (⛔ in-process 부분은 지금은 불가)
+
+> 아래 설명의 `dependency_overrides` **배선 자체는 지금도 그대로 쓰고 있습니다** —
+> 방법 C가 바로 이 진입점(`backend_entry.py`)을 재사용합니다. 다만 치환해 넣는
+> 대상이 in-process `TutorAgentAdapter`가 아니라 `HttpAgentClient`로 바뀌었습니다
+> (`AGENT_WIRING` 기본값 `http`). 아래 "B의 함정"은 C에도 그대로 적용됩니다.
 
 `backend/app/agent/__init__.py`를 지금 당장 못 고치는 상황(권한/PR 순서/충돌 회피)이면,
 FastAPI의 `dependency_overrides`로 같은 결과를 낼 수 있습니다. 고치는 것은
@@ -268,15 +359,23 @@ agent/
 │   ├── schemas.py        # 파이프라인 전체가 공유하는 Pydantic 모델
 │   ├── models.py         # 모델 프로바이더 스위치 (env var 기반, 미정 상태 대응)
 │   ├── orchestrator.py   # 4개 에이전트를 잇는 TutorPipeline
+│   ├── service.py         # ★ agent를 별도 프로세스로 노출하는 HTTP 서비스 (현재 배선)
+│   ├── http_client.py     # ★ backend가 위 서비스를 부르는 AgentProtocol 클라이언트
 │   ├── backend_adapter.py # backend AgentProtocol 어댑터 (계약 미러 + 변환 + WAIT 폴백)
+│   ├── backend_entry.py   # backend 무수정 진입점 (get_agent를 위 둘 중 하나로 치환)
 │   ├── agents/            # 에이전트별 시스템 프롬프트 + build_agent()/실행 함수
-│   │   └── state_agent.py # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
-│   └── tools/             # 에이전트가 쓸 Strands @tool 함수 (현재 예시 1개)
+│   │   ├── state_agent.py # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
+│   │   └── problem_generator_agent.py  # 오답/복습 기반 문제 생성 (judge로 검증)
+│   └── tools/             # 에이전트가 쓸 Strands @tool 함수
+│       └── judge_validator.py          # judge 샌드박스로 생성 문제 검증
 ├── examples/run_session_demo.py   # 전체 파이프라인 실행 예시 (struggle/skip/paste 3종)
 ├── tests/
 │   ├── test_state_agent.py      # 규칙 게이트 + assess() 분기 테스트 (LLM 없음, mock)
 │   ├── test_orchestrator.py     # 분기 로직 스모크 테스트 (LLM 호출 없이 mock)
-│   └── test_backend_adapter.py  # backend 계약 변환/폴백 + 미러 드리프트 검사 (mock)
+│   ├── test_backend_adapter.py  # backend 계약 변환/폴백 + 미러 드리프트 검사 (mock)
+│   ├── test_service.py          # HTTP 서비스 계약 (5xx 안 냄, 필드 누락 허용)
+│   ├── test_http_client.py      # 모든 실패 모드 -> WAIT 폴백 (MockTransport)
+│   └── test_problem_generator*.py  # 문제 생성 (mock + 실제 judge/Docker 통합)
 ├── pyproject.toml
 └── .env.example
 ```
@@ -303,6 +402,42 @@ python -m examples.run_session_demo
 ```bash
 pytest
 ```
+
+### 전체 스택 띄우기 (프론트에서 힌트까지 보려면)
+
+프로세스가 **3개** 필요합니다. 하나라도 빠지면 조용히 기능만 사라지므로
+(예: agent 서비스가 없으면 힌트가 안 나오고 WAIT만 나옴) 순서대로 확인하세요.
+
+| # | 무엇 | 명령 | 포트 |
+|---|---|---|---|
+| 1 | agent 서비스 | `cd agent && python -m uvicorn tutor_agent.service:app --port 8100` | 8100 |
+| 2 | backend | `cd backend && PYTHONPATH=../agent/src python -m uvicorn tutor_agent.backend_entry:app --port 8000` | 8000 |
+| 3 | frontend | `cd frontend && npm run dev` | 5173 |
+
+전제 조건:
+
+- **Docker 데몬이 켜져 있고** judge 샌드박스 이미지가 빌드돼 있어야 합니다
+  (`cd judge && docker build -t judge-sandbox .`). backend `.env`에
+  `JUDGE_BACKEND=docker`, `PROBLEMS_DIR=../judge/problems`.
+- backend venv에는 `docker` SDK가 필요합니다 (`pip install "docker>=7.0"`).
+  **`strands-agents`는 절대 설치하지 마세요** — backend가 깨집니다
+  (위 "먼저 읽으세요" 참고).
+- agent `.env`에 `ANTHROPIC_API_KEY`가 있어야 실제 힌트가 나옵니다. 없으면
+  파이프라인이 실패하고 WAIT로 폴백합니다 (채점은 정상 동작).
+
+배선이 제대로 됐는지는 각 서버의 기동 로그로 확인합니다:
+
+```
+# agent 서비스
+INFO:     Uvicorn running on http://127.0.0.1:8100
+
+# backend — 이 두 줄이 같이 나와야 연결된 것
+INFO:tutor_agent.backend_entry:tutor_agent 서비스(http://localhost:8100)를 get_agent에 연결했습니다.
+INFO:httpx:HTTP Request: GET http://localhost:8100/health "HTTP/1.1 200 OK"
+```
+
+agent 서비스가 안 떠 있으면 backend가 기동 시 경고를 남기고, 개입 결정은
+전부 WAIT로 폴백합니다 (채점은 영향 없음).
 
 ## 모델 프로바이더를 아직 안 정했을 때
 
