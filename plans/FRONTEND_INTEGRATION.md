@@ -315,21 +315,41 @@ GET /problems                 → 목록 (테스트 데이터 없음)
 GET /problems/{problem_id}    → 상세
 ```
 
+**`concept`은 단수다.** 문제 JSON·judge API·프론트 파서가 전부 단수를 쓴다.
+
+`check_type`에 따라 테스트케이스의 키가 다르다. **원본 키가 그대로 나간다.**
+
 ```jsonc
+// check_type: "function_call"
 {
   "problem_id": "func_sum_list",
-  "title": "...", "description": "...", "difficulty": "...",
-  "concepts": ["loop", "accumulator"],
-  "function_name": "sum_list",
+  "title": "...", "description": "...", "difficulty": "BEGINNER",
+  "concept": ["loop", "accumulator"],
   "check_type": "function_call",
+  "function_name": "sum_list",
   "code_template": "def sum_list(arr):\n    # 여기에 코드를 작성하세요\n    pass",
-  "public_test_cases": [ { "input": [[1,2,3]], "expected": 6, "category": "basic" } ],
+  "public_test_cases": [
+    { "input": [[1,2,3]], "expected": 6, "stdin": null, "expected_stdout": null, "category": "basic" }
+  ],
   "hidden_test_case_count": 3,
-  "hidden_test_categories": ["negative_numbers", "boundary_case", "empty_list"]
+  "hidden_test_categories": ["negative_numbers", "boundary_case", "empty_list"],
+  "time_limit_sec": null, "memory_limit_mb": null
+}
+
+// check_type: "stdout_match"  -- function_name 이 null 이다
+{
+  "problem_id": "stdout_bigger_number",
+  "concept": [], "check_type": "stdout_match", "function_name": null,
+  "public_test_cases": [
+    { "input": null, "expected": null, "stdin": "10 -3\n", "expected_stdout": "0\n", "category": "sample_1" }
+  ],
+  "time_limit_sec": 1.0, "memory_limit_mb": 128
 }
 ```
 
-**hidden test의 input/expected는 응답에 담길 필드 자체가 없다.** 개수와 카테고리만 노출되니 "숨은 테스트 3개: 음수, 경계값, 빈 리스트" 같은 힌트 UI를 만들 수 있다. Pyodide는 `public_test_cases`만 채점하게 된다 (`mode: "run"`).
+렌더링은 `stdin !== null`로 분기하면 된다.
+
+**hidden test의 값은 응답에 담길 필드 자체가 없다.** 개수와 카테고리만 노출되니 "숨은 테스트 3개: 음수, 경계값, 빈 리스트" 같은 힌트 UI를 만들 수 있다.
 
 ### 타임라인
 
