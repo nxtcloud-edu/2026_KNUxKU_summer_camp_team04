@@ -20,7 +20,7 @@ type AuthResponse = {
 }
 
 export async function loginUser(email: string, password: string, role: UserRole): Promise<AuthUser> {
-  if (!isApiConfigured) return demoUser(email, role)
+  requireAuthApi()
   const response = await apiRequest<AuthResponse>('/auth/login', {
     method: 'POST',
     auth: false,
@@ -31,7 +31,7 @@ export async function loginUser(email: string, password: string, role: UserRole)
 }
 
 export async function signupUser(name: string, email: string, password: string, role: UserRole): Promise<AuthUser> {
-  if (!isApiConfigured) return demoUser(email, role, name)
+  requireAuthApi()
   const response = await apiRequest<AuthResponse>('/auth/signup', {
     method: 'POST',
     auth: false,
@@ -58,12 +58,18 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 }
 
 export async function requestPasswordReset(email: string) {
-  if (!isApiConfigured) return
+  requireAuthApi()
   await apiRequest('/auth/password-reset/request', {
     method: 'POST',
     auth: false,
     body: JSON.stringify({ email }),
   })
+}
+
+function requireAuthApi() {
+  if (!isApiConfigured) {
+    throw new Error('인증 API가 연결되지 않았습니다. frontend/.env의 VITE_API_BASE_URL을 확인해 주세요.')
+  }
 }
 
 function persistToken(response: AuthResponse) {
@@ -94,11 +100,3 @@ function isAuthResponse(value: Partial<AuthUser> | AuthResponse): value is AuthR
   return 'user' in value || 'access_token' in value || 'token' in value
 }
 
-function demoUser(email: string, role: UserRole, name = ''): AuthUser {
-  return {
-    id: 'demo-user',
-    email,
-    name: name || email.split('@')[0] || 'Tutory User',
-    role,
-  }
-}
