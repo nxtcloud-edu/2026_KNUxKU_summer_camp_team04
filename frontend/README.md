@@ -50,3 +50,18 @@ Both response shapes below are accepted:
 Required fields are `problem_id` and `title`. `concept` is optional. If the API
 is unavailable, the UI falls back to the local index so frontend development can
 continue independently.
+
+Problem selection requests `GET /problems/{problem_id}` and replaces the title,
+description, starter code, and public tests in the editor. Running and submitting
+send the following request to `POST /judge`:
+
+```json
+{
+  "student_code": "print('hello')",
+  "problem_id": "stdout_example",
+  "mode": "run"
+}
+```
+
+`mode` is `run` for public tests and `submit` for all tests. The UI supports
+`ACCEPTED`, `WRONG_ANSWER`, `RUNTIME_ERROR`, `SYNTAX_ERROR`, and `TIME_LIMIT`.
