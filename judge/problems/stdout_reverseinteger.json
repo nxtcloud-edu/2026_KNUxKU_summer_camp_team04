@@ -1,0 +1,63 @@
+{
+  "problem_id": "stdout_reverseinteger",
+  "title": "정수 뒤집기",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "1234\n",
+      "expected_stdout": "4321\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "case_1"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "1\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "1000\n",
+      "expected_stdout": "1\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "1203\n",
+      "expected_stdout": "3021\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "9090\n",
+      "expected_stdout": "909\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "1000000000\n",
+      "expected_stdout": "1\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "987654321\n",
+      "expected_stdout": "123456789\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "100200300\n",
+      "expected_stdout": "3002001\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "500050005\n",
+      "expected_stdout": "500050005\n",
+      "category": "case_10"
+    }
+  ]
+}

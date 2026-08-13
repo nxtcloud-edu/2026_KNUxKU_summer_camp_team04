@@ -1,0 +1,143 @@
+[
+  {
+    "problem_id": "func_count_positive",
+    "title": "양수 개수 세기",
+    "concept": [
+      "loop",
+      "function",
+      "conditional"
+    ]
+  },
+  {
+    "problem_id": "func_find_max",
+    "title": "최댓값 찾기",
+    "concept": [
+      "loop",
+      "function",
+      "comparison"
+    ]
+  },
+  {
+    "problem_id": "func_sum_list",
+    "title": "리스트 합 구하기",
+    "concept": [
+      "loop",
+      "function"
+    ]
+  },
+  {
+    "problem_id": "stdout_bigger_number",
+    "title": "더 큰 수는?",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_bit_is_on",
+    "title": "비트 켜져 있나요?",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_classify_three_numbers",
+    "title": "세 수를 조건으로 분류하기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_countdown",
+    "title": "N부터 1까지 출력",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_digitcount",
+    "title": "숫자 개수 세기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_discount_shop",
+    "title": "할인 규칙이 많은 상점",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_divisorcount",
+    "title": "약수의 개수",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_evenoddstripe",
+    "title": "홀짝 줄무늬 출력",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_flip_kth_bit",
+    "title": "K번째 비트 뒤집기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_leap_year",
+    "title": "윤년 판별",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_multiplicationtable",
+    "title": "구구단 한 단 출력",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_odd_detector",
+    "title": "홀수 판별기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_perfectnumber",
+    "title": "완전수 판별",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_prefixthreshold",
+    "title": "합이 처음으로 N 이상이 되는 순간",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_primecount",
+    "title": "소수의 개수",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_primelist",
+    "title": "소수만 출력하기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_printevens",
+    "title": "짝수만 출력하기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_reverseinteger",
+    "title": "정수 뒤집기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_skipmultiples",
+    "title": "3의 배수 건너뛰기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_sort_three_numbers",
+    "title": "세 수 정렬",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_sumton",
+    "title": "1부터 N까지의 합",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_sumuntilzero",
+    "title": "0이 나올 때까지 합 구하기",
+    "concept": []
+  },
+  {
+    "problem_id": "stdout_threesixninecount",
+    "title": "369 카운트",
+    "concept": []
+  }
+]

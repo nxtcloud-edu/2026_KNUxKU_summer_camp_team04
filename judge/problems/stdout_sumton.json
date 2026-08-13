@@ -1,0 +1,63 @@
+{
+  "problem_id": "stdout_sumton",
+  "title": "1부터 N까지의 합",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "5\n",
+      "expected_stdout": "15\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "2\n",
+      "expected_stdout": "3\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "55\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "100\n",
+      "expected_stdout": "5050\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "999\n",
+      "expected_stdout": "499500\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "1000\n",
+      "expected_stdout": "500500\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "12345\n",
+      "expected_stdout": "76205685\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "32768\n",
+      "expected_stdout": "536887296\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "50000\n",
+      "expected_stdout": "1250025000\n",
+      "category": "case_10"
+    }
+  ]
+}

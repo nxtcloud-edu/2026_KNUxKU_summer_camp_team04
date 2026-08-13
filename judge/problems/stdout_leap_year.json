@@ -1,0 +1,53 @@
+{
+  "problem_id": "stdout_leap_year",
+  "title": "윤년 판별",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1.0,
+  "memory_limit_mb": 128,
+  "public_test_cases": [
+    {
+      "stdin": "2024\n",
+      "expected_stdout": "Leap\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "1900\n",
+      "expected_stdout": "Common\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1999\n",
+      "expected_stdout": "Common\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "2000\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "2400\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "2100\n",
+      "expected_stdout": "Common\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "4\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1\n",
+      "expected_stdout": "Common\n",
+      "category": "case_8"
+    }
+  ]
+}

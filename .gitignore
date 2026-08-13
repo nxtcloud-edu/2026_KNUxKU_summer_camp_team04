@@ -1,0 +1,8 @@
+# Claude Code local files (개인 로컬용, 원격에 올리지 않음)
+CLAUDE.md
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
