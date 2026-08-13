@@ -11,21 +11,83 @@ cd backend && uvicorn app.main:app --reload --port 8000 --workers 1
 
 ---
 
-## 1. 30초 요약
+## 0. 인증 — 먼저 붙여야 할 것
 
-- **JSON은 전부 `snake_case`다.** 계획서의 `camelCase` TS 인터페이스를 그대로 쓰면 안 된다.
-- 이벤트는 **배치 전용** — 단건도 `{"events": [...]}`로 감싼다.
-- 모든 이벤트에 **`client_event_id`를 반드시 넣는다** (`crypto.randomUUID()`).
-- 채점은 오늘 브라우저(Pyodide)가 하고, 결과는 `POST /sessions/{id}/results`로 보낸다.
-- **Run/Submit은 "스냅샷 먼저 보내고 → 채점 → 결과 전송"** 순서를 지켜야 한다 (§5).
+지금 프론트의 로그인/회원가입 화면은 입력값을 **아무 데도 보내지 않고** `setAuthView('workspace')`만 호출한다. 이걸 실제 API에 연결하기 전까지는 `POST /sessions`가 **401**을 반환하므로 Coding Trace도 채점도 동작하지 않는다.
+
+### 토큰 얻기
+
+```http
+POST /auth/signup   { "name": "홍길동", "email": "a@b.com", "password": "password123" }
+POST /auth/login    { "email": "a@b.com", "password": "password123" }
+```
+
+두 응답이 같은 모양이다:
+
+```jsonc
+{
+  "user": {
+    "id": "user_...", "name": "홍길동", "nickname": "홍길동",
+    "email": "a@b.com", "avatar_url": null,
+    "acorn_balance": 0, "total_acorns_earned": 0
+  },
+  "access_token": "eyJhbGciOi...",
+  "token_type": "bearer",
+  "expires_in": 43200          // 초. 12시간
+}
+```
+
+### 토큰 쓰기
+
+```ts
+headers: { Authorization: `Bearer ${token}` }
+```
+
+`localStorage`에 보관하고, 앱 부팅 시 `GET /auth/me`로 살아있는지 확인한다. 401이면 토큰을 지우고 로그인 화면으로 보낸다.
+
+```
+GET  /auth/me      → UserRead (새로고침 후 상태 복구)
+POST /auth/logout  → 204. 서버는 상태를 안 지우므로 토큰 삭제는 클라이언트 몫
+```
+
+`/auth/refresh`는 **아직 없다.** access token 하나만 쓰고 만료되면 다시 로그인한다.
+
+### 인증이 필요 없는 것
+
+`GET /health`, `GET /problems`, `GET /problems/{id}`, `POST /auth/signup`, `POST /auth/login`.
+
+**그 외 전부 로그인이 필요하다.**
+
+### 비밀번호 정책
+
+최소 8자. 서버가 422로 거부한다. 클라이언트에서도 같은 기준으로 미리 막아주면 왕복이 준다.
+
+### 로그인 실패
+
+이메일이 없든 비밀번호가 틀렸든 **같은 401**이 온다. 의도된 것이다 — 구분해서 알려주면 "이 이메일은 가입되어 있다"를 확인시켜 주는 셈이다. 화면에도 "이메일 또는 비밀번호가 올바르지 않습니다" 하나만 띄운다.
 
 ---
 
-## 2. 반드시 지켜야 할 5가지
+## 1. 30초 요약
+
+- **JSON은 전부 `snake_case`다.** 계획서의 `camelCase` TS 인터페이스를 그대로 쓰면 안 된다.
+- **거의 모든 API가 로그인을 요구한다.** `Authorization: Bearer <token>` (§0)
+- 이벤트는 **배치 전용** — 단건도 `{"events": [...]}`로 감싼다.
+- 모든 이벤트에 **`client_event_id`를 반드시 넣는다** (`crypto.randomUUID()`).
+- 채점은 **서버가 한다.** `POST /sessions/{id}/run|submit` 한 번이 스냅샷·채점·기록·판정을 전부 처리한다.
+- **Run/Submit 직전에 대기 중인 스냅샷을 flush** 해야 한다 (§5).
+
+---
+
+## 2. 반드시 지켜야 할 6가지
 
 깨지면 서버가 에러를 내는 게 아니라 **조용히 틀린 판단**을 한다. 그래서 여기 따로 모았다.
 
-### ① `client_event_id`는 선택이 아니다
+### ① 토큰 없이 부르면 401
+
+`POST /sessions`부터 막힌다. 로그인 연동이 Coding Trace보다 먼저다.
+
+### ② `client_event_id`는 선택이 아니다
 
 ```ts
 { type: "RUN", client_event_id: crypto.randomUUID(), payload: {} }
@@ -35,21 +97,21 @@ cd backend && uvicorn app.main:app --reload --port 8000 --workers 1
 
 키가 있으면 서버가 알아서 걸러내고 `duplicate_client_event_ids`에 담아 알려준다. 재시도는 안전하다.
 
-### ② Run/Submit 직전에 대기 중인 스냅샷을 flush 한다
+### ③ Run/Submit 직전에 대기 중인 스냅샷을 flush 한다
 
 서버는 "직전 실행 이후의 편집"을 코드 버전으로 잘라서 판단한다. debounce 타이머가 안 끝난 상태로 Run을 누르면 스냅샷이 결과보다 **늦게** 도착하고, 그 편집이 다음 결과의 창으로 밀려 판정이 한 칸씩 어긋난다.
 
 서버는 이걸 막을 방법이 없다 — 도착 순서가 곧 진실이다. §5에 구현 코드가 있다.
 
-### ③ `code_version`은 서버가 준다
+### ④ `code_version`은 서버가 준다
 
-프론트는 절대 지어내지 않는다. `POST /events` 응답의 `current_code_version`을 받아서 다음 `POST /results`에 실어 보낸다. 생략하면 서버가 최신 버전으로 추정하는데, 그 사이 편집이 하나 끼면 어긋난다.
+프론트는 절대 지어내지 않는다. `POST /events` 응답의 `current_code_version`을 받아 쓴다.
 
-### ④ 서버 전용 이벤트는 보내면 422
+### ⑤ 서버 전용 이벤트는 보내면 422
 
 `SESSION_START`, `TEST_RESULT`, `AGENT_TRIGGER`, `AGENT_INTERVENTION`, `SYNTAX_ERROR`, `RUNTIME_ERROR` — 전부 서버가 만든다. 특히 계획서가 수집 목록에 넣어둔 **`SESSION_START`를 보내면 422**다. `POST /sessions` 응답 시점에 이미 만들어져 있다.
 
-### ⑤ `GET`은 폴링해도 안전하다
+### ⑥ `GET`은 폴링해도 안전하다
 
 `/process-state`를 몇 초마다 불러도 상태가 바뀌지 않는다. 의도된 설계다 — 마음껏 폴링해라.
 
@@ -62,20 +124,25 @@ cd backend && uvicorn app.main:app --reload --port 8000 --workers 1
 ```ts
 const r = await fetch(`${API}/sessions`, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ problem_id: "func_sum_list", user_id: "demo-user" }),
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,     // 없으면 401
+  },
+  body: JSON.stringify({ problem_id: "func_sum_list" }),
 });
 const s = await r.json();
 localStorage.setItem("session_id", s.session_id);
 editor.setValue(s.current_code);   // 문제 템플릿이 이미 들어 있다
 ```
 
+**`user_id`를 body로 보내지 않는다.** 보내도 무시된다 — 세션 소유자는 토큰이 정한다. 받아들이면 아무나 남의 이름으로 세션을 만들고 그 채점 결과가 그 사람의 도토리가 된다.
+
 응답 (`201`):
 
 ```jsonc
 {
   "session_id": "sess_699b671f0ece44199bfd220977ff12f8",
-  "user_id": "demo-user",
+  "user_id": "user_faf17a7c42f44628a7202989839976f1",   // 토큰의 주인
   "problem_id": "func_sum_list",
   "status": "SOLVING",
   "started_at": "2026-08-13T02:11:04Z",
@@ -98,6 +165,12 @@ editor.setValue(s.current_code);
 ```
 
 `GET /sessions/{id}`가 `current_code`를 함께 준다. 왕복 한 번이면 끝난다. **백엔드가 진실이고 localStorage는 세션 id 보관용이다.**
+
+기기가 바뀌어도 이어서 풀려면 세션이 아니라 **진행 상태**를 쓴다 — `GET /users/me/progress/{problem_id}`의 `current_code` (§9).
+
+### 남의 세션에 접근하면 404
+
+403이 아니다. 403은 "그 세션은 존재하지만 네 것이 아니다"를 알려주므로 id를 훑어 다른 사용자의 활동을 탐지할 수 있다. 프론트 입장에서는 **"없는 세션"과 똑같이 처리**하면 된다 — localStorage를 비우고 새로 만든다.
 
 ### 종료
 
@@ -169,7 +242,7 @@ POST /sessions/{session_id}/events
                   "source": "CLIENT", "code_version": 2, "payload": { ... },
                   "server_timestamp": "2026-08-13T02:11:09Z" } ],
   "duplicate_client_event_ids": [],
-  "current_code_version": 2,     // ← 다음 POST /results에 실어 보낼 값
+  "current_code_version": 2,     // ← 서버가 할당한 최신 코드 버전
   "last_event_seq": 2,
   "session_finished": false
 }
@@ -185,39 +258,36 @@ POST /sessions/{session_id}/events
 
 ```ts
 async function handleRun(mode: "run" | "submit") {
-  // 1. 대기 중인 debounce 스냅샷을 강제로 비운다. 반드시 await.
-  const { current_code_version } = await flushPendingSnapshot();
+  // 1. 세션 확보 (지연 생성). 로그인이 안 돼 있으면 여기서 401.
+  const sid = await ensureSession();
 
-  // 2. 실행 "요청" 이벤트 (선택이지만 타임라인이 예뻐진다)
+  // 2. 대기 중인 debounce 스냅샷을 강제로 비운다. 반드시 await.
+  await flushPendingSnapshot();
+
+  // 3. 실행 "요청" 이벤트 (선택이지만 타임라인이 예뻐진다)
   await postEvents([{ type: mode.toUpperCase(), client_event_id: uuid(), payload: {} }]);
 
-  // 3. 브라우저에서 채점
-  const graded = await pyodideRunner.judge(editor.getValue(), mode);
-
-  // 4. 결과 전송 → 여기서 백엔드 파이프라인 전체가 돈다
-  const res = await fetch(`${API}/sessions/${sid}/results`, {
+  // 4. 채점. **이 한 번의 호출이 전부 한다** --
+  //    스냅샷 생성 → Docker judge 실행 → TEST_RESULT 기록 → monitor 판정
+  //    → 최초 정답이면 도토리 지급 + 진행 상태 갱신
+  const res = await fetch(`${API}/sessions/${sid}/${mode}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode,                              // "run" | "submit"
-      status: graded.status,             // ACCEPTED | WRONG_ANSWER | SYNTAX_ERROR | ...
-      passed: graded.passed,
-      total: graded.total,
-      runtime_ms: graded.runtimeMs,
-      message: graded.message ?? null,
-      failed_categories: graded.failedCategories ?? [],
-      code_version: current_code_version,   // ← 1번에서 받은 값
-      client_event_id: uuid(),
-    }),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code: editor.getValue() }),
   }).then(r => r.json());
 
-  renderTestResult(res.event.payload);
+  renderTestResult(res.event.payload);      // { status, passed, total, ... }
   renderProcessState(res.process_state);
   if (res.agent_decision) renderAgent(res.agent_decision);
 }
 ```
 
-### `status`에 넣을 값
+**프론트는 더 이상 채점하지 않는다.** `pythonRunner.runPython`은 죽은 코드다 (Pyodide는 TRACE 학습 화면의 `runTrace`에만 쓰인다). 서버가 Docker judge를 돌리고 결과를 돌려준다.
+
+### `status`로 올 수 있는 값
 
 | 값 | 언제 | 점수로 세나 |
 |---|---|---|
@@ -228,9 +298,11 @@ async function handleRun(mode: "run" | "submit") {
 | `TIME_LIMIT` | 시간 초과 | ✗ |
 | `INTERNAL_ERROR` | 러너 자체 실패 | ✗ |
 
-**에러 상태를 `passed: 0`인 `WRONG_ANSWER`로 보내지 마라.** 서버는 에러를 "0점"이 아니라 **"관측 없음"** 으로 취급한다. 오타 한 번을 0점으로 세면 `3/5 → 오타 → 3/5`가 "+3점 진전"으로 읽혀서 명백히 막힌 학생이 방치된다. 러너가 실제로 던진 상태를 그대로 보내면 된다.
+서버가 에러를 "0점"이 아니라 **"관측 없음"** 으로 취급하기 때문에, 오타 한 번이 `3/5 → 오타 → 3/5`를 "+3점 진전"으로 만들지 않는다.
 
-제약: `0 ≤ passed ≤ total ≤ 100`. 어기면 422.
+### `POST /sessions/{id}/results`는 **제거됐다**
+
+클라이언트가 채점 결과를 보고하던 입구다. 도토리가 정답 기준으로 지급되는 이상 이 경로가 열려 있으면 `{"status":"ACCEPTED"}` 한 줄로 무한 획득이 가능해서 없앴다. 채점은 `run`/`submit`뿐이다.
 
 ### 응답
 
@@ -238,10 +310,10 @@ async function handleRun(mode: "run" | "submit") {
 // 201
 {
   "event": { "event_id": "evt_...", "seq": 7, "type": "TEST_RESULT",
-             "source": "CLIENT_JUDGE", "code_version": 4,
+             "source": "SERVER", "code_version": 4,
              "payload": { "mode": "run", "status": "WRONG_ANSWER",
                           "passed": 3, "total": 5, "runtime_ms": 21,
-                          "judge": "pyodide" } },
+                          "judge": "docker" } },
 
   "process_state": { /* §6 */ },
   "agent_decision": null        // trigger가 있을 때만 채워진다
@@ -252,7 +324,7 @@ async function handleRun(mode: "run" | "submit") {
 
 ## 6. Process State 소비하기
 
-`POST /results` 응답에 이미 들어 있다. 데모 패널을 따로 갱신하고 싶으면 `GET /sessions/{id}/process-state`를 **3~5초 주기로 폴링**하면 된다 (안전하다).
+`POST /run|submit` 응답에 이미 들어 있다. 데모 패널을 따로 갱신하고 싶으면 `GET /sessions/{id}/process-state`를 **3~5초 주기로 폴링**하면 된다 (안전하다).
 
 ```jsonc
 {
@@ -390,7 +462,7 @@ POST /sessions/{id}/submit  → 503 JUDGE_UNAVAILABLE
 POST /agent/decide          → 200, 항상 action: "WAIT"
 ```
 
-**둘 다 최종 스키마로 OpenAPI에 이미 올라가 있다.** 서버 judge가 붙는 날 프론트는 `POST /results` 호출을 `POST /run`으로 바꾸고 자체 채점을 지우기만 하면 된다. 응답 모양(`ResultIngestResponse`)이 동일하다.
+**Agent는 아직 stub이라 항상 `WAIT`을 돌려준다.** 응답 스키마는 확정이므로 6종 action UI를 지금 만들어두면 LLM이 붙는 날 프론트는 손댈 게 없다.
 
 ---
 
@@ -420,33 +492,160 @@ FastAPI의 검증 실패(422)만 네이티브 배열 형태를 유지한다:
 | `INVALID_CODE_VERSION` | 422 | 서버가 아직 모르는 버전을 보냈다 |
 | `JUDGE_UNAVAILABLE` | 503 | 서버 judge 미연결 (정상) |
 | `AGENT_UNAVAILABLE` | 503 | LLM 미연결 (정상) |
+| `NOT_AUTHENTICATED` | 401 | 토큰이 없거나 만료. **토큰 지우고 로그인 화면으로** |
+| `INVALID_CREDENTIALS` | 401 | 로그인 실패. 이메일/비밀번호를 구분하지 않는다 |
+| `EMAIL_ALREADY_REGISTERED` | 409 | 이미 가입된 이메일 |
+| `NICKNAME_TAKEN` | 409 | 닉네임 중복 |
+| `INVALID_NICKNAME` | 422 | 길이·문자·금지어 위반 |
+| `INSUFFICIENT_ACORNS` | 402 | 도토리 부족. `context.required` / `context.balance`가 함께 온다 |
 
-**Agent 호출이 실패해도 채점 결과는 반드시 돌아온다.** `POST /results`가 내부에서 삼킨다 — "실행했는데 아무 반응이 없는" 상황은 만들지 않는다. `agent_decision: null`을 정상 케이스로 다뤄라.
+**Agent 호출이 실패해도 채점 결과는 반드시 돌아온다.** `POST /run|submit`이 내부에서 삼킨다 — "실행했는데 아무 반응이 없는" 상황은 만들지 않는다. `agent_decision: null`을 정상 케이스로 다뤄라.
 
 ---
 
-## 9. 구현 체크리스트
+## 9. 프로필 · 도토리 · 진행 상태
+
+마이페이지와 홈 화면이 쓰는 API. 전부 로그인 필요.
+
+### 프로필
+
+```http
+GET   /users/me/profile
+PATCH /users/me/nickname   { "nickname": "새 닉네임" }
+```
+
+```jsonc
+// GET /users/me/profile
+{
+  "id": "user_...", "name": "홍길동", "nickname": "도토리왕",
+  "email": "a@b.com", "avatar_url": null,
+  "acorn_balance": 135, "total_acorns_earned": 260,
+  "current_badge": { "code": "SAPLING", "name": "묘목 뱃지", "required_acorns": 150 },
+  "next_badge":    { "code": "OAK",     "name": "참나무 뱃지", "required_acorns": 300 },
+  "created_at": "...", "last_login_at": "..."
+}
+```
+
+**뱃지는 서버가 계산한다.** 프론트에서 누적 도토리로 다시 계산하지 마라 — 기준이 두 곳에 있으면 갈라진다.
+
+닉네임 변경은 **도토리 5개**를 차감한다. 응답:
+
+```jsonc
+{ "nickname": "도토리왕", "acorn_balance": 5, "acorns_spent": 5 }
+```
+
+- 잔액이 부족하면 **402** `INSUFFICIENT_ACORNS`. **아무것도 바뀌지 않는다** (검증·차감·변경이 한 트랜잭션)
+- 같은 닉네임으로 바꾸면 과금하지 않는다 (`acorns_spent: 0`)
+- **차감액을 프론트가 보내지 않는다.** 서버가 정한다
+
+### 도토리
+
+```http
+GET /users/me/acorns                          → { balance, total_earned }
+GET /users/me/acorns/transactions?limit=&offset=
+```
+
+```jsonc
+{
+  "balance": 135, "total_earned": 260, "total": 12,
+  "transactions": [
+    { "id": "acorn_tx_...", "amount": 15, "balance_after": 135,
+      "type": "PROBLEM_SOLVED", "description": "리스트 합 구하기 최초 해결",
+      "problem_id": "func_sum_list", "created_at": "..." }
+  ]
+}
+```
+
+지급/차감은 **전부 서버가 한다.** 프론트가 "도토리 주세요"를 호출하는 API는 없다.
+
+| 사건 | 변동 |
+|---|---|
+| 문제 **최초** 정답 | +10 (난이도별 10/15/20, 현재 데이터엔 난이도가 없어 전부 10) |
+| 같은 문제 재통과 | **0** |
+| 닉네임 변경 | −5 |
+
+### 진행 상태 · Checkpoint
+
+```http
+GET /users/me/progress                              → 전체 (홈 목록용, 코드 제외)
+GET /users/me/progress/{problem_id}                 → 하나 (current_code 포함)
+PUT /users/me/progress/{problem_id}/checkpoint      { "student_code": "..." }
+```
+
+```jsonc
+{
+  "problem_id": "func_sum_list",
+  "status": "SOLVED",              // NOT_STARTED | IN_PROGRESS | SOLVED
+  "best_passed": 5, "total_tests": 5,
+  "attempt_count": 3,
+  "last_judge_status": "ACCEPTED",
+  "first_started_at": "...", "last_attempted_at": "...", "solved_at": "...",
+  "current_code": "def sum_list(arr): ..."   // 목록에서는 null
+}
+```
+
+**`localStorage`의 `codetrace:checkpoint:*`를 이걸로 대체한다.** 계정에 저장되므로 기기가 바뀌어도 이어서 풀 수 있다.
+
+손대지 않은 문제도 **404가 아니라** `NOT_STARTED` 빈 상태를 준다 — "없음"과 "에러"를 구분하는 분기를 만들 필요가 없다. 존재하지 않는 `problem_id`만 404다.
+
+### 푼 문제 목록
+
+```http
+GET /users/me/solved-problems
+```
+
+```jsonc
+{
+  "items": [
+    { "problem_id": "func_sum_list", "title": "리스트 합 구하기",
+      "solved_at": "...", "attempt_count": 3, "acorns_earned": 15 }
+  ],
+  "total": 1
+}
+```
+
+마이페이지의 하드코딩된 샘플을 이걸로 바꾸면 된다.
+
+---
+
+## 10. 구현 체크리스트
+
+**먼저 해야 하는 것 (이게 없으면 나머지가 전부 401)**
+
+- [ ] `LoginPage` / `SignupPage`를 `POST /auth/login` · `/auth/signup`에 연결
+- [ ] `access_token`을 localStorage에 보관하고 모든 요청에 `Authorization: Bearer` 부착
+- [ ] 앱 부팅 시 `GET /auth/me`로 세션 복구, 401이면 토큰 삭제 후 로그인 화면
+- [ ] `traceClient.ts` / `useCodingTrace.ts`의 fetch에 토큰 추가
+- [ ] 401 공통 핸들러 (토큰 만료 시 자동 로그아웃)
+
+**그 다음**
 
 - [ ] 모든 요청/응답 필드를 `snake_case`로
 - [ ] 모든 이벤트에 `client_event_id = crypto.randomUUID()`
 - [ ] 전송 실패 → 메모리 큐 보관 → 재시도 (중복은 서버가 거른다)
 - [ ] `CODE_SNAPSHOT` 800ms debounce
 - [ ] **Run/Submit/Reset 직전 `await flushPendingSnapshot()`**
-- [ ] `POST /events` 응답의 `current_code_version`을 보관 → `POST /results`에 전달
-- [ ] 채점 에러를 `passed: 0`이 아니라 실제 `status`로 전송
 - [ ] `SESSION_START` / `TEST_RESULT`를 `POST /events`로 보내지 않기
-- [ ] `session_id`를 localStorage에, 코드 복구는 `GET /sessions/{id}`로
+- [ ] 남의 세션 404를 "없는 세션"과 동일하게 처리
 - [ ] `process_state.reason` / `evidence`를 가공 없이 렌더
 - [ ] `status` 6종 + `trigger` 4종 + `agent_decision.action` 6종 UI 매핑
 - [ ] `agent_decision: null`을 정상으로 처리
 - [ ] 페이지 이탈 시 `sendBeacon`으로 마지막 flush
-- [ ] `.env`에 `VITE_API_BASE=http://localhost:8000`
+- [ ] `.env`에 `VITE_API_BASE_URL=http://localhost:8000`
+
+**마이페이지 / 홈 (§9)**
+
+- [ ] `localStorage`의 `codetrace:checkpoint:*` → `PUT .../checkpoint`
+- [ ] `tutory:profile` → `GET /users/me/profile`
+- [ ] 하드코딩된 도토리·풀이 기록 → `GET /users/me/acorns`, `/solved-problems`
+- [ ] 뱃지를 프론트에서 계산하지 말고 `current_badge` 사용
+- [ ] 닉네임 변경 시 402 `INSUFFICIENT_ACORNS` 처리
 
 CORS는 `http://localhost:5173`, `http://127.0.0.1:5173`이 열려 있다. 포트가 다르면 백엔드 `.env`의 `CORS_ORIGINS`에 추가해달라고 요청할 것.
 
 ---
 
-## 10. 이름이 정리된 항목
+## 11. 이름이 정리된 항목
 
 구현하면서 확정한 이름들. 아래 왼쪽 열은 초기 논의에서 쓰이던 표현이라 아직 코드나 메모에
 남아 있을 수 있는데, 그대로 보내면 **422가 난다.**
@@ -458,14 +657,14 @@ CORS는 `http://localhost:5173`, `http://127.0.0.1:5173`이 열려 있다. 포�
 | `LEARNING_ACTIVITY_RESPONSE` | **`ACTIVITY_RESPONSE`** | 3개 계획 문서 중 2개가 짧은 쪽으로 합의 |
 | `CODE_CHANGE` | **`CODE_SNAPSHOT`** | 저장 산출물의 이름과 일치 |
 | 수집 목록에 `SESSION_START` 포함 | **보내면 422** | `POST /sessions`가 이미 만든다 |
-| 채점 결과는 `POST /run` | **`POST /results`** | 오늘은 브라우저가 채점한다. `/run`은 서버 judge용으로 예약 |
+| 채점 결과를 `POST /results`로 보고 | **`POST /run\|submit`** | 서버가 채점한다. 클라이언트 보고 경로는 제거됐다 |
 | 이벤트 단건 전송 | **배치 전용** (`{"events": [...]}`) | 단건은 1개짜리 배치 |
 
 전송 시점 정책(800ms debounce, 즉시/배치 구분, 재시도 큐)은 [frontend_plan.md](frontend_plan.md) §6~7 그대로다.
 
 ---
 
-## 11. 막히면
+## 12. 막히면
 
 - <http://localhost:8000/docs> — 모든 스키마를 실제로 눌러볼 수 있다
 - `python -m scripts.seed_demo` — 4개 데모 세션(PROGRESSING / STUCK / UNDERSTANDING_UNCERTAIN / RECOVERED)을 만들어준다. 프론트 붙이기 전에 응답 모양을 보려면 이게 제일 빠르다

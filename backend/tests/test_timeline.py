@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from app.enums import JudgeStatus, TriggerType
+from app.judge import get_judge
+from app.judge.interface import JudgeResult
+from app.judge.stub import FakeJudge
+from app.main import app
 from app.trace.timeline import build_timeline
 from app.trace import service as trace_service
 from tests.factories import T0, TraceBuilder
@@ -114,10 +118,13 @@ def test_timeline_endpoint(client):
         f"/sessions/{sid}/events",
         json={"events": [{"type": "CODE_SNAPSHOT", "payload": {"code": LOOP_V2}}]},
     )
-    client.post(
-        f"/sessions/{sid}/results",
-        json={"mode": "run", "status": "WRONG_ANSWER", "passed": 3, "total": 5},
+    app.dependency_overrides[get_judge] = lambda: FakeJudge(
+        [JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=3, total=5)]
     )
+    try:
+        client.post(f"/sessions/{sid}/run", json={"code": LOOP_V2})
+    finally:
+        app.dependency_overrides.pop(get_judge, None)
 
     body = client.get(f"/sessions/{sid}/timeline").json()
     assert body["problem_id"] == "func_sum_list"

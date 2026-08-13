@@ -12,9 +12,30 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session as DbSession
 
+from sqlmodel import select
+
 from app.enums import EventSource, EventType, JudgeStatus, SessionStatus, TriggerType
-from app.models import Session
+from app.models import Session, User
 from app.trace import service as trace_service
+
+TEST_USER_EMAIL = "builder@example.com"
+
+
+def ensure_test_user(db: DbSession) -> User:
+    """TraceBuilder 전용 회원. 이미 있으면 재사용한다."""
+    found = db.exec(select(User).where(User.email == TEST_USER_EMAIL)).first()
+    if found is not None:
+        return found
+    user = User(
+        email=TEST_USER_EMAIL,
+        password_hash="$2b$12$" + "x" * 53,
+        name="빌더",
+        nickname="빌더",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 T0 = datetime(2026, 8, 13, 12, 0, 0)
 DEFAULT_TEMPLATE = "def sum_list(arr):\n    # 여기에 코드를 작성하세요\n    pass"
@@ -34,11 +55,17 @@ class TraceBuilder:
         db: DbSession,
         *,
         problem_id: str = "func_sum_list",
-        user_id: str = "demo-user",
+        user_id: str | None = None,
         at: datetime = T0,
         code: str = DEFAULT_TEMPLATE,
         total: int = 5,
     ) -> "TraceBuilder":
+        # sessions.user_id 가 users.id FK 가 되면서 실제 회원 행이 있어야 한다.
+        # 지정하지 않으면 이 빌더가 하나 만들어 쓴다 -- 순수 trace 테스트가
+        # 회원 준비 코드를 반복하지 않게 하기 위해서.
+        if user_id is None:
+            user_id = ensure_test_user(db).id
+
         session = Session(
             user_id=user_id,
             problem_id=problem_id,

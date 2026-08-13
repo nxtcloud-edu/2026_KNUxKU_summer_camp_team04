@@ -17,9 +17,17 @@ def get_session(db: DbSession, session_id: str) -> Session | None:
     return db.get(Session, session_id)
 
 
-def require_session(db: DbSession, session_id: str) -> Session:
+def require_session(db: DbSession, session_id: str, *, user_id: str | None = None) -> Session:
+    """세션을 가져온다. user_id를 주면 소유권까지 검사한다.
+
+    **남의 세션은 403이 아니라 404다.** 403은 "그 세션은 존재하지만 네 것이
+    아니다"를 알려주므로, id를 훑어 다른 사용자의 활동을 탐지할 수 있다.
+    존재 여부 자체를 숨긴다.
+    """
     row = db.get(Session, session_id)
     if row is None:
+        raise SessionNotFound(session_id)
+    if user_id is not None and row.user_id != user_id:
         raise SessionNotFound(session_id)
     return row
 

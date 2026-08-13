@@ -23,7 +23,13 @@ from sqlalchemy import JSON, Column, Float, Index, String, Text, UniqueConstrain
 from sqlmodel import Field, SQLModel
 
 from app.clock import utcnow
-from app.enums import EventSource, EventType, SessionStatus
+from app.enums import (
+    AcornTransactionType,
+    EventSource,
+    EventType,
+    ProgressStatus,
+    SessionStatus,
+)
 
 
 def _id(prefix: str) -> Callable[[], str]:
@@ -39,11 +45,111 @@ def _id(prefix: str) -> Callable[[], str]:
     return lambda: f"{prefix}_{uuid4().hex}"
 
 
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: str = Field(default_factory=_id("user"), primary_key=True, max_length=64)
+    # 소문자로 정규화해서 저장한다. 대소문자만 다른 중복 가입을 막는 유일한 방법이
+    # UNIQUE 제약이므로, 정규화를 서비스 계층에만 두면 언젠가 새어 나간다.
+    email: str = Field(sa_column=Column(String(255), nullable=False, unique=True, index=True))
+    password_hash: str = Field(sa_column=Column(String(255), nullable=False))
+    name: str = Field(max_length=64, nullable=False)
+    nickname: str = Field(sa_column=Column(String(32), nullable=False, unique=True, index=True))
+    avatar_url: str | None = Field(default=None, max_length=512)
+
+    # 잔액은 acorn_transactions 의 **캐시**다. 원장이 진실이고 이건 빠른 조회용이다.
+    # 둘은 같은 트랜잭션 안에서만 함께 움직인다 (acorns/service.py 참조).
+    acorn_balance: int = Field(default=0, nullable=False)
+    total_acorns_earned: int = Field(default=0, nullable=False)
+
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    updated_at: datetime = Field(default_factory=utcnow, nullable=False)
+    last_login_at: datetime | None = Field(default=None)
+    is_active: bool = Field(default=True, nullable=False)
+
+
+class AcornTransaction(SQLModel, table=True):
+    """도토리 원장. **잔액을 직접 증감하지 않고 여기에 한 줄을 쓴다.**
+
+    users.acorn_balance 만 고치면 "왜 135개지?"에 답할 수 없고, 중복 지급을
+    사후에 찾아낼 방법도 없다. balance_after 를 함께 적어두면 원장을 되짚어
+    잔액이 어디서 어긋났는지 정확히 짚을 수 있다.
+    """
+
+    __tablename__ = "acorn_transactions"
+
+    id: str = Field(default_factory=_id("acorn_tx"), primary_key=True, max_length=64)
+    user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    amount: int = Field(nullable=False)  # 양수=획득, 음수=사용
+    balance_after: int = Field(nullable=False)
+    transaction_type: AcornTransactionType = Field(
+        sa_column=Column(String(32), nullable=False, index=True)
+    )
+    reference_type: str | None = Field(default=None, max_length=32)
+    reference_id: str | None = Field(default=None, max_length=64)
+    description: str = Field(default="", max_length=200)
+    # 중복 지급 방지의 **전부**다. "이 사용자가 이 문제를 처음 풀었다"를
+    # 애플리케이션 로직이 아니라 DB 제약이 보장한다.
+    idempotency_key: str | None = Field(
+        sa_column=Column(String(128), nullable=True, unique=True, index=True)
+    )
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class UserProblemProgress(SQLModel, table=True):
+    """사용자별 문제 진행 요약.
+
+    sessions/events 로도 계산할 수 있지만, 홈에서 26개 문제 상태를 한 번에
+    조회하려면 세션 전체를 훑어야 한다. 이건 그 조회를 위한 요약 테이블이다.
+    Checkpoint(작성 중인 코드)도 여기 산다 -- 기기가 바뀌어도 이어서 풀 수 있게.
+    """
+
+    __tablename__ = "user_problem_progress"
+
+    id: str = Field(default_factory=_id("prog"), primary_key=True, max_length=64)
+    user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    problem_id: str = Field(index=True, max_length=64)
+    status: ProgressStatus = Field(sa_column=Column(String(16), nullable=False, index=True))
+    current_code: str = Field(default="", sa_column=Column(Text, nullable=False))
+    best_passed: int = Field(default=0, nullable=False)
+    total_tests: int = Field(default=0, nullable=False)
+    attempt_count: int = Field(default=0, nullable=False)
+    last_judge_status: str | None = Field(default=None, max_length=32)
+    first_started_at: datetime = Field(default_factory=utcnow, nullable=False)
+    last_attempted_at: datetime | None = Field(default=None)
+    solved_at: datetime | None = Field(default=None)
+    updated_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "problem_id", name="uq_progress_user_problem"),
+        Index("ix_progress_user_status", "user_id", "status"),
+    )
+
+
+class PasswordResetToken(SQLModel, table=True):
+    """비밀번호 재설정 토큰.
+
+    **원문이 아니라 해시를 저장한다.** DB가 유출돼도 토큰을 쓸 수 없어야 한다.
+    재설정 API 자체는 이번 범위 밖이지만, 테이블을 지금 만들어두면
+    나중에 스키마 변경(= DB 파일 삭제)을 한 번 덜 하게 된다.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id: str = Field(default_factory=_id("prt"), primary_key=True, max_length=64)
+    user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    token_hash: str = Field(sa_column=Column(String(128), nullable=False, unique=True, index=True))
+    expires_at: datetime = Field(nullable=False)
+    used_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+
 class Session(SQLModel, table=True):
     __tablename__ = "sessions"
 
     id: str = Field(default_factory=_id("sess"), primary_key=True, max_length=64)
-    user_id: str = Field(default="demo-user", index=True, max_length=64)
+    # 실제 users.id 를 가리키는 FK. 예전에는 "demo-user" 문자열이었다.
+    user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
     # FK 없음: 문제는 DB가 아니라 JSON 파일에 산다. 세션 생성 시 repository로 검증한다.
     problem_id: str = Field(index=True, max_length=64)
     status: SessionStatus = Field(
