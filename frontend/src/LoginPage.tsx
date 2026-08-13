@@ -1,16 +1,17 @@
-import { ArrowLeft, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, Play, Send, UserRound } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, GraduationCap, Info, LockKeyhole, Mail, Play, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import { loginUser, requestPasswordReset, type UserRole } from './auth'
+import { loginUser, type UserRole } from './auth'
 
 type LoginPageProps = {
   onLogin: (role: UserRole) => void
   onSignupClick: () => void
   onBack: () => void
+  /** 로그인 화면으로 보내진 이유. 세션 만료 안내 등. 입력 오류(message)와 구분한다. */
+  notice?: string
 }
 
-function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
+function LoginPage({ onLogin, onSignupClick, onBack, notice = '' }: LoginPageProps) {
   const [isFindingPassword, setIsFindingPassword] = useState(false)
-  const [resetRequested, setResetRequested] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [role, setRole] = useState<UserRole>('student')
   const [message, setMessage] = useState('')
@@ -31,21 +32,13 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
     }
   }
 
-  const handlePasswordReset = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    setMessage('')
-    setIsSubmitting(true)
-    try {
-      await requestPasswordReset(String(form.get('email') ?? ''))
-      setResetRequested(true)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '비밀번호 재설정 요청에 실패했습니다.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
+  // 비밀번호 재설정 안내.
+  //
+  // 예전에는 여기에 이메일 입력 폼이 있었고 `POST /auth/password-reset/request`
+  // 를 불렀다. **백엔드에 그 경로가 없어서 항상 404 였는데도** 화면은
+  // "재설정 안내를 보냈습니다"를 띄웠다. 오지 않는 메일을 기다리게 하는 것보다
+  // 지금 할 수 있는 방법을 알려주는 게 낫다. 서버가 준비되면 폼을 되살린다
+  // (필요한 조각 목록은 auth.ts 주석에 있다).
   if (isFindingPassword) {
     return (
       <main className="auth-shell">
@@ -56,42 +49,28 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
 
           <div className="auth-heading">
             <span className="section-kicker">계정 도움</span>
-            <h1>비밀번호를 찾을게요</h1>
-            <p>가입한 이메일을 입력하면 비밀번호 재설정 안내를 받을 수 있습니다.</p>
+            <h1>비밀번호 재설정은 준비 중이에요</h1>
+            <p>아직 이메일로 재설정 링크를 보내드릴 수 없습니다. 담당 교수자나 운영자에게 문의하면 계정을 초기화해 드릴 수 있어요.</p>
           </div>
 
-          <form className="auth-form" onSubmit={handlePasswordReset}>
-            <label className="auth-field">
-              <span>이메일</span>
-              <div>
-                <Mail size={17} />
-                <input name="email" type="email" placeholder="name@example.com" required />
-              </div>
-            </label>
-
-            {resetRequested && (
-              <p className="auth-message">입력한 이메일로 재설정 안내를 보냈습니다.</p>
-            )}
-            {message && <p className="auth-message error">{message}</p>}
-
-            <button className="auth-primary-button" type="submit" disabled={isSubmitting}>
-              <Send size={17} />
-              재설정 안내 받기
-            </button>
-          </form>
+          <p className="auth-message notice">
+            <Info size={15} /> 계정을 새로 만들어도 괜찮다면 회원가입으로 바로 시작할 수 있습니다.
+          </p>
 
           <div className="auth-switch">
             <button
               className="auth-back-button"
               type="button"
-              onClick={() => {
-                setIsFindingPassword(false)
-                setResetRequested(false)
-              }}
+              onClick={() => setIsFindingPassword(false)}
             >
               <ArrowLeft size={15} />
               로그인으로 돌아가기
             </button>
+          </div>
+
+          <div className="auth-switch">
+            <span>아직 계정이 없나요?</span>
+            <button type="button" onClick={onSignupClick}>회원가입</button>
           </div>
         </section>
       </main>
@@ -111,6 +90,8 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
           <h1>다시 만나서 반가워요</h1>
           <p>계정으로 로그인하고 오늘의 코딩 문제를 이어서 풀어보세요.</p>
         </div>
+
+        {notice && <p className="auth-message notice"><Info size={15} /> {notice}</p>}
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <RoleSelector value={role} onChange={setRole} />

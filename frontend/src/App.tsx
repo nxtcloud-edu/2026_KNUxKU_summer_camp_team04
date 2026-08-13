@@ -22,6 +22,7 @@ import {
   Waypoints,
 } from 'lucide-react'
 import AiTutorPanel from './AiTutorPanel'
+import { onUnauthorized } from './api'
 import EducatorPage from './EducatorPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
@@ -42,6 +43,7 @@ type AuthView = 'login' | 'signup' | 'workspace'
 function App() {
   const [authView, setAuthView] = useState<AuthView>('workspace')
   const [userRole, setUserRole] = useState<UserRole | null>(null)
+  const [sessionNotice, setSessionNotice] = useState('')
 
   useEffect(() => {
     getCurrentUser()
@@ -51,17 +53,37 @@ function App() {
       .catch((error) => console.warn('Current user API unavailable. Staying in guest mode.', error))
   }, [])
 
+  // 토큰 만료. api.ts 가 죽은 토큰을 버린 뒤 여기로 알린다.
+  //
+  // **화면 상태를 되돌리는 것이 이 훅의 본질이다.** userRole 을 null 로 만들면
+  // useCodingTrace 의 `enabled` 가 꺼져서 이벤트 큐가 401 을 무한 재시도하는
+  // 것도 같이 멈춘다. 게스트는 토큰이 없으므로 이 알림을 받지 않는다.
+  useEffect(() => onUnauthorized(() => {
+    setUserRole(null)
+    setSessionNotice('로그인이 만료되었어요. 이어서 학습하려면 다시 로그인해 주세요.')
+    setAuthView('login')
+  }), [])
+
   const finishAuth = (role: UserRole) => {
     setUserRole(role)
+    setSessionNotice('')
     setAuthView('workspace')
+  }
+
+  // 로그인 화면을 벗어나면 만료 안내를 지운다. 안 지우면 회원가입에 들렀다
+  // 돌아왔을 때 이미 지난 안내가 다시 떠 있다.
+  const leaveLogin = (view: AuthView) => {
+    setSessionNotice('')
+    setAuthView(view)
   }
 
   if (authView === 'login') {
     return (
       <LoginPage
         onLogin={finishAuth}
-        onSignupClick={() => setAuthView('signup')}
-        onBack={() => setAuthView('workspace')}
+        onSignupClick={() => leaveLogin('signup')}
+        onBack={() => leaveLogin('workspace')}
+        notice={sessionNotice}
       />
     )
   }

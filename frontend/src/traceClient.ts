@@ -114,6 +114,23 @@ export function isJudgeUnavailable(error: unknown): boolean {
   return error instanceof ApiError && error.status === 503
 }
 
+/** 토큰이 거부됐다(401). 세션이 죽었으므로 같은 요청을 다시 보낼 이유가 없다. */
+export function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+/**
+ * 기다렸다 다시 보내면 나아질 수 있는 실패인가?
+ *
+ * 네트워크 오류(= ApiError 가 아닌 것)와 5xx 만 재시도한다. 4xx 는 요청이
+ * 잘못됐거나 권한이 없다는 뜻이라 백오프를 태워도 같은 답이 온다 -- 특히
+ * 401 에 4회 재시도를 돌리면 7초를 버리고 결과는 동일하다.
+ */
+export function isRetriable(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true
+  return error.status >= 500
+}
+
 /**
  * 페이지 이탈 시 마지막 이벤트를 흘려보낸다.
  * keepalive fetch 는 unload 중에도 전송되면서 Authorization 헤더를 실을 수 있다.
