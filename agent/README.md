@@ -93,6 +93,173 @@ flowchart TD
 > 권장합니다 — 자동 감지가 놓쳐도 학생이 스스로 요청할 수 있는 탈출구입니다.
 > (버튼 자체는 backend/frontend 쪽 구현이며 이 파이프라인은 자동 개입만 다룹니다.)
 
+## backend 연결 (`AgentProtocol`)
+
+backend는 `backend/app/agent/interface.py`에서 이미 계약을 정해뒀습니다.
+
+```python
+class AgentProtocol(Protocol):
+    name: str
+    def decide(self, ctx: AgentContext) -> AgentDecision: ...
+```
+
+이 계약을 만족하는 어댑터가 **`src/tutor_agent/backend_adapter.py`의
+`TutorAgentAdapter`** 입니다. agent/는 backend 코드를 import하지 않고
+(`app.*` 의존성 없음), `AgentAction` / `AgentContext` / `AgentDecision`을
+**필드명·enum 값 그대로 미러링**합니다. backend 라우터는 `decision.action.value`
+(str)만 읽으므로 우리 enum이 backend enum과 다른 클래스여도 동작합니다.
+미러가 어긋나면 `tests/test_backend_adapter.py`가 backend 소스를 텍스트로 파싱해
+비교하다가 실패합니다 (backend를 import하지는 않습니다).
+
+### 연결 방법 A: backend에서 한 줄 (권장, 이 폴더 작업 범위 밖)
+
+`backend/app/agent/__init__.py::get_agent()`의 폴백 분기에 `llm` 분기를 넣으면 됩니다.
+
+```python
+def get_agent() -> AgentProtocol:
+    backend = get_settings().agent_backend
+    if backend == "llm":
+        try:
+            from tutor_agent.backend_adapter import get_backend_agent
+
+            return get_backend_agent()  # lru_cache 싱글턴
+        except Exception:  # tutor_agent 미설치 등
+            log.exception("tutor_agent 로드 실패. WaitAgent로 폴백합니다.")
+            return WaitAgent()
+    return WaitAgent()
+```
+
+각 줄의 근거 (그대로 안 써도 되지만, 안 지키면 생기는 문제):
+
+- **`try`로 감싸는 이유는 `import` 하나 때문입니다.** `get_agent()`는 FastAPI
+  `Depends`라 라우터 본문보다 먼저, `post_result()`의 try/except **바깥에서**
+  평가됩니다(backend 자신의 docstring이 명시). agent/와 backend/는 별도 venv라
+  backend에 `tutor_agent`가 설치돼 있지 않으면 `ModuleNotFoundError`가 나고,
+  그러면 `POST /results`가 500이 되어 채점 결과까지 유실됩니다. 반대로
+  `get_backend_agent()` 호출 자체는 속성 2개를 대입할 뿐이라 현실적으로
+  던지지 않습니다 — `except`는 사실상 import 보험입니다.
+- **`get_backend_agent()`(싱글턴)를 쓰는 이유.** `TutorAgentAdapter()`를 직접
+  부르면 요청마다 새 인스턴스가 생기고, 인스턴스에 캐시된 `TutorPipeline`
+  (strands `Agent` 4개)도 첫 `decide()`마다 다시 만들어집니다. 어댑터는 상태를
+  갖지 않으니 공유해도 안전합니다. 모듈 최상단에서 import해 두고 재사용하는
+  방식도 동등하게 괜찮습니다 — 그 경우 import 실패가 앱 기동 실패가 되므로
+  try/except는 여전히 필요합니다.
+
+`TutorAgentAdapter()` 생성은 아무것도 하지 않습니다(무거운 `TutorPipeline`은 첫
+`decide()` 호출 때 lazy 생성). `backend_adapter` 모듈 자체는 `strands`를 import
+시점에 끌어오지 않으므로, backend venv에 `strands-agents`가 없어도 import는
+성공하고 실패는 WAIT 폴백으로만 나타납니다 (`sys.modules['strands'] = None`으로
+차단한 상태에서 import 성공 + `decide() → WAIT`을 확인했습니다).
+
+### 연결 방법 B: backend를 **한 줄도 안 고치고** 띄우기
+
+`backend/app/agent/__init__.py`를 지금 당장 못 고치는 상황(권한/PR 순서/충돌 회피)이면,
+FastAPI의 `dependency_overrides`로 같은 결과를 낼 수 있습니다. 고치는 것은
+backend 소스가 아니라 **uvicorn이 띄우는 모듈 이름**뿐입니다.
+
+```bash
+cd backend
+# agent를 backend venv에 설치했다면 PYTHONPATH 없이 그냥 실행
+PYTHONPATH=../agent/src uvicorn tutor_agent.backend_entry:app --reload
+```
+
+`src/tutor_agent/backend_entry.py`가 `app.main:app`을 가져와
+`app.dependency_overrides[get_agent] = get_backend_agent`만 얹어 돌려줍니다.
+라우터/미들웨어/DB/에러 핸들러는 backend가 만든 그대로입니다.
+
+실제로 이렇게 띄우고 `POST /agent/decide`를 호출하면 응답이 이렇게 나옵니다
+(파이프라인을 stub으로 바꿔 LLM 없이 확인한 결과):
+
+```json
+{"state": "PROGRESSING", "concept": "loop", "action": "HINT",
+ "reason": "같은 오류를 반복하고 있습니다. (지도 방식: 소크라테스식 질문/hint)",
+ "activity": {"kind": "hint", "message": "합을 담는 변수는 언제 초기화해야 할까요?",
+              "hint_level": "hint", "action_type": "send_message", "...": "..."}}
+```
+
+**그래도 A를 권하는 이유** (B의 함정):
+
+- `uvicorn app.main:app`으로 띄우는 사람(다른 팀원, Docker `CMD`, 배포 스크립트,
+  IDE 런 설정)은 override를 못 받고 **조용히 `WaitAgent`로 돌아갑니다.** 실행
+  명령이 사실상 계약이 되는데, 이건 코드에 안 적혀 있습니다.
+- backend의 pytest(`tests/conftest.py`)는 `app.main:app`을 직접 쓰고
+  `get_agent`를 `WaitAgent`로 override하므로, B로는 backend 테스트에서 어댑터가
+  절대 안 걸립니다(테스트를 깨지 않는다는 장점이기도 합니다).
+- `dependency_overrides`는 원래 테스트용으로 문서화된 훅입니다. 동작은 동일하지만
+  프로덕션 배선을 테스트 훅으로 하는 셈입니다.
+- `/health`의 `agent_backend`는 backend 설정을 그대로 보여주므로, B로 띄운 사실은
+  기동 로그(`INFO ... get_agent에 연결했습니다`)로만 확인됩니다.
+
+즉 **B는 "지금 당장 눈으로 보고 싶다 / 데모까지 버텨야 한다"용 임시 배선**,
+A는 최종 배선입니다. `install(app, respect_setting=True)`로 부르면 B도
+`AGENT_BACKEND=llm`일 때만 치환합니다. B에서도 연결 실패는 앱 기동을 막지 않고
+경고 로그 + `WaitAgent` 유지로 끝납니다.
+
+### 실행 전제 조건
+
+1. backend venv에서 `tutor_agent`가 import 가능해야 합니다.
+   ```bash
+   # backend venv 활성화 상태에서
+   pip install -e ../agent          # 또는 PYTHONPATH=../agent/src
+   ```
+   `strands-agents[anthropic]` 등 LLM 의존성이 함께 설치됩니다. 설치하지 않으면
+   어댑터는 항상 WAIT을 돌려줍니다(에러는 로그로만).
+2. backend 프로세스 환경에 LLM 키가 있어야 합니다: `ANTHROPIC_API_KEY`
+   (또는 `MODEL_PROVIDER`에 맞는 키). `models.py`가 `python-dotenv`로 `.env`를
+   읽지만, 이건 **backend 프로세스의 작업 디렉터리** 기준이므로 backend의
+   `.env`나 셸 환경변수에 넣는 편이 확실합니다.
+3. backend 설정 `AGENT_BACKEND=llm` (기본값은 `none` → `WaitAgent`).
+
+### 계약 변환 규칙
+
+`AgentContext` → `SessionContext` (`to_session_context()`). 1:1이 아닌 곳만:
+
+| `SessionContext` | 출처 | 비고 |
+|---|---|---|
+| `student_id` | `session_id` | backend 계약은 세션 단위라 학생 id가 없습니다 |
+| `problem_id` | `problem["problem_id"]` | |
+| `code` | `current_code` | |
+| `run_history` | `recent_trace` + `judge_result` 요약 1줄 | judge 요약은 `"1/4 tests passed"` 포맷을 유지합니다 (`state_agent`의 실패 판별이 `N/M`을 읽습니다) |
+| `elapsed_seconds` | `features["elapsed_seconds"]` | |
+| `idle_seconds` | `features["seconds_without_progress"]` | 키 입력 유휴가 아니라 "결과 진전 없음" 시간 — backend가 주는 가장 가까운 신호 |
+| `edit_churn_count` | `features["same_region_edit_count"]` | 같은 영역 반복 수정 = churn |
+| `cursor_stuck_seconds` | `0.0` | backend는 커서 위치를 추적하지 않습니다 |
+| `paste_detected` | `trigger`/`process_status == "UNDERSTANDING_UNCERTAIN"` | backend R2(대규모 변경 직후 통과) = agent의 "이해도 확인" 분기와 같은 의미 |
+| `last_error` | `features["recent_error_types"][-1]` 또는 에러 status | |
+| `session_ended` | `False` | backend는 세션이 살아 있을 때만 호출합니다 |
+| `seconds_since_last_intervention` | `None` | backend ctx는 개입 이력의 `seq`만 줍니다(초 없음). 쿨다운은 backend Monitor가 이미 적용 |
+| `backend_signals` | ctx 전체 요약 | 위 표로 표현되지 않는 신호(`trigger`, `evidence`, `features` 전체, 문제 설명, 이전 개입)를 담아 **LLM 프롬프트까지 그대로** 전달합니다 |
+
+`PipelineResult` → `AgentDecision` (`to_agent_decision()`):
+
+| agent | backend | |
+|---|---|---|
+| `should_intervene=False` | `action=WAIT`, `activity=None` | |
+| `action_type="no_op"` | `action=WAIT` | |
+| `action_type="send_message"` / `"highlight_code"` / `"show_example"` | `action=HINT` | 표에 없는 값도 HINT로 수렴 |
+| — | `state` | agent 문장이 아니라 **backend `ProcessStatus` 값**(`ctx.process_status`)을 그대로 돌려줍니다. timeline/교육자 화면이 파싱할 수 있어야 하므로 |
+| `problem["concepts"][0]` | `concept` | |
+| `StudentState.state_summary` (+ 지도 방식) | `reason` | |
+| `GuidancePlan` / `ActionPlan` / `Evaluation` | `activity` | `{"kind": "hint", "message": ..., "hint_level": ..., "action_type": ..., "payload": ..., "urgency": ..., "evaluation": {...}}` — 학생에게 보여줄 문구는 `activity["message"]` |
+
+`TRACE`/`PREDICT`/`DEBUG`/`VERIFY`는 아직 매핑하지 않습니다. agent/에 해당 학습
+활동(Activity)을 생성하는 로직이 없어서, 없는 활동을 만들어 보내는 대신 실제 개입을
+전부 HINT로 모읍니다. 활동 생성기가 붙으면
+`backend_adapter.ACTION_TYPE_TO_AGENT_ACTION`만 넓히면 됩니다.
+
+### 두 가지 안전 장치
+
+- **게이트 이중 판정 방지.** 어댑터는 `TutorPipeline.run(ctx, skip_gate=True)`로
+  호출합니다. backend Process Monitor가 자기 규칙으로 이미 "지금이 개입 시점"이라고
+  판단해서 우리를 부른 것이므로, `state_agent`의 게이트가 다른 기준(예: backend
+  `same_region_edit_count` vs 우리 `edit_churn_count`)으로 재판정하다가 Monitor의
+  판단을 조용히 WAIT로 덮어쓰는 일을 막습니다. (붙여넣기/이해도 확인 분기는
+  `skip_gate=True`에서도 그대로 확인합니다.)
+- **`decide()`는 예외를 던지지 않습니다.** LLM 실패, 네트워크 오류, 필드 누락,
+  스키마 검증 실패, `strands` 미설치 — 전부 `AgentAction.WAIT` 폴백 + 로그입니다.
+  backend에서 이 값은 채점 응답(`POST /results`)과 같은 경로에 실려 나가므로,
+  Agent 실패가 채점 결과를 깨뜨려선 안 됩니다(backend_plan §14).
+
 ## 폴더 구조
 
 ```
@@ -101,13 +268,15 @@ agent/
 │   ├── schemas.py        # 파이프라인 전체가 공유하는 Pydantic 모델
 │   ├── models.py         # 모델 프로바이더 스위치 (env var 기반, 미정 상태 대응)
 │   ├── orchestrator.py   # 4개 에이전트를 잇는 TutorPipeline
+│   ├── backend_adapter.py # backend AgentProtocol 어댑터 (계약 미러 + 변환 + WAIT 폴백)
 │   ├── agents/            # 에이전트별 시스템 프롬프트 + build_agent()/실행 함수
 │   │   └── state_agent.py # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
 │   └── tools/             # 에이전트가 쓸 Strands @tool 함수 (현재 예시 1개)
 ├── examples/run_session_demo.py   # 전체 파이프라인 실행 예시 (struggle/skip/paste 3종)
 ├── tests/
-│   ├── test_state_agent.py    # 규칙 게이트 + assess() 분기 테스트 (LLM 없음, mock)
-│   └── test_orchestrator.py   # 분기 로직 스모크 테스트 (LLM 호출 없이 mock)
+│   ├── test_state_agent.py      # 규칙 게이트 + assess() 분기 테스트 (LLM 없음, mock)
+│   ├── test_orchestrator.py     # 분기 로직 스모크 테스트 (LLM 호출 없이 mock)
+│   └── test_backend_adapter.py  # backend 계약 변환/폴백 + 미러 드리프트 검사 (mock)
 ├── pyproject.toml
 └── .env.example
 ```
@@ -156,8 +325,14 @@ SDK가 그 extra에 들어 있습니다). AWS 계정을 쓰기로 팀에서 정�
       게이트로 구체화 — 실제 서비스 데이터로 임계값(`STATE_GATE_*`)은 계속 튜닝 필요
 - [ ] `edit_churn_count`, `cursor_stuck_seconds`, `paste_detected`를 프런트엔드에서
       실제로 계산해 backend를 거쳐 `SessionContext`로 채우는 연동 구현
-- [ ] backend가 프런트엔드 이벤트(코드 변경/실행/제출)를 어떤 형태로 넘길지 정하고
-      `SessionContext` 생성 지점을 backend 쪽에 연결
+      (backend 경로에서는 `backend_adapter`가 근사 매핑 중 — `cursor_stuck_seconds`는
+      backend에 대응 신호가 없어 0으로 들어갑니다)
+- [x] backend가 프런트엔드 이벤트를 어떤 형태로 넘길지 정하고 `SessionContext`
+      생성 지점을 연결 — backend `AgentContext`를 받는 `backend_adapter.py` 작성 완료.
+      남은 것은 **backend 쪽 한 줄**(`get_agent()`에서 `TutorAgentAdapter` 반환,
+      위 "backend 연결" 절 스니펫)
+- [ ] `AgentAction`의 `TRACE`/`PREDICT`/`DEBUG`/`VERIFY` 활동 생성 로직 — 지금은
+      실제 개입을 전부 `HINT`로 모으고 있습니다
 - [ ] 사용자가 문제를 해결할 때 실시간으로 에이전트가 호출되야함
 - [ ] "힌트 버튼"(학생 직접 요청) 경로를 backend/frontend에 구현 — state_agent의
       규칙 게이트와 무관하게 항상 열려 있어야 함

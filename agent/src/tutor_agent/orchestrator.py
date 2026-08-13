@@ -11,6 +11,11 @@ StateAgent와 사실상 같은 질문("지금 뭔가 해야 하나?")을 LLM 호
 
 파이프라인이 중간에 멈추면(개입하지 않음) 이후 필드는 None으로 남는다. 실제
 서비스 정책이 정해지면 분기 조건과 순서는 자유롭게 바꿔도 된다.
+
+`run(ctx, skip_gate=True)`는 backend 연동(`backend_adapter.TutorAgentAdapter`)이 쓴다 —
+backend Process Monitor가 이미 자체 규칙으로 "지금 부를 시점"이라고 판단해서 우리를
+호출했을 때, 이 모듈의 게이트가 또 다른 기준으로 재판정하다가 신호가 어긋나
+조용히 WAIT 처리해버리는 걸 막기 위해서다.
 """
 
 from __future__ import annotations
@@ -38,8 +43,8 @@ class TutorPipeline:
         self._action = action_agent.build_agent()
         self._evaluation = evaluation_agent.build_agent()
 
-    def run(self, ctx: SessionContext) -> PipelineResult:
-        student_state = state_agent.assess(ctx, self._state)
+    def run(self, ctx: SessionContext, *, skip_gate: bool = False) -> PipelineResult:
+        student_state = state_agent.assess(ctx, self._state, skip_gate=skip_gate)
         if not student_state.should_intervene:
             return PipelineResult(student_state=student_state)
 

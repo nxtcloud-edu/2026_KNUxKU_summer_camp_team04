@@ -118,3 +118,43 @@ def test_assess_calls_llm_when_gate_passes_with_struggle_signals() -> None:
     mock_agent.structured_output.assert_called_once()
     assert result.entry_branch == "struggle"
     assert result.should_intervene is True
+
+
+# --- skip_gate=True (backend Monitor가 이미 호출 시점을 판단한 경우) --------------
+
+
+def test_skip_gate_calls_llm_even_without_any_local_signal() -> None:
+    """게이트라면 막았을 신호 0개짜리 ctx도, skip_gate=True면 곧장 LLM으로 간다."""
+    mock_agent = MagicMock()
+    mock_agent.structured_output.return_value = StudentState(
+        state_summary="Monitor가 STUCK으로 판단", should_intervene=True, urgency="high"
+    )
+    ctx = _ctx()  # idle/churn/cursor_stuck 전부 0 -- 일반 게이트라면 스킵됐을 상태
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=True)
+
+    mock_agent.structured_output.assert_called_once()
+    assert result.entry_branch == "struggle"
+
+
+def test_skip_gate_ignores_cooldown_and_session_ended() -> None:
+    mock_agent = MagicMock()
+    mock_agent.structured_output.return_value = StudentState(
+        state_summary="Monitor가 판단", should_intervene=True
+    )
+    ctx = _ctx(session_ended=True, seconds_since_last_intervention=1)
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=True)
+
+    mock_agent.structured_output.assert_called_once()
+    assert result.should_intervene is True
+
+
+def test_skip_gate_still_routes_paste_to_comprehension_check_without_llm() -> None:
+    mock_agent = MagicMock()
+    ctx = _ctx(paste_detected=True)
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=True)
+
+    mock_agent.structured_output.assert_not_called()
+    assert result.entry_branch == "paste"
