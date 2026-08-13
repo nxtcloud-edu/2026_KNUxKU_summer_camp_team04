@@ -51,7 +51,19 @@ def test_runtime_error():
     code = "def not_sum_list(arr):\n    return sum(arr)\n"  # 함수명이 다름
     result = run_judge(code, PROBLEM_ID, mode="run")
     assert result["status"] == "RUNTIME_ERROR"
-    assert "message" in result
+    assert "찾을 수 없습니다" in result["message"]
+
+
+def test_runtime_error_reports_specific_exception():
+    """회귀 테스트: 모듈 최상위(exec 단계)에서 예외가 나면, 뭉뚱그린 메시지가
+    아니라 실제 예외 타입/메시지가 그대로 나와야 한다 (Agent가 last_error로
+    구체적인 힌트를 만들 때 필요 — 자식 프로세스 격리 리팩터링 과정에서
+    한 번 뭉개졌던 정보라 회귀 방지용으로 추가함)."""
+    code = "def sum_list(arr):\n    return sum(arr)\nundefined_variable_boom\n"
+    result = run_judge(code, PROBLEM_ID, mode="run")
+    assert result["status"] == "RUNTIME_ERROR"
+    assert "NameError" in result["message"]
+    assert "undefined_variable_boom" in result["message"]
 
 
 def test_cannot_forge_result_via_sys_exit():

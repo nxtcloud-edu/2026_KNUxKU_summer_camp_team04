@@ -24,16 +24,22 @@ import subprocess
 import sys
 
 # 함수가 존재하고 호출 가능한지만 확인하는 자식 스크립트.
+# ok=False일 때 detail에 구체적인 원인(예외 타입/메시지, 또는 함수 없음)을
+# 실어 보낸다. 이 detail은 채점 결과(pass/fail)엔 전혀 영향을 주지 않고
+# 진단 메시지로만 쓰이므로, 자식 프로세스가 뭘 보내든 안전하다.
 _CHECK_RUNNER = """
 import json, sys
 student_code, function_name = sys.argv[1], sys.argv[2]
 namespace = {}
 try:
     exec(compile(student_code, "<student_code>", "exec"), namespace)
-    ok = callable(namespace.get(function_name))
-except Exception:
-    ok = False
-print(json.dumps({"ok": ok}))
+except Exception as e:
+    print(json.dumps({"ok": False, "detail": f"{type(e).__name__}: {e}"}))
+    sys.exit(0)
+if callable(namespace.get(function_name)):
+    print(json.dumps({"ok": True}))
+else:
+    print(json.dumps({"ok": False, "detail": f"함수 '{function_name}'을(를) 찾을 수 없습니다."}))
 """
 
 # 함수를 실제로 한 번 호출해 리턴값을 stdout으로 보고하는 자식 스크립트.
@@ -82,10 +88,8 @@ def main(payload_path: str) -> None:
         return
 
     if not check or not check.get("ok"):
-        print(json.dumps({
-            "error": "runtime",
-            "message": f"함수 '{function_name}'을 찾을 수 없거나 코드 실행 중 오류가 발생했습니다.",
-        }))
+        detail = (check or {}).get("detail", "코드 실행 중 알 수 없는 오류가 발생했습니다.")
+        print(json.dumps({"error": "runtime", "message": detail}))
         return
 
     results = []
