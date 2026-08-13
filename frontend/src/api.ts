@@ -3,6 +3,14 @@ export const isApiConfigured = Boolean(API_BASE_URL)
 
 export type ApiRequestOptions = RequestInit & {
   auth?: boolean
+  /**
+   * 401 을 "세션 만료"로 취급할지. 기본 true.
+   *
+   * `false` 로 두는 경우는 하나다 -- **로그아웃.** 만료된 토큰으로 로그아웃을
+   * 누르면 `/auth/logout` 이 401 을 주는데, 그걸 만료로 처리하면 방금 나가려던
+   * 사용자를 "로그인이 만료되었어요" 화면으로 밀어넣는다.
+   */
+  notifyOnUnauthorized?: boolean
 }
 
 /**
@@ -31,10 +39,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
 
-  if (options.auth !== false) {
-    const token = getAccessToken()
-    if (token) headers.set('Authorization', `Bearer ${token}`)
-  }
+  // 실제로 토큰을 실었는지 기록해둔다. 아래 401 처리가 이 값에 의존한다.
+  const sentToken = options.auth !== false ? getAccessToken() : ''
+  if (sentToken) headers.set('Authorization', `Bearer ${sentToken}`)
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -43,6 +50,16 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   const payload: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {
+    // 우리가 보낸 토큰이 거부됐다 = 세션이 죽었다. 토큰을 버리고 구독자에게 알린다.
+    //
+    // **`sentToken` 조건이 핵심이다.** `POST /auth/login` 은 비밀번호가 틀리면
+    // 똑같이 401(INVALID_CREDENTIALS)을 주는데, 그건 세션 만료가 아니라 입력
+    // 오류다. 로그인/회원가입은 `auth: false` 로 호출되므로 sentToken 이 비어
+    // 있고, 따라서 이 분기를 타지 않는다. 조건 없이 status 만 보면 로그인
+    // 실패가 "로그인이 만료되었어요" 화면을 띄우는 엉뚱한 동작이 된다.
+    if (response.status === 401 && sentToken && options.notifyOnUnauthorized !== false) {
+      notifyUnauthorized()
+    }
     throw new ApiError(getApiErrorMessage(payload, `API returned ${response.status}`), response.status, payload)
   }
   return payload as T
@@ -78,6 +95,40 @@ export function getAccessToken() {
 export function setAccessToken(token: string) {
   if (token) localStorage.setItem('tutory:access-token', token)
   else localStorage.removeItem('tutory:access-token')
+}
+
+type UnauthorizedListener = () => void
+const unauthorizedListeners = new Set<UnauthorizedListener>()
+
+/**
+ * 세션 만료(401) 알림을 구독한다. 반환값은 구독 해지 함수.
+ *
+ * 토큰 만료는 720분 뒤에 조용히 찾아온다(`ACCESS_TOKEN_EXPIRE_MINUTES`).
+ * 이 훅이 없으면 죽은 토큰이 localStorage 에 그대로 남아 세션 생성 · 이벤트
+ * 전송 · 채점이 전부 401 로 실패하는데 화면에는 아무 설명도 나오지 않는다.
+ *
+ * 알림 시점에 토큰은 **이미 폐기되어 있다.** 구독자가 할 일은 화면 상태를
+ * 비로그인으로 되돌리는 것뿐이다.
+ */
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener)
+  return () => {
+    unauthorizedListeners.delete(listener)
+  }
+}
+
+function notifyUnauthorized() {
+  // 토큰을 먼저 버린다. 구독자가 이 알림을 받고 다시 API 를 부를 수도 있는데
+  // 그때 죽은 토큰이 남아 있으면 401 이 또 나서 알림이 재귀한다.
+  if (!getAccessToken()) return
+  setAccessToken('')
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener()
+    } catch (error) {
+      console.warn('세션 만료 처리 중 오류.', error)
+    }
+  }
 }
 
 export function getApiErrorMessage(payload: unknown, fallback: string) {

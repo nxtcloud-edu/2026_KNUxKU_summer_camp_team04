@@ -47,6 +47,18 @@ class SessionContext(BaseModel):
         default=False, description="최근 편집이 붙여넣기였는지 여부. 막힘 신호가 아니라 별도 분기로 처리한다.",
     )
 
+    # --- backend 연동에서만 채워지는 부가 신호 ---
+    backend_signals: dict = Field(
+        default_factory=dict,
+        description=(
+            "backend AgentContext에서 온, 위 필드로 표현되지 않는 신호들 "
+            "(process_status, trigger, evidence, problem, judge_result, features 등). "
+            "`backend_adapter.to_session_context()`가 채우며, 각 에이전트 프롬프트는 "
+            "SessionContext를 그대로 직렬화하므로 이 내용이 LLM까지 전달된다. "
+            "backend 없이 로컬로 돌릴 때는 빈 dict."
+        ),
+    )
+
 
 class StudentState(BaseModel):
     """문제 풀이 중 학생 상태 파악 에이전트의 출력 (개입시점 결정 포함).

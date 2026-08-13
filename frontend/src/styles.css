@@ -744,6 +744,13 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   font-size: 13px;
 }
 .auth-field input::placeholder { color: #a39b92; }
+/* 입력 필드 아래 보조 설명. 오류가 아니라 안내이므로 배경을 두지 않는다. */
+.auth-hint {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .password-toggle {
   width: 28px;
   height: 28px;
@@ -810,6 +817,19 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   border-color: rgba(195, 78, 66, .18);
   background: var(--danger-soft);
   color: var(--danger);
+}
+/* 안내(세션 만료, 준비 중 기능). 오류가 아니라 정보이므로 중립 톤을 쓴다. */
+.auth-message.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+.auth-message.notice svg {
+  flex: none;
+  margin-top: 1px;
 }
 .auth-primary-button {
   height: 44px;

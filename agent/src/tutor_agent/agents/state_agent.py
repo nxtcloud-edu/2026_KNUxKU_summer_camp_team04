@@ -203,7 +203,35 @@ def build_agent() -> Agent:
     )
 
 
-def assess(ctx: SessionContext, agent: Agent | None = None) -> StudentState:
+def _assess_via_llm(ctx: SessionContext, agent: Agent | None, signals: list[str]) -> StudentState:
+    agent = agent or build_agent()
+    signal_note = ", ".join(signals) if signals else "(backend Monitor가 이미 개입 시점으로 판단함)"
+    prompt = (
+        f"다음 신호로 LLM 평가로 넘어왔습니다: {signal_note}.\n\n"
+        f"다음 세션 상태를 보고 학생 상태와 개입시점을 판단하세요:\n\n{ctx.model_dump_json(indent=2)}"
+    )
+    state = agent.structured_output(StudentState, prompt)
+    state.entry_branch = "struggle"
+    return state
+
+
+def assess(ctx: SessionContext, agent: Agent | None = None, *, skip_gate: bool = False) -> StudentState:
+    """규칙 게이트를 통과한 경우에만 LLM을 호출해 학생 상태를 판단한다.
+
+    Args:
+        skip_gate: True면 유휴/churn/쿨다운 등 이 모듈 자체의 규칙 게이트를 건너뛰고
+            곧장 LLM 평가로 간다 (붙여넣기 분기는 그대로 확인한다). backend
+            Monitor가 이미 독립적인 규칙으로 "지금 Agent를 부를 시점"이라고
+            판단해 호출한 경우(`backend_adapter.TutorAgentAdapter`)에 쓴다 — 서로 다른
+            기준으로 만든 신호(예: backend의 `same_region_edit_count` vs 이 모듈의
+            `edit_churn_count`)가 우연히 이 모듈의 임계값을 못 넘겨 Monitor의
+            판단을 무시하고 조용히 WAIT 처리해버리는 걸 막기 위해서다.
+    """
+    if skip_gate:
+        if ctx.paste_detected:
+            return _comprehension_check_state()
+        return _assess_via_llm(ctx, agent, signals=[])
+
     gate = evaluate_entry_signals(ctx)
 
     if not gate.should_enter:
@@ -217,12 +245,4 @@ def assess(ctx: SessionContext, agent: Agent | None = None) -> StudentState:
     if gate.branch == "paste":
         return _comprehension_check_state()
 
-    agent = agent or build_agent()
-    prompt = (
-        "규칙 기반 게이트가 다음 신호를 감지해 LLM 평가로 넘어왔습니다: "
-        f"{', '.join(gate.signals)}.\n\n"
-        f"다음 세션 상태를 보고 학생 상태와 개입시점을 판단하세요:\n\n{ctx.model_dump_json(indent=2)}"
-    )
-    state = agent.structured_output(StudentState, prompt)
-    state.entry_branch = "struggle"
-    return state
+    return _assess_via_llm(ctx, agent, signals=gate.signals)

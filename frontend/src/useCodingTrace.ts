@@ -18,6 +18,8 @@ import {
   beaconEvents,
   createSession,
   getSession,
+  isRetriable,
+  isUnauthorized,
   newEventId,
   postEvents,
   type SessionInfo,
@@ -215,19 +217,31 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
           break
         } catch (error) {
           lastError = error
+          // 4xx 는 기다려서 낫지 않는다. 즉시 빠져나온다.
+          if (!isRetriable(error)) break
           const delay = RETRY_DELAYS_MS[attempt]
           if (delay === undefined) break
           await new Promise((resolve) => window.setTimeout(resolve, delay))
         }
       }
       if (lastError) {
-        // 되돌려놓는다. client_event_id 가 있으므로 나중에 중복 전송돼도 서버가 거른다.
-        queueRef.current.unshift(...batch)
-        console.warn('trace 전송 실패. 큐에 보관하고 다음 주기에 재시도합니다.', lastError)
+        if (isUnauthorized(lastError)) {
+          // 세션이 죽었다. 되돌려놓으면 다음 주기에 또 401 을 받는다.
+          // api.ts 가 이미 만료를 통보했고, App 이 enabled 를 끄면서 큐를 버린다.
+          console.warn('trace 전송 중 세션이 만료됐습니다. 남은 이벤트를 버립니다.', lastError)
+        } else {
+          // 되돌려놓는다. client_event_id 가 있으므로 나중에 중복 전송돼도 서버가 거른다.
+          queueRef.current.unshift(...batch)
+          console.warn('trace 전송 실패. 큐에 보관하고 다음 주기에 재시도합니다.', lastError)
+        }
       }
     } catch (error) {
-      queueRef.current.unshift(...batch)
-      console.warn('trace 세션을 확보하지 못했습니다.', error)
+      if (isUnauthorized(error)) {
+        console.warn('trace 세션이 만료됐습니다. 남은 이벤트를 버립니다.', error)
+      } else {
+        queueRef.current.unshift(...batch)
+        console.warn('trace 세션을 확보하지 못했습니다.', error)
+      }
     } finally {
       sendingRef.current = false
     }

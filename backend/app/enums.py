@@ -97,12 +97,32 @@ class JudgeStatus(str, Enum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
-# 점수로 셀 수 있는 결과 vs 셀 수 없는 결과.
+# 채점 결과 3분류. **누가 실패했는가**로 가른다.
+#
+#   SCORED  점수로 셀 수 있다.                      ACCEPTED / WRONG_ANSWER
+#   ERROR   **학생 코드**가 실패했다.               SYNTAX / RUNTIME / TIME_LIMIT
+#   SYSTEM  **채점 인프라**가 실패했다.             INTERNAL_ERROR
+#
 # features.py의 가장 중요한 정의: 에러 결과는 0점이 아니라 **관측 없음**이다.
+#
+# SYSTEM을 ERROR에서 떼어낸 이유
+# -----------------------------
+# INTERNAL_ERROR가 ERROR에 있으면 학생이 아무 잘못을 하지 않았는데도
+# consecutive_error_count가 올라간다. Docker 데몬이 죽어 있을 때 학생이 Run을
+# 세 번 누르는 것만으로 임계값 3을 넘겨 REPEATED_FAILURE 트리거가 발화하고,
+# agent가 "반복 실패네요, 반복문을 살펴보세요" 같은 엉뚱한 개입을 한다.
+# 학생에게 필요한 말은 "채점 서버가 고장났어요"다.
+#
+# INTERNAL_ERROR는 세 분류 중 SYSTEM에만 속하므로 feature 집계에서 통째로
+# 빠진다. 단 타임라인에는 그대로 남는다(timeline.py의 _ERROR_LABEL) --
+# 발표 중에 채점기가 죽었다는 사실 자체는 보여야 한다.
 SCORED_STATUSES: frozenset[JudgeStatus] = frozenset(
     {JudgeStatus.ACCEPTED, JudgeStatus.WRONG_ANSWER}
 )
-ERROR_STATUSES: frozenset[JudgeStatus] = frozenset(JudgeStatus) - SCORED_STATUSES
+SYSTEM_STATUSES: frozenset[JudgeStatus] = frozenset({JudgeStatus.INTERNAL_ERROR})
+ERROR_STATUSES: frozenset[JudgeStatus] = (
+    frozenset(JudgeStatus) - SCORED_STATUSES - SYSTEM_STATUSES
+)
 
 
 class ProcessStatus(str, Enum):
