@@ -17,16 +17,43 @@ import {
   Terminal,
   Waypoints,
 } from 'lucide-react'
+import LoginPage from './LoginPage'
 import { preparePython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
 import { getProblemDetail, isJudgeApiConfigured, judgeCode, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import SignupPage from './SignupPage'
 
 type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 type ThemeMode = 'system' | 'light' | 'dark'
+type AuthView = 'login' | 'signup' | 'workspace'
 
 function App() {
+  const [authView, setAuthView] = useState<AuthView>('login')
+
+  if (authView === 'login') {
+    return (
+      <LoginPage
+        onLogin={() => setAuthView('workspace')}
+        onSignupClick={() => setAuthView('signup')}
+      />
+    )
+  }
+
+  if (authView === 'signup') {
+    return (
+      <SignupPage
+        onSignup={() => setAuthView('workspace')}
+        onLoginClick={() => setAuthView('login')}
+      />
+    )
+  }
+
+  return <LearningWorkspace />
+}
+
+function LearningWorkspace() {
   const [selectedProblemId, setSelectedProblemId] = useState('func_sum_list')
   const [problem, setProblem] = useState<ProblemDetail | null>(null)
   const [problemLoading, setProblemLoading] = useState(true)
