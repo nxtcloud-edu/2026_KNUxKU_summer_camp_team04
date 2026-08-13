@@ -1,4 +1,4 @@
-import { ArrowLeft, LockKeyhole, Mail, Play, Send } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail, Play, Send } from 'lucide-react'
 import { useState } from 'react'
 
 type LoginPageProps = {
@@ -9,6 +9,7 @@ type LoginPageProps = {
 function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
   const [isFindingPassword, setIsFindingPassword] = useState(false)
   const [resetRequested, setResetRequested] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -99,7 +100,19 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
             <span>비밀번호</span>
             <div>
               <LockKeyhole size={17} />
-              <input type="password" placeholder="비밀번호를 입력하세요" required />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="비밀번호를 입력하세요"
+                required
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
             </div>
           </label>
 
