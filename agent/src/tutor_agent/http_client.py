@@ -22,26 +22,26 @@
    즉시(0.5초) 포기하고 WAIT, 실제로 LLM을 돌리는 중이면 끝까지 기다린다.
    둘을 한 값으로 묶으면 "서비스 꺼짐"에도 매 요청이 십수 초씩 매달린다.
 
-알려진 한계 — **팀 결정이 필요하다**
-------------------------------------
-`decide()`는 **동기 호출**이고, 파이프라인이 LLM을 4번 순차 호출한다
-(state -> guidance -> action -> evaluation). 로컬에서 실측한 왕복 시간은
-**28~30초**다. 이 호출은 backend의 `POST /sessions/{id}/run|submit` 안에서
-일어나므로, Monitor가 트리거된 제출은 학생이 그만큼 기다리게 된다.
+알려진 한계
+-----------
+`decide()`는 **동기 호출**이다. 원래 파이프라인이 LLM을 4번 순차 호출해서
+(state -> guidance -> action -> evaluation) 실측 28~30초가 걸렸는데, 두 가지를
+고쳤다: guidance+action을 한 번의 호출로 합치고(`orchestrator.py`,
+`agents/guided_action_agent.py`), evaluation은 응답 경로에서 빼서
+`service.py`가 응답 후 `BackgroundTasks`로 돌린다. 지금은 **16~18초**
+(state -> guided_action, 2번 순차 호출). 자세한 논의는 agent/README.md의
+"지연 시간" 절 참고.
 
-완화되는 부분: Monitor는 자주 트리거되지 않는다(예: 같은 결과 3회 반복).
-평범한 제출은 agent를 아예 안 부르므로 즉시 응답한다.
+이 호출은 backend의 `POST /sessions/{id}/run|submit` 안에서 일어나므로,
+Monitor가 트리거된 제출은 학생이 그만큼 기다리게 된다 — Monitor는 자주
+트리거되지 않으므로(예: 같은 결과 3회 반복) 평범한 제출은 영향 없다.
 
-그래도 트리거된 순간의 30초는 크다. 근본 해결은 **"채점 결과는 즉시 반환하고,
-agent 결정은 별도 채널로 나중에 전달"**인데, 이건 backend 라우터와 frontend
-수신부를 같이 고쳐야 해서 이 파일 혼자 정할 수 없다. 그때가 오면 이
-클라이언트는 그대로 두고 호출 지점만 백그라운드로 옮기면 된다.
-
-중간 완화책(코드 수정 없이 가능):
-* `evaluation` 단계는 결정을 바꾸지 않고 메타데이터만 붙인다
-  (`backend_adapter.to_agent_decision` 참고). 빼면 약 1/4가 줄어든다.
-* `AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면 그냥 WAIT"로 흘려보낼 수
-  있다 — 개입을 포기하는 대신 응답 속도를 지키는 선택.
+더 줄이려면 state까지 합쳐서 LLM 호출을 1번으로 만들 수 있는데, "학생 상태
+판단"과 "지도 방법 결정"이 하나의 프롬프트에 뭉쳐져 판단이 덜 세밀해질 수
+있다. 근본적으로는 **"채점 결과는 즉시 반환하고, agent 결정은 별도 채널로
+나중에 전달"**이 맞는데, backend 라우터와 frontend 수신부를 같이 고쳐야 해서
+이 파일 혼자 정할 수 없다. `AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면
+그냥 WAIT"로 흘려보낼 수도 있다 — 개입을 포기하는 대신 응답 속도를 지키는 선택.
 """
 
 from __future__ import annotations
@@ -64,14 +64,13 @@ log = logging.getLogger(__name__)
 #: agent 서비스 주소. backend 프로세스의 환경변수로 덮어쓸 수 있다.
 DEFAULT_BASE_URL = "http://localhost:8100"
 
-#: LLM 파이프라인이 실제로 도는 시간. 4개 에이전트를 순차 호출한다.
+#: LLM 파이프라인이 실제로 도는 시간. state -> guided_action 2개를 순차 호출한다.
 #:
-#: **로컬 실측 28~30초** (Anthropic 다이렉트 API). 처음엔 15초로 잡았다가 매번
-#: ReadTimeout -> 항상 WAIT가 되는 걸 실제로 겪어서 실측 기반으로 올렸다.
-#: 짧게 잡으면 연결한 의미가 사라지고, 길게 잡으면 학생의 제출 응답이 그만큼
-#: 늦어진다 (위 "알려진 한계" 참고). 45초는 "실측 + 여유"이지 이상적인 값이
-#: 아니다 — 근본 해결은 비동기화다.
-DEFAULT_READ_TIMEOUT_SECONDS = 45.0
+#: **로컬 실측 16~18초** (Anthropic 다이렉트 API, guidance+action 병합 이후 —
+#: 병합 전엔 28~30초였다. 위 "알려진 한계" 참고). 처음엔 15초로 잡았다가 매번
+#: ReadTimeout -> 항상 WAIT가 되는 걸 실제로 겪어서 실측 기반으로 잡았다.
+#: 30초는 "실측 + 여유"이지 이상적인 값이 아니다 — 근본 해결은 비동기화다.
+DEFAULT_READ_TIMEOUT_SECONDS = 30.0
 
 #: 서비스가 안 떠 있는 경우를 빨리 포기하기 위한 값. 읽기 타임아웃과 분리한다.
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 0.5

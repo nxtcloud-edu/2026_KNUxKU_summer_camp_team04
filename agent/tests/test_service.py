@@ -71,6 +71,12 @@ def test_decide_returns_a_hint_when_the_pipeline_intervenes(client, monkeypatch)
         action_plan=ActionPlan(action_type="send_message", payload={}),
     )
     _wire_pipeline(monkeypatch, pipeline)
+    # action_plan이 있으면 백그라운드 evaluation이 걸린다 (아래
+    # test_decide_schedules_background_evaluation_without_blocking_response 참고)
+    # — 여기서는 그게 진짜 LLM을 부르지 않게만 막는다 (응답 검증이 이 테스트의 목적).
+    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
+
+    monkeypatch.setattr(evaluation_agent_module, "evaluate", MagicMock())
 
     response = client.post("/decide", json=CONTEXT)
 
@@ -93,6 +99,54 @@ def test_decide_returns_wait_when_the_pipeline_declines(client, monkeypatch) -> 
 
     assert body["action"] == "WAIT"
     assert body["activity"] is None
+
+
+def test_decide_schedules_background_evaluation_without_blocking_response(
+    client, monkeypatch
+) -> None:
+    """evaluation은 응답에 영향을 안 주지만, action_plan이 있으면 백그라운드로는
+    실제로 걸려야 한다 (완전히 빼먹은 게 아니라 "안 기다리는" 것이어야 함)."""
+    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
+    from tutor_agent.schemas import Evaluation
+
+    mock_evaluate = MagicMock(
+        return_value=Evaluation(effectiveness_score=0.9, notes="적절함", follow_up_needed=False)
+    )
+    monkeypatch.setattr(evaluation_agent_module, "evaluate", mock_evaluate)
+
+    pipeline = MagicMock()
+    pipeline.run.return_value = PipelineResult(
+        student_state=StudentState(state_summary="같은 오류 반복", should_intervene=True),
+        guidance_plan=GuidancePlan(approach="직접 힌트", message_draft="확인해보세요"),
+        action_plan=ActionPlan(action_type="send_message", payload={}),
+    )
+    _wire_pipeline(monkeypatch, pipeline)
+
+    response = client.post("/decide", json=CONTEXT)
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "HINT"  # 응답은 evaluation과 무관하게 즉시 나온다
+    mock_evaluate.assert_called_once()  # 그래도 백그라운드로는 실제로 호출됐다
+
+
+def test_decide_skips_background_evaluation_when_there_is_no_action_plan(
+    client, monkeypatch
+) -> None:
+    """WAIT라서 action_plan이 없으면 평가할 대상 자체가 없다 — 호출하지 않는다."""
+    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
+
+    mock_evaluate = MagicMock()
+    monkeypatch.setattr(evaluation_agent_module, "evaluate", mock_evaluate)
+
+    pipeline = MagicMock()
+    pipeline.run.return_value = PipelineResult(
+        student_state=StudentState(state_summary="순조롭습니다", should_intervene=False),
+    )
+    _wire_pipeline(monkeypatch, pipeline)
+
+    client.post("/decide", json=CONTEXT)
+
+    mock_evaluate.assert_not_called()
 
 
 def test_decide_returns_wait_instead_of_500_when_the_pipeline_explodes(

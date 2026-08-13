@@ -33,13 +33,20 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel, Field
 
 from .backend_adapter import get_backend_agent
 from .schemas import ReviewRequest, ValidationReport
 
 log = logging.getLogger(__name__)
+
+# uvicorn은 자기 로거(uvicorn/uvicorn.access/uvicorn.error)만 설정하고 앱 로거는
+# 안 건드린다. basicConfig를 안 하면 루트 로거에 핸들러가 없어서 Python의
+# "handler of last resort"가 WARNING 이상만 stderr로 흘려보낸다 — 그러면
+# `/decide`의 log.info("evaluation(백그라운드): ...")가 조용히 사라진다
+# (실제로 겪음: 백그라운드 태스크는 돌고 있는데 로그가 하나도 안 보였음).
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 #: backend가 기본으로 찾아오는 포트. 8000(backend) / 5173(frontend)과 겹치지 않게.
 DEFAULT_PORT = 8100
@@ -99,15 +106,28 @@ def health() -> dict:
 
 
 @app.post("/decide", response_model=DecideResponse)
-def decide(request: DecideRequest) -> DecideResponse:
+def decide(request: DecideRequest, background_tasks: BackgroundTasks) -> DecideResponse:
     """Monitor가 개입 시점이라고 판단했을 때 backend가 부르는 단일 진입점.
 
-    `TutorAgentAdapter.decide()`는 **어떤 경우에도 예외를 던지지 않고** 실패를
-    WAIT로 흘린다. 그래서 이 핸들러도 5xx를 내지 않는다 — backend는 항상
-    파싱 가능한 결정을 받는다 (네트워크 자체가 끊긴 경우만 클라이언트 쪽
-    폴백이 담당한다).
+    `TutorAgentAdapter.decide_with_pipeline_result()`는 **어떤 경우에도 예외를
+    던지지 않고** 실패를 WAIT로 흘린다. 그래서 이 핸들러도 5xx를 내지 않는다
+    — backend는 항상 파싱 가능한 결정을 받는다 (네트워크 자체가 끊긴 경우만
+    클라이언트 쪽 폴백이 담당한다).
+
+    evaluation은 응답을 반환한 **뒤에** 백그라운드로 돌린다 (`orchestrator.py`가
+    더 이상 동기로 부르지 않는 이유 참고 — 학생에게 보여줄 결정에 영향이
+    없는데 30초 파이프라인의 1/4을 더 기다리게 할 이유가 없다). 지금은 결과를
+    로그로만 남긴다 — 저장할 곳(분석 DB 등)이 아직 backend에 없어서다. 그게
+    생기면 `_log_evaluation`을 그쪽으로 보내는 걸로 바꾸면 된다.
     """
-    decision = get_backend_agent().decide(request.model_dump())
+    decision, pipeline_context = get_backend_agent().decide_with_pipeline_result(
+        request.model_dump()
+    )
+    if pipeline_context is not None:
+        session_ctx, result = pipeline_context
+        if result.action_plan is not None:
+            background_tasks.add_task(_log_evaluation, session_ctx, result.action_plan)
+
     return DecideResponse(
         state=decision.state,
         concept=decision.concept,
@@ -116,6 +136,28 @@ def decide(request: DecideRequest) -> DecideResponse:
         reason=decision.reason,
         activity=decision.activity,
     )
+
+
+def _log_evaluation(session_ctx: Any, action_plan: Any) -> None:
+    """방금 반환한 결정을 백그라운드에서 평가해 로그로 남긴다.
+
+    응답 경로 밖에서 실행되므로 여기서 걸리는 시간은 학생 대기 시간에
+    전혀 들어가지 않는다. 실패해도 아무 데도 영향 없음 — 로그만 남는다.
+    """
+    # 지연 import: 이 백그라운드 작업이 안 걸리면 evaluation_agent(=strands 호출)를
+    # import 시점에 끌어오지 않는다.
+    from .agents import evaluation_agent
+
+    try:
+        evaluation = evaluation_agent.evaluate(session_ctx, action_plan)
+        log.info(
+            "evaluation(백그라운드): score=%.2f follow_up_needed=%s notes=%s",
+            evaluation.effectiveness_score,
+            evaluation.follow_up_needed,
+            evaluation.notes,
+        )
+    except Exception:
+        log.exception("백그라운드 evaluation 실패 (응답에는 영향 없음)")
 
 
 @app.post("/generate-problem", response_model=ValidationReport)

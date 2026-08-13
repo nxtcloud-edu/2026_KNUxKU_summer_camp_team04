@@ -50,18 +50,26 @@ flowchart TD
     B -->|"세션 종료 / 쿨다운 / 신호 부족<br/>(LLM 미호출)"| STOP1((종료))
     B -->|"paste_detected<br/>(LLM 미호출)"| C
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=False"| STOP2((종료: 관찰만))
-    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 결정 에이전트<br/>GuidanceAgent"]
-    C --> D["행동 결정 에이전트<br/>ActionAgent"]
-    D --> E["평가 에이전트<br/>EvaluationAgent"]
-    E -.피드백.-> B
+    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 + 행동 결정 에이전트<br/>GuidedActionAgent"]
+    C -.응답 반환 후 백그라운드.-> F["평가 에이전트<br/>EvaluationAgent<br/>(로그만, 응답 안 기다림)"]
 ```
 
 | 단계 | 모듈 | 역할 | 출력(Pydantic) |
 |---|---|---|---|
 | 1 | `agents/state_agent.py` | 규칙 기반 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` |
-| 2 | `agents/guidance_agent.py` | 개입한다면 어떻게 지도할지 결정 | `GuidancePlan` |
-| 3 | `agents/action_agent.py` | 지도 방침이 정해졌을 때 실제로 무엇을 할지 결정 | `ActionPlan` |
-| 4 | `agents/evaluation_agent.py` | 실행한 행동의 결과를 평가 | `Evaluation` |
+| 2 | `agents/guided_action_agent.py` | 개입한다면 어떻게 지도할지 + 구체적으로 뭘 할지를 한 번에 결정 | `GuidedAction` |
+| (백그라운드) | `agents/evaluation_agent.py` | 방금 결정이 적절했는지 평가 (응답 반환 후, `service.py`가 `BackgroundTasks`로 호출) | `Evaluation` |
+
+원래는 `guidance_agent.py`(어떻게 가르칠지) → `action_agent.py`(뭘 할지)를
+LLM 호출 2번으로 나눠 물었는데, 강하게 결합된 하나의 판단이라 합쳤습니다
+(레이턴시 절감 — 아래 "backend 연결" 절의 "지연 시간" 참고).
+`orchestrator.py`가 `GuidedAction`을 `GuidancePlan`/`ActionPlan`으로 다시
+쪼개므로 `PipelineResult`의 모양과 `backend_adapter.py`는 이 변경을 모릅니다.
+두 모듈(`guidance_agent.py`, `action_agent.py`) 자체는 남겨뒀습니다(재사용/롤백용).
+
+`evaluation_agent.py`는 더 이상 이 파이프라인이 동기로 부르지 않습니다 —
+학생에게 보여줄 결정에 영향이 없는 로깅용 메타데이터였기 때문입니다. 응답을
+반환한 뒤 `service.py`가 백그라운드로 따로 호출합니다.
 
 공통 입력은 `schemas.py`의 `SessionContext`(학생 id, 문제 id, 현재 코드, 실행 기록,
 경과/유휴 시간, 마지막 에러 등)이며, 각 단계는 이전 단계의 구조화된 출력을 이어받습니다.
@@ -169,33 +177,45 @@ LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 �
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `AGENT_SERVICE_URL` | `http://localhost:8100` | agent 서비스 주소 |
-| `AGENT_SERVICE_TIMEOUT_SECONDS` | `45` | 읽기 타임아웃 (아래 지연 시간 참고) |
+| `AGENT_SERVICE_TIMEOUT_SECONDS` | `30` | 읽기 타임아웃 (아래 지연 시간 참고) |
 | `AGENT_SERVICE_CONNECT_TIMEOUT_SECONDS` | `0.5` | 연결 타임아웃 (서비스가 꺼져 있을 때 빨리 포기) |
 | `AGENT_WIRING` | `http` | `http` \| `inprocess` |
 
-#### ⏱️ 지연 시간 — **팀 결정이 필요합니다**
+#### ⏱️ 지연 시간
 
 로컬 실측 (Anthropic 다이렉트 API):
 
 | 상황 | `POST /sessions/{id}/submit` 응답 시간 |
 |---|---|
 | 평범한 제출 (Monitor 미발화) | **3.3 ~ 3.5초** (agent 호출 없음) |
-| Monitor 발화 → agent 호출 | **32초** |
+| Monitor 발화 → agent 호출 (개선 전, LLM 4회 순차) | ~~32초~~ |
+| Monitor 발화 → agent 호출 (지금, LLM 2회 순차) | **16 ~ 18초** |
 
-파이프라인이 LLM을 4번 순차 호출(state → guidance → action → evaluation)하기
-때문입니다. 대부분의 제출은 agent를 아예 안 부르므로 영향이 없지만, 발화된
-순간의 30초는 학생 입장에서 깁니다.
+처음엔 파이프라인이 LLM을 4번 순차 호출(state → guidance → action →
+evaluation)해서 28~30초가 걸렸다. 두 가지를 고쳤다:
 
-근본 해결은 **"채점 결과는 즉시 반환하고 agent 결정은 별도 채널로 나중에 전달"**
-인데, backend 라우터와 frontend 수신부를 같이 고쳐야 해서 agent/ 혼자 정할 수
-없습니다. 그때가 오면 `http_client`는 그대로 두고 호출 지점만 백그라운드로
-옮기면 됩니다.
+1. **guidance + action을 한 번의 LLM 호출로 합쳤다**
+   (`agents/guided_action_agent.py`, `schemas.GuidedAction`). "어떻게
+   가르칠지"와 "그래서 뭘 할지"는 강하게 결합된 하나의 판단이라 나눠 물을
+   이유가 약했다. `orchestrator.py`가 결과를 `GuidancePlan`/`ActionPlan`으로
+   다시 쪼개므로 `backend_adapter.py` 이하는 이 변경을 모른다.
+2. **evaluation을 응답 경로에서 뺐다.** 학생에게 보여줄 결정(action/reason)에
+   전혀 영향을 안 주는 로깅용 메타데이터였다(`backend_adapter.to_agent_decision`
+   참고). `orchestrator.TutorPipeline.run()`은 이제 이걸 동기로 안 부르고,
+   `service.py`의 `/decide`가 응답을 반환한 **뒤에** `BackgroundTasks`로
+   돌려서 로그만 남긴다 (`_log_evaluation`). 응답 시간에 전혀 안 들어간다 —
+   실제로 로그 타임스탬프가 "200 OK" 응답보다 몇 초 뒤에 찍히는 것까지 확인함.
 
-코드 수정 없이 가능한 중간 완화책:
-- `evaluation` 단계는 결정을 바꾸지 않고 메타데이터만 붙입니다
-  (`backend_adapter.to_agent_decision` 참고). 빼면 약 1/4가 줄어듭니다.
-- `AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면 그냥 WAIT"로 흘려보냅니다 —
-  개입을 포기하는 대신 응답 속도를 지키는 선택입니다.
+**남은 병목**: 4번 -> 2번으로 줄었지만 여전히 순차 호출 2번(state,
+guided_action)이라 16~18초가 걸린다. 더 줄이려면 state까지 합쳐서 1번으로
+만드는 방법이 있는데, 이건 "학생 상태 판단"과 "지도 방법 결정"을 하나의
+프롬프트/구조화 출력으로 묻는 거라 판단이 더 뭉쳐진다 (트레이드오프는 이
+README를 고친 커밋의 논의 참고). 근본적으로는 **"채점 결과는 즉시 반환하고
+agent 결정은 별도 채널로 나중에 전달"**이 맞는데, backend 라우터와 frontend
+수신부를 같이 고쳐야 해서 agent/ 혼자 정할 수 없다.
+
+`AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면 그냥 WAIT"로 흘려보낼 수도
+있다 — 개입을 포기하는 대신 응답 속도를 지키는 선택.
 
 ### 연결 방법 A: backend에서 한 줄 (⛔ 지금은 불가 — 위 의존성 충돌 참고)
 
@@ -358,22 +378,27 @@ agent/
 ├── src/tutor_agent/
 │   ├── schemas.py        # 파이프라인 전체가 공유하는 Pydantic 모델
 │   ├── models.py         # 모델 프로바이더 스위치 (env var 기반, 미정 상태 대응)
-│   ├── orchestrator.py   # 4개 에이전트를 잇는 TutorPipeline
+│   ├── orchestrator.py   # 2개 에이전트를 잇는 TutorPipeline (state -> guided_action)
 │   ├── service.py         # ★ agent를 별도 프로세스로 노출하는 HTTP 서비스 (현재 배선)
 │   ├── http_client.py     # ★ backend가 위 서비스를 부르는 AgentProtocol 클라이언트
 │   ├── backend_adapter.py # backend AgentProtocol 어댑터 (계약 미러 + 변환 + WAIT 폴백)
 │   ├── backend_entry.py   # backend 무수정 진입점 (get_agent를 위 둘 중 하나로 치환)
 │   ├── agents/            # 에이전트별 시스템 프롬프트 + build_agent()/실행 함수
-│   │   ├── state_agent.py # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
+│   │   ├── state_agent.py         # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
+│   │   ├── guided_action_agent.py # 지도 방법+행동 결정 (guidance+action 병합, 레이턴시 절감)
+│   │   ├── guidance_agent.py      # (더 이상 파이프라인이 안 씀, 재사용/롤백용으로 보존)
+│   │   ├── action_agent.py        # (더 이상 파이프라인이 안 씀, 재사용/롤백용으로 보존)
+│   │   ├── evaluation_agent.py    # 응답 반환 후 service.py가 백그라운드로만 호출
 │   │   └── problem_generator_agent.py  # 오답/복습 기반 문제 생성 (judge로 검증)
 │   └── tools/             # 에이전트가 쓸 Strands @tool 함수
 │       └── judge_validator.py          # judge 샌드박스로 생성 문제 검증
 ├── examples/run_session_demo.py   # 전체 파이프라인 실행 예시 (struggle/skip/paste 3종)
 ├── tests/
 │   ├── test_state_agent.py      # 규칙 게이트 + assess() 분기 테스트 (LLM 없음, mock)
+│   ├── test_guided_action_agent.py  # guided_action_agent 스모크 테스트 (mock)
 │   ├── test_orchestrator.py     # 분기 로직 스모크 테스트 (LLM 호출 없이 mock)
 │   ├── test_backend_adapter.py  # backend 계약 변환/폴백 + 미러 드리프트 검사 (mock)
-│   ├── test_service.py          # HTTP 서비스 계약 (5xx 안 냄, 필드 누락 허용)
+│   ├── test_service.py          # HTTP 서비스 계약 (5xx 안 냄, 필드 누락 허용, 백그라운드 evaluation)
 │   ├── test_http_client.py      # 모든 실패 모드 -> WAIT 폴백 (MockTransport)
 │   └── test_problem_generator*.py  # 문제 생성 (mock + 실제 judge/Docker 통합)
 ├── pyproject.toml

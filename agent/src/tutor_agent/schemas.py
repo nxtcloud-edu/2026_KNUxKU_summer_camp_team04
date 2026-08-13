@@ -83,7 +83,14 @@ class StudentState(BaseModel):
 
 
 class GuidancePlan(BaseModel):
-    """개입 시 어떻게 지도할지 결정하는 에이전트의 출력."""
+    """개입 시 어떻게 지도할지 결정하는 에이전트의 출력.
+
+    지금은 LLM이 직접 이 모양으로 반환하지 않는다 — `GuidedAction`을 한 번에
+    받아서 `orchestrator.py`가 이 모양으로 쪼갠다 (레이턴시 단축을 위해
+    guidance+action을 LLM 호출 1번으로 합쳤다). `PipelineResult`의 필드
+    모양과 `backend_adapter.to_agent_decision()`을 그대로 유지하기 위해
+    타입 자체는 남겨둔다.
+    """
 
     approach: str = Field(description="예: 소크라테스식 질문, 직접 힌트, 개념 재설명 등")
     hint_level: Literal["nudge", "hint", "explain"] = "nudge"
@@ -91,8 +98,33 @@ class GuidancePlan(BaseModel):
 
 
 class ActionPlan(BaseModel):
-    """지도 방침이 정해졌을 때 무엇을 할지 결정하는 에이전트의 출력."""
+    """지도 방침이 정해졌을 때 무엇을 할지 결정하는 에이전트의 출력.
 
+    `GuidancePlan`과 같은 사정 — 지금은 `GuidedAction`에서 쪼개져 나온다.
+    """
+
+    action_type: Literal["send_message", "highlight_code", "show_example", "no_op"]
+    payload: dict = Field(default_factory=dict)
+
+
+class GuidedAction(BaseModel):
+    """지도 방법 + 구체적 행동을 한 번의 LLM 호출로 함께 결정하는 출력.
+
+    이전에는 GuidancePlan(어떻게 가르칠지) -> ActionPlan(뭘 할지)을 LLM
+    호출 2번으로 나눠 물었다. 둘은 강하게 결합된 하나의 판단이라("소크라테스식
+    질문으로 가겠다"와 "그래서 보낼 메시지는 이거다"를 따로 물을 이유가 약함)
+    합쳤다 — 파이프라인 전체 LLM 호출이 4번 -> 2번으로 줄어 레이턴시가 준다
+    (실측: 로컬에서 순차 4회 호출 시 28~30초, 근거는
+    agent/README.md의 "지연 시간" 절 참고).
+
+    `orchestrator.py`가 이 출력을 `GuidancePlan`/`ActionPlan`으로 쪼개서
+    `PipelineResult`에 담는다 — `backend_adapter.to_agent_decision()`을
+    포함한 하류 코드는 이 변경을 몰라도 된다.
+    """
+
+    approach: str = Field(description="예: 소크라테스식 질문, 직접 힌트, 개념 재설명 등")
+    hint_level: Literal["nudge", "hint", "explain"] = "nudge"
+    message_draft: str
     action_type: Literal["send_message", "highlight_code", "show_example", "no_op"]
     payload: dict = Field(default_factory=dict)
 
