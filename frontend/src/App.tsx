@@ -17,7 +17,6 @@ import {
   Send,
   Sun,
   Terminal,
-  UserRound,
   Waypoints,
 } from 'lucide-react'
 import LoginPage from './LoginPage'
@@ -181,10 +180,6 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
           <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
             <img src="/TUTORY_logo.svg" alt="" />
           </button>
-          <button className="mypage-trigger" onClick={() => setActivity('mypage')}>
-            <UserRound size={16} />
-            마이페이지
-          </button>
         </div>
         <div className="topbar-actions">
           <div className={`runtime-pill ${runtimeStatus}`}>
@@ -233,8 +228,8 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
       </header>
 
       {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
-        : activity === 'mypage' ? <MyPage onExit={() => setActivity('problem')} />
-        : activity === 'list' ? <ProblemList onExit={() => setActivity('problem')} onSelect={selectProblem} /> : (
+        : activity === 'mypage' ? <MyPage />
+        : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
 
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
