@@ -173,11 +173,10 @@ function LearningWorkspace() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#" aria-label="TUTORY 홈">
+        <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
           <img src="/TUTORY_logo.svg" alt="" />
-        </a>
+        </button>
         <div className="topbar-actions">
-          <button className="problem-list-trigger" onClick={() => setActivity('list')}><BookOpen size={16} /> 문제 목록</button>
           <div className={`runtime-pill ${runtimeStatus}`}>
             <span className="status-dot" />
             {runtimeStatus === 'loading' && 'Python 준비 중'}
