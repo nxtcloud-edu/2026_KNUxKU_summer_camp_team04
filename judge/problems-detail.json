@@ -1,0 +1,574 @@
+[
+  {
+    "problem_id": "func_count_positive",
+    "title": "양수 개수 세기",
+    "description": "## 문제\n정수로 이루어진 리스트 `arr`가 주어진다. 리스트에서 0보다 큰(양수) 원소의 개수를 반환하는 함수 `count_positive(arr)`를 작성하시오.\n\n## 입력\n`arr`: 정수로 이루어진 리스트\n\n## 출력\n`arr`에서 양수인 원소의 개수",
+    "concept": [
+      "loop",
+      "function",
+      "conditional"
+    ],
+    "check_type": "function_call",
+    "function_name": "count_positive",
+    "code_template": "def count_positive(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+    "public_test_cases": [
+      {
+        "input": [
+          [
+            1,
+            -2,
+            3,
+            -4,
+            5
+          ]
+        ],
+        "expected": 3,
+        "category": "basic"
+      }
+    ]
+  },
+  {
+    "problem_id": "func_find_max",
+    "title": "최댓값 찾기",
+    "description": "## 문제\n정수로 이루어진 리스트 `arr`가 주어진다. 리스트에서 가장 큰 값을 반환하는 함수 `find_max(arr)`를 작성하시오.\n\n## 입력\n`arr`: 정수로 이루어진 리스트 (최소 1개 이상의 원소를 가짐)\n\n## 출력\n`arr`에서 가장 큰 정수",
+    "concept": [
+      "loop",
+      "function",
+      "comparison"
+    ],
+    "check_type": "function_call",
+    "function_name": "find_max",
+    "code_template": "def find_max(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+    "public_test_cases": [
+      {
+        "input": [
+          [
+            3,
+            1,
+            4,
+            1,
+            5
+          ]
+        ],
+        "expected": 5,
+        "category": "basic"
+      }
+    ]
+  },
+  {
+    "problem_id": "func_sum_list",
+    "title": "리스트 합 구하기",
+    "description": "## 문제\n정수로 이루어진 리스트 `arr`가 주어진다. 리스트에 있는 모든 정수의 합을 구하는 함수 `sum_list(arr)`를 작성하시오.\n\n## 입력\n`arr`: 정수로 이루어진 리스트 (빈 리스트일 수도 있음)\n\n## 출력\n`arr`에 있는 모든 정수의 합 (정수)",
+    "concept": [
+      "loop",
+      "function"
+    ],
+    "check_type": "function_call",
+    "function_name": "sum_list",
+    "code_template": "def sum_list(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+    "public_test_cases": [
+      {
+        "input": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": 6,
+        "category": "basic"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_bigger_number",
+    "title": "더 큰 수는?",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n두 정수 `A`, `B`가 주어진다.\n\n`B`가 `A`보다 크면 `1`, 아니면 `0`을 출력하시오.\n\n## 입력\n한 줄에 두 정수 `A`, `B`가 공백으로 구분되어 주어진다.\n\n## 출력\n`B`가 `A`보다 크면 `1`, 아니면 `0`을 출력한다.\n\n## 제한\n- `-10^9 <= A, B <= 10^9`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "10 -3\n",
+        "expected_stdout": "0\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "3 8\n",
+        "expected_stdout": "1\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_bit_is_on",
+    "title": "비트 켜져 있나요?",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n정수 `N`과 비트 위치 `K`가 주어진다.\n\n`N`의 **오른쪽에서부터 `K`번째 비트**가 `1`이면 `1`, 아니면 `0`을 출력하시오.\n\n비트 위치는 `0`부터 시작한다.  \n즉, 가장 오른쪽 비트가 `0`번째 비트이다.\n\n## 입력\n한 줄에 두 정수 `N`, `K`가 공백으로 구분되어 주어진다.\n\n## 출력\n`K`번째 비트가 `1`이면 `1`, 아니면 `0`을 출력한다.\n\n## 제한\n- `0 <= N <= 2^31 - 1`\n- `0 <= K <= 30`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "13 0\n",
+        "expected_stdout": "1\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "13 1\n",
+        "expected_stdout": "0\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_classify_three_numbers",
+    "title": "세 수를 조건으로 분류하기",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n세 정수 `A`, `B`, `C`가 주어진다.\n\n다음 규칙에 따라 하나의 문자열을 출력하시오.\n\n- 세 수가 모두 같으면 `ALL`\n- 정확히 두 수만 같으면 `TWO`\n- 세 수가 모두 다르면 `NONE`\n\n## 입력\n한 줄에 세 정수 `A`, `B`, `C`가 공백으로 구분되어 주어진다.\n\n## 출력\n규칙에 맞는 문자열을 출력한다.\n\n## 제한\n- `-10^9 <= A, B, C <= 10^9`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "5 5 5\n",
+        "expected_stdout": "ALL\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "7 3 7\n",
+        "expected_stdout": "TWO\n",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "1 2 3\n",
+        "expected_stdout": "NONE\n",
+        "category": "sample_3"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_countdown",
+    "title": "N부터 1까지 출력",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`부터 `1`까지의 정수를 큰 수에서 작은 수 순서로 출력하시오.\n\n각 수는 공백 하나로 구분한다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N N-1 ... 1`을 공백으로 구분하여 출력한다.\n\n## 제한\n- `1 <= N <= 1000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "1\n",
+        "expected_stdout": "1\n",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "4\n",
+        "expected_stdout": "4 3 2 1\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_digitcount",
+    "title": "숫자 개수 세기",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`이 몇 자리 수인지 출력하시오.\n\n예를 들어:\n- `7`은 1자리 수\n- `10`은 2자리 수\n- `1234`는 4자리 수\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N`의 자릿수를 출력한다.\n\n## 제한\n- `1 <= N <= 1000000000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "7\n",
+        "expected_stdout": "1\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_discount_shop",
+    "title": "할인 규칙이 많은 상점",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n상점에서 물건을 `N`개 구매한다. 물건 하나의 가격은 `P`원이다.\n\n다음 규칙에 따라 최종 결제 금액을 구하시오.\n\n1. 기본 금액은 `P × N`이다.\n2. `N >= 10`이면 **기본 금액의 5%를 할인**한다.\n3. `P >= 5000`이면 **추가로 1000원 할인**한다.\n4. 할인은 위 순서대로 적용한다.\n5. 최종 결제 금액은 0 미만이 될 수 없다.\n\n퍼센트 할인에서 소수점 이하는 버린다.  \n즉, 5% 할인 금액은 `floor(기본 금액 × 0.05)`이다.\n\n## 입력\n한 줄에 두 정수 `P`, `N`이 공백으로 구분되어 주어진다.\n\n## 출력\n최종 결제 금액을 출력한다.\n\n## 제한\n- `0 <= P <= 100000`\n- `0 <= N <= 1000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "5000 10\n",
+        "expected_stdout": "46500\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "300 2\n",
+        "expected_stdout": "600\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_divisorcount",
+    "title": "약수의 개수",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`의 **양의 약수**의 개수를 출력하시오.\n\n양의 약수란, `N`을 나누었을 때 나머지가 `0`이 되는 양의 정수를 뜻한다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N`의 양의 약수의 개수를 출력한다.\n\n## 제한\n- `1 <= N <= 100000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "12\n",
+        "expected_stdout": "6",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "13\n",
+        "expected_stdout": "2",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_evenoddstripe",
+    "title": "홀짝 줄무늬 출력",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`번 줄부터 `N`번 줄까지 다음 규칙에 따라 출력하시오.\n\n- `i`가 **홀수**이면, 정수 `i`를 **공백 없이 이어서** `i`번 출력한다.\n- `i`가 **짝수**이면, 정수 `i`를 **한 칸 공백으로 구분하여** `i`번 출력한다.\n\n즉,\n- 1번 줄에는 `1`\n- 2번 줄에는 `2 2`\n- 3번 줄에는 `333`\n- 4번 줄에는 `4 4 4 4`\n와 같은 형식이 된다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n조건에 맞는 총 `N`개의 줄을 출력한다.  \n짝수 줄에서는 같은 줄의 숫자 사이를 정확히 한 칸의 공백으로 구분한다.  \n줄 끝에는 불필요한 공백이 없도록 출력한다.\n\n## 제한\n- `1 <= N <= 15`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "4\n",
+        "expected_stdout": "1\n2 2\n333\n4 4 4 4",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "5\n",
+        "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_flip_kth_bit",
+    "title": "K번째 비트 뒤집기",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n정수 `N`과 비트 위치 `K`가 주어진다.\n\n`N`의 **오른쪽에서부터 `K`번째 비트**를 뒤집은 결과를 출력하시오.\n\n비트 위치는 `0`부터 시작한다.  \n즉, 가장 오른쪽 비트가 `0`번째 비트이다.\n\n## 입력\n한 줄에 두 정수 `N`, `K`가 공백으로 구분되어 주어진다.\n\n## 출력\n`K`번째 비트를 뒤집은 뒤의 정수를 출력한다.\n\n## 제한\n- `0 <= N <= 2^31 - 1`\n- `0 <= K <= 30`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "10 1\n",
+        "expected_stdout": "8\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_leap_year",
+    "title": "윤년 판별",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n연도 `Y`가 주어진다.\n\n다음 규칙에 따라 윤년이면 `Leap`, 평년이면 `Common`을 출력하시오.\n\n- 400의 배수이면 윤년이다.\n- 100의 배수이지만 400의 배수는 아니면 평년이다.\n- 4의 배수이지만 100의 배수는 아니면 윤년이다.\n- 그 외에는 평년이다.\n\n## 입력\n연도 `Y`가 한 줄에 주어진다.\n\n## 출력\n윤년이면 `Leap`, 평년이면 `Common`을 출력한다.\n\n## 제한\n- `1 <= Y <= 100000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "2024\n",
+        "expected_stdout": "Leap\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "1900\n",
+        "expected_stdout": "Common\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_multiplicationtable",
+    "title": "구구단 한 단 출력",
+    "description": "## 문제\n정수 `D`가 주어진다.  \n`D × 1`부터 `D × 9`까지를 아래 형식에 맞추어 출력하시오.\n\n각 줄의 형식은 다음과 같다.\n\n`D x i = 결과`\n\n여기서 `i`는 `1`부터 `9`까지 증가한다.\n\n## 입력\n첫째 줄에 정수 `D`가 주어진다.\n\n## 출력\n총 9개의 줄에 걸쳐, 다음 형식으로 출력한다.\n\n- 첫째 줄: `D x 1 = D`\n- 둘째 줄: `D x 2 = 2D`\n- ...\n- 아홉째 줄: `D x 9 = 9D`\n\n## 제한\n- `-100 <= D <= 100`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "5\n",
+        "expected_stdout": "5 x 1 = 5\n5 x 2 = 10\n5 x 3 = 15\n5 x 4 = 20\n5 x 5 = 25\n5 x 6 = 30\n5 x 7 = 35\n5 x 8 = 40\n5 x 9 = 45\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "-3\n",
+        "expected_stdout": "-3 x 1 = -3\n-3 x 2 = -6\n-3 x 3 = -9\n-3 x 4 = -12\n-3 x 5 = -15\n-3 x 6 = -18\n-3 x 7 = -21\n-3 x 8 = -24\n-3 x 9 = -27\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_odd_detector",
+    "title": "홀수 판별기",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n정수 `N`이 주어진다.\n\n`N`이 홀수이면 `1`, 짝수이면 `0`을 출력하시오.\n\n## 입력\n정수 `N`이 한 줄에 주어진다.\n\n## 출력\n홀수이면 `1`, 짝수이면 `0`을 출력한다.\n\n## 제한\n- `-10^9 <= N <= 10^9`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "7\n",
+        "expected_stdout": "1\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "12\n",
+        "expected_stdout": "0\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_perfectnumber",
+    "title": "완전수 판별",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`의 **자기 자신을 제외한 양의 약수들의 합**이 정확히 `N`과 같으면 `PERFECT`, 아니면 `NOT PERFECT`를 출력하시오.\n\n예를 들어 `6`의 자기 자신을 제외한 양의 약수는 `1, 2, 3`이고,  \n이들의 합은 `1 + 2 + 3 = 6` 이므로 `6`은 완전수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n`N`이 완전수이면 `PERFECT`, 아니면 `NOT PERFECT`를 출력한다.\n\n## 제한\n- `1 <= N <= 100000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "6\n",
+        "expected_stdout": "PERFECT",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "12\n",
+        "expected_stdout": "NOT PERFECT",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_prefixthreshold",
+    "title": "합이 처음으로 N 이상이 되는 순간",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1 + 2 + 3 + ...` 을 차례대로 더해 나갈 때, 누적합이 **처음으로 `N` 이상이 되는 순간**의 마지막 수 `i`를 출력하시오.\n\n즉, 다음을 만족하는 가장 작은 자연수 `i`를 찾아 출력하면 된다.\n\n- `1 + 2 + ... + i >= N`\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 조건을 처음 만족시키는 마지막 수 `i`를 출력한다.\n\n## 제한\n- `1 <= N <= 1000000000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "10\n",
+        "expected_stdout": "4\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "11\n",
+        "expected_stdout": "5\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_primecount",
+    "title": "소수의 개수",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 자연수 중 소수의 개수를 출력하시오.\n\n소수란 `1`보다 크고, `1`과 자기 자신만을 약수로 가지는 자연수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지 존재하는 소수의 개수를 출력한다.\n\n## 제한\n- `1 <= N <= 5000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "11\n",
+        "expected_stdout": "5",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_primelist",
+    "title": "소수만 출력하기",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 자연수 중 **소수(prime number)** 만 골라서 오름차순으로 출력하시오.\n\n소수란 `1`보다 크고, `1`과 자기 자신만을 약수로 가지는 자연수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N` 이하의 모든 소수를 오름차순으로 출력한다.  \n여러 개의 수를 출력할 때는 **한 칸의 공백**으로 구분한다.\n\n출력할 소수가 하나도 없다면 **아무 것도 출력하지 않는다.**\n\n## 제한\n- `1 <= N <= 5000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "1\n",
+        "expected_stdout": "",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "11\n",
+        "expected_stdout": "2 3 5 7 11",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_printevens",
+    "title": "짝수만 출력하기",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 정수 중 짝수만 오름차순으로 출력하시오.\n\n각 수는 공백 하나로 구분한다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지의 짝수를 공백으로 구분하여 출력한다.  \n출력할 짝수가 하나도 없다면 아무 것도 출력하지 않는다.\n\n## 제한\n- `1 <= N <= 1000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "1\n",
+        "expected_stdout": "",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "10\n",
+        "expected_stdout": "2 4 6 8 10\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_reverseinteger",
+    "title": "정수 뒤집기",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`의 각 자릿수를 반대로 뒤집은 값을 출력하시오.\n\n출력은 **정수 형태**로 한다.  \n따라서 뒤집은 결과의 앞부분에 생기는 `0`은 출력하지 않는다.\n\n예를 들어:\n- `1234`를 뒤집으면 `4321`\n- `1200`을 뒤집으면 `0021`이 아니라 정수 `21`\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N`을 뒤집은 정수를 출력한다.\n\n## 제한\n- `1 <= N <= 1000000000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "1234\n",
+        "expected_stdout": "4321\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_skipmultiples",
+    "title": "3의 배수 건너뛰기",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 정수 중에서 **3의 배수는 제외하고** 나머지 수만 오름차순으로 출력하시오.\n\n각 수는 공백 하나로 구분한다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지의 수 중 `3`의 배수를 제외한 수를 공백으로 구분하여 출력한다.\n\n## 제한\n- `1 <= N <= 1000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "3\n",
+        "expected_stdout": "1 2\n",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "10\n",
+        "expected_stdout": "1 2 4 5 7 8 10\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_sort_three_numbers",
+    "title": "세 수 정렬",
+    "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n세 정수 `A`, `B`, `C`가 주어진다.\n\n이 세 수를 오름차순으로 정렬하여 출력하시오.\n\n## 입력\n한 줄에 세 정수 `A`, `B`, `C`가 공백으로 구분되어 주어진다.\n\n## 출력\n세 수를 오름차순으로 정렬한 결과를 공백으로 구분하여 출력한다.\n\n## 제한\n- `-10^9 <= A, B, C <= 10^9`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1.0,
+    "memory_limit_mb": 128,
+    "public_test_cases": [
+      {
+        "stdin": "15 20 3\n",
+        "expected_stdout": "3 15 20\n",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "5 7 5\n",
+        "expected_stdout": "5 5 7\n",
+        "category": "sample_2"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_sumton",
+    "title": "1부터 N까지의 합",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 모든 정수를 더한 값을 출력하시오.\n\n예를 들어 `N = 5`이면 `1 + 2 + 3 + 4 + 5 = 15` 이므로 정답은 `15`이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지의 합을 출력한다.\n\n## 제한\n- `1 <= N <= 50000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "1\n",
+        "expected_stdout": "1\n",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "5\n",
+        "expected_stdout": "15\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_sumuntilzero",
+    "title": "0이 나올 때까지 합 구하기",
+    "description": "## 문제\n정수들이 한 줄에 하나씩 입력된다.  \n`0`이 입력될 때까지 입력된 정수들의 합을 출력하시오.\n\n단, 마지막에 입력되는 `0`은 합에 포함하지 않는다.\n\n## 입력\n여러 줄에 걸쳐 정수가 주어진다.  \n마지막 줄에는 반드시 `0`이 주어진다.\n\n## 출력\n첫째 줄에 `0`이 나오기 전까지 입력된 정수들의 합을 출력한다.\n\n## 제한\n- 입력되는 정수의 개수는 `1`개 이상 `1000`개 이하이다.  \n  (마지막 `0` 포함)\n- 각 정수는 `-1000000` 이상 `1000000` 이하이다.",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "0\n",
+        "expected_stdout": "0\n",
+        "category": "sample_2"
+      },
+      {
+        "stdin": "10\n5\n-3\n0\n",
+        "expected_stdout": "12\n",
+        "category": "sample_1"
+      }
+    ]
+  },
+  {
+    "problem_id": "stdout_threesixninecount",
+    "title": "369 카운트",
+    "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 수 중에서, **각 자릿수에 `3`, `6`, `9`가 하나라도 포함된 수**의 개수를 출력하시오.\n\n예를 들어 `13`은 일의 자리가 `3`이므로 조건을 만족하고,  \n`26`은 일의 자리가 `6`이므로 조건을 만족한다.  \n반면 `25`는 어떤 자릿수에도 `3`, `6`, `9`가 없으므로 조건을 만족하지 않는다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 조건을 만족하는 수의 개수를 출력한다.\n\n## 제한\n- `1 <= N <= 100000`",
+    "concept": [],
+    "check_type": "stdout_match",
+    "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+    "time_limit_sec": 1,
+    "memory_limit_mb": 256,
+    "public_test_cases": [
+      {
+        "stdin": "9\n",
+        "expected_stdout": "3",
+        "category": "sample_1"
+      },
+      {
+        "stdin": "40\n",
+        "expected_stdout": "19",
+        "category": "sample_2"
+      }
+    ]
+  }
+]

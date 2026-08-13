@@ -68,6 +68,14 @@ def list_all_problems() -> list:
     return problems
 
 
+def get_problem_detail(problem_id: str) -> dict:
+    """프론트 API용 - 문제 풀이 화면에 필요한 정보(지문/코드 템플릿/공개
+    테스트케이스)만 반환. hidden_test_cases는 절대 포함하지 않는다
+    (정답이 노출되면 안 되니까)."""
+    problem = load_problem(problem_id)
+    return {k: v for k, v in problem.items() if k != "hidden_test_cases"}
+
+
 def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
     """학생 코드를 채점한다.
 
