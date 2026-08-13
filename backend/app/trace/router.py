@@ -8,8 +8,10 @@ from sqlmodel import Session as DbSession
 from app.agent import AgentProtocol, get_agent
 from app.agent.context import build_context
 from app.clock import to_naive_utc, utcnow
+from app.auth.deps import get_current_user
 from app.db import get_db
 from app.enums import SessionStatus
+from app.models import User
 from app.errors import SnapshotNotFound
 from app.problems.service import ProblemRepository, get_problem_repository
 from app.sessions import store
@@ -93,9 +95,10 @@ def _state_response(session_id: str, state: monitor.ProcessState) -> ProcessStat
 def post_events(
     session_id: str,
     body: EventBatchIn,
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> EventIngestResponse:
-    session = store.require_session(db, session_id)
+    session = store.require_session(db, session_id, user_id=user.id)
     accepted, duplicates = trace_service.ingest_events(db, session, body.events)
     return EventIngestResponse(
         accepted=[EventRead.from_row(e) for e in accepted],
@@ -114,9 +117,10 @@ def get_events(
     session_id: str,
     since_seq: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> EventListResponse:
-    session = store.require_session(db, session_id)
+    session = store.require_session(db, session_id, user_id=user.id)
     rows = trace_service.events_since(db, session_id, since_seq=since_seq, limit=limit)
     return EventListResponse(
         session_id=session_id,
@@ -127,71 +131,20 @@ def get_events(
 
 
 # ------------------------------------------------------------------ Judge 결과
-
-
-@router.post(
-    "/sessions/{session_id}/results",
-    response_model=ResultIngestResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def post_result(
-    session_id: str,
-    body: JudgeResultIn,
-    db: DbSession = Depends(get_db),
-    repo: ProblemRepository = Depends(get_problem_repository),
-    agent: AgentProtocol = Depends(get_agent),
-) -> ResultIngestResponse:
-    """브라우저 Pyodide 채점 결과를 받는 입구. **파이프라인의 척추다.**
-
-        TEST_RESULT 기록 -> feature 재계산 -> monitor.evaluate_and_record()
-          -> (trigger 있으면) AGENT_TRIGGER 기록 -> agent.decide() -> 응답
-
-    backend_plan §20 계약에는 없던 엔드포인트다. 오늘 Pyodide가 클라이언트에서 채점하므로
-    결과가 들어올 입구가 필요하다. 서버 judge가 붙으면 POST /run이 같은 내부 함수를 쓴다.
-    """
-    session = store.require_session(db, session_id)
-    now = utcnow()
-
-    event = trace_service.record_judge_result(
-        db,
-        session,
-        mode=body.mode,
-        status=body.status.value,
-        passed=body.passed,
-        total=body.total,
-        runtime_ms=body.runtime_ms,
-        message=body.message,
-        failed_categories=body.failed_categories,
-        code_version=body.code_version,
-        client_event_id=body.client_event_id,
-        client_timestamp=to_naive_utc(body.client_timestamp),
-        now=now,
-    )
-
-    state = monitor.evaluate_and_record(db, session, now=now)
-
-    decision: AgentDecisionRead | None = None
-    if state.triggered:
-        # backend_plan §14: Judge 결과는 Agent 실패와 무관하게 반드시 반환한다.
-        try:
-            ctx = build_context(db, session_id, repo, state=state, now=now)
-            d = agent.decide(ctx)
-            decision = AgentDecisionRead(
-                state=d.state,
-                concept=d.concept,
-                action=d.action.value,
-                reason=d.reason,
-                activity=d.activity,
-            )
-        except Exception:  # noqa: BLE001 - agent 실패가 채점 결과를 막으면 안 된다
-            log.exception("agent decide 실패 (session=%s)", session_id)
-            decision = None
-
-    return ResultIngestResponse(
-        event=EventRead.from_row(event),
-        process_state=_state_response(session_id, state),
-        agent_decision=decision,
-    )
+#
+# POST /sessions/{id}/results 는 **제거됐다.**
+#
+# 클라이언트가 보고한 채점 결과를 그대로 기록하던 엔드포인트다. Pyodide가
+# 브라우저에서 채점하던 시절의 입구였는데, 지금은 두 가지가 바뀌었다.
+#
+#   1. 프런트가 더 이상 쓰지 않는다. 채점은 POST /sessions/{id}/run|submit 로
+#      가고 서버가 Docker judge 를 직접 돌린다.
+#   2. 도토리가 정답 기준으로 지급된다. 클라이언트가 status 를 정할 수 있으면
+#      curl 한 줄로 {"status":"ACCEPTED"} 를 보내 무한히 획득할 수 있다.
+#
+# "채점 결과를 프런트가 조작해 도토리를 요청할 수 없도록 서버의 ACCEPTED 결과를
+# 기준으로 지급한다"는 요구사항은 **이 입구가 없어야** 성립한다.
+# 클라이언트 채점을 다시 도입한다면 보상과 진행 상태 갱신을 반드시 분리할 것.
 
 
 # ------------------------------------------------------------------ Process State
@@ -199,13 +152,19 @@ def post_result(
 
 @router.get("/sessions/{session_id}/process-state", response_model=ProcessStateResponse)
 def get_process_state(
-    session_id: str, db: DbSession = Depends(get_db)
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
 ) -> ProcessStateResponse:
     """읽기 전용. evaluate()만 부르고 evaluate_and_record()는 절대 부르지 않는다.
 
     데모 패널이 이걸 폴링한다. GET이 AGENT_TRIGGER를 쓰면 cooldown을 소진해
     정작 agent를 불러야 할 Run이 cooldown에 걸린다 (monitor.py 상단 참조).
     """
+    # monitor.evaluate()가 내부에서 세션을 다시 조회하지만 소유권은 보지 않는다.
+    # 여기서 먼저 막지 않으면 남의 session_id로 그 사람의 학습 상태(막힘 여부,
+    # 근거 문자열, feature 전체)를 읽을 수 있다.
+    store.require_session(db, session_id, user_id=user.id)
     return _state_response(session_id, monitor.evaluate(db, session_id))
 
 
@@ -216,9 +175,10 @@ def get_process_state(
 def get_timeline(
     session_id: str,
     collapse: bool = Query(default=True),
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> TimelineResponse:
-    session = store.require_session(db, session_id)
+    session = store.require_session(db, session_id, user_id=user.id)
     events = trace_service.all_events(db, session_id)
     return build_timeline(session, events, collapse=collapse)
 
@@ -243,9 +203,11 @@ def _snapshot_summary(s) -> SnapshotSummary:  # type: ignore[no-untyped-def]
 
 @router.get("/sessions/{session_id}/snapshots", response_model=list[SnapshotSummary])
 def list_snapshots(
-    session_id: str, db: DbSession = Depends(get_db)
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
 ) -> list[SnapshotSummary]:
-    store.require_session(db, session_id)
+    store.require_session(db, session_id, user_id=user.id)
     # code는 뺀다 -- 목록이 커지면 안 된다.
     return [_snapshot_summary(s) for s in store.all_snapshots(db, session_id)]
 
@@ -254,9 +216,12 @@ def list_snapshots(
     "/sessions/{session_id}/snapshots/{version}", response_model=SnapshotRead
 )
 def get_snapshot(
-    session_id: str, version: int, db: DbSession = Depends(get_db)
+    session_id: str,
+    version: int,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
 ) -> SnapshotRead:
-    store.require_session(db, session_id)
+    store.require_session(db, session_id, user_id=user.id)
     s = store.snapshot_at(db, session_id, version)
     if s is None:
         raise SnapshotNotFound(session_id, version)
@@ -272,9 +237,10 @@ def get_snapshot_diff(
     session_id: str,
     version: int,
     from_version: int | None = Query(default=None, alias="from"),
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> DiffRead:
-    store.require_session(db, session_id)
+    store.require_session(db, session_id, user_id=user.id)
     target = store.snapshot_at(db, session_id, version)
     if target is None:
         raise SnapshotNotFound(session_id, version)

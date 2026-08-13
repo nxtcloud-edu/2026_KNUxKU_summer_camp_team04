@@ -17,7 +17,10 @@ from app.clock import utcnow
 from app.enums import EventSource
 from app.errors import InvalidCodeVersion, SnapshotNotFound
 from app.judge import JudgeMode, JudgeProtocol, get_judge
+from app.auth.deps import get_current_user
 from app.db import get_db
+from app.models import User
+from app.progress import service as progress_service
 from app.problems.service import ProblemRepository, get_problem_repository
 from app.sessions import store
 from app.trace import monitor
@@ -38,12 +41,13 @@ def _execute(
     session_id: str,
     body: RunRequest,
     mode: JudgeMode,
+    user: User,
     db: DbSession,
     repo: ProblemRepository,
     judge: JudgeProtocol,
     agent: AgentProtocol,
 ) -> ResultIngestResponse:
-    session = store.require_session(db, session_id)
+    session = store.require_session(db, session_id, user_id=user.id)
     problem = repo.get(session.problem_id)
     now = utcnow()
 
@@ -87,6 +91,21 @@ def _execute(
         now=now,
     )
 
+    # 진행 상태 갱신 + 최초 정답 시 도토리 지급.
+    # **여기가 유일한 지급 지점이다.** 이 경로의 result 는 서버가 실행한 judge 에서
+    # 왔으므로 클라이언트가 조작할 수 없다.
+    progress_service.record_judge_result(
+        db,
+        user_id=user.id,
+        problem=problem,
+        status=result.status,
+        passed=result.passed,
+        total=result.total,
+        code=snapshot.code,
+        mode=mode,
+    )
+    db.commit()
+
     state = monitor.evaluate_and_record(db, session, now=now)
 
     decision: AgentDecisionRead | None = None
@@ -120,12 +139,13 @@ def _execute(
 def run(
     session_id: str,
     body: RunRequest,
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
     repo: ProblemRepository = Depends(get_problem_repository),
     judge: JudgeProtocol = Depends(get_judge),
     agent: AgentProtocol = Depends(get_agent),
 ) -> ResultIngestResponse:
-    return _execute(session_id, body, "run", db, repo, judge, agent)
+    return _execute(session_id, body, "run", user, db, repo, judge, agent)
 
 
 @router.post(
@@ -137,9 +157,10 @@ def run(
 def submit(
     session_id: str,
     body: RunRequest,
+    user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
     repo: ProblemRepository = Depends(get_problem_repository),
     judge: JudgeProtocol = Depends(get_judge),
     agent: AgentProtocol = Depends(get_agent),
 ) -> ResultIngestResponse:
-    return _execute(session_id, body, "submit", db, repo, judge, agent)
+    return _execute(session_id, body, "submit", user, db, repo, judge, agent)

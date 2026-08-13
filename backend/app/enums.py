@@ -138,6 +138,27 @@ class RegionTag(str, Enum):
     OTHER = "other"
 
 
+class ProgressStatus(str, Enum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SOLVED = "SOLVED"
+
+
+class AcornTransactionType(str, Enum):
+    """원장 항목의 종류. 양수/음수는 amount 가 정하고 이건 '왜'를 담는다."""
+
+    # 획득
+    PROBLEM_SOLVED = "PROBLEM_SOLVED"
+    FIRST_ACCEPTED = "FIRST_ACCEPTED"
+    DAILY_STREAK = "DAILY_STREAK"
+    TRACE_COMPLETED = "TRACE_COMPLETED"
+    # 사용
+    NICKNAME_CHANGED = "NICKNAME_CHANGED"
+    AVATAR_CHANGED = "AVATAR_CHANGED"
+    # 운영
+    ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+
+
 class AgentAction(str, Enum):
     WAIT = "WAIT"
     HINT = "HINT"
