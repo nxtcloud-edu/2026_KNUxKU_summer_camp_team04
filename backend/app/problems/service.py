@@ -68,7 +68,11 @@ def parse_problem(data: dict[str, Any]) -> ProblemRecord:
     키 이름은 origin/judge의 파일 기준을 채택했다 (problem_id, code_template) --
     병합 시 rename이 0이 된다. backend_plan §5의 id/starter_code/concepts도 입력으로 받아준다.
     description/difficulty는 judge 파일에 없으므로 부재를 허용한다.
-    PROBLEMS_DIR을 judge 쪽으로 돌려도 그대로 파싱되게 하기 위함.
+
+    **주의: judge/problems 26개 중 3개만 파싱된다.** stdout_match 문제 23개는
+    function_name 키가 없어(stdin/stdout으로 채점하므로 불필요) KeyError가 나고,
+    그걸 고쳐도 테스트케이스 키가 {stdin, expected_stdout}이라 다시 깨진다.
+    PROBLEMS_DIR을 judge 쪽으로 돌리려면 stdout_match 지원을 먼저 넣어야 한다.
     """
     concepts = data.get("concepts") or data.get("concept") or []
     return ProblemRecord(

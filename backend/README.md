@@ -113,9 +113,17 @@ FastAPI의 422는 네이티브 배열 형태를 유지한다. 둘 다 `detail` �
 
 1. `pip install "docker>=7.0"`; `judge/`에서 `docker build -t judge-sandbox .`
 2. `.env`: `JUDGE_BACKEND=docker`, `JUDGE_PATH=../judge`
-3. **문제 디렉터리를 하나로 정한다.** `PROBLEMS_DIR`을 `../judge/problems`로 돌리거나
-   (그 경우 우리 JSON의 `description`/`difficulty` 키를 그쪽에 복사),
-   우리 것을 유지하되 양쪽 `problem_id` 집합이 같은지 확인. 디렉터리 둘이 drift 위험이다.
+3. **문제 디렉터리를 하나로 정한다.** 단 아래 경고를 먼저 읽을 것.
+
+> **`PROBLEMS_DIR=../judge/problems`를 지금 켜면 앱이 기동 중 죽는다.**
+> judge 문제 26개 중 `function_call` 3개만 파싱되고 `stdout_match` 23개는
+> `KeyError('function_name')`이 난다. `reload()`가 전체를 한 번에 파싱하므로
+> 파일 하나 실패가 저장소 전체를 죽이고, `/problems`·`/sessions`가 전부 500이 된다.
+> 실측: OK 3 / FAIL 23.
+>
+> 켜기 전에 필요한 작업 —
+> `function_name`을 Optional로, 테스트케이스 파서가 `{stdin, expected_stdout}`도 받도록,
+> `reload()`가 개별 파일 실패를 skip 하도록. 그때까지는 기본값(`app/problems/data`)을 유지한다.
 4. `run_judge()`는 `runtime_ms`를 반환하지 않는다 → BE1이 한 줄 추가하거나 `null`로 남는다.
 5. 어댑터(`app/judge/docker_judge.py`)는 이미 작성되어 있다.
 
