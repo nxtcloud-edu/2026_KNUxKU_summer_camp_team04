@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     sql_echo: bool = False
 
     database_url: str = "sqlite:///./codetrace.db"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
     problems_dir: str = "app/problems/data"
 
