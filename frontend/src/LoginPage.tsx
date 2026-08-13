@@ -27,7 +27,6 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
         <section className="auth-panel">
           <a className="auth-brand" href="#" aria-label="TUTORY 홈">
             <img src="/TUTORY_logo.svg" alt="" />
-            <span>TUTORY</span>
           </a>
 
           <div className="auth-heading">
@@ -78,7 +77,6 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
       <section className="auth-panel">
         <a className="auth-brand" href="#" aria-label="TUTORY 홈">
           <img src="/TUTORY_logo.svg" alt="" />
-          <span>TUTORY</span>
         </a>
 
         <div className="auth-heading">

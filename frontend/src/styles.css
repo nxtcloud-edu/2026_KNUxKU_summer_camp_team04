@@ -344,14 +344,14 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
     #f5f3ef;
 }
 .auth-panel {
-  width: min(100%, 420px);
+  width: min(100%, 450px);
+  min-height: 650px;
   padding: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, .98);
   box-shadow: 0 24px 60px rgba(52, 42, 30, .09);
 }
-.signup-panel { width: min(100%, 450px); }
 .auth-brand {
   display: inline-flex;
   align-items: center;

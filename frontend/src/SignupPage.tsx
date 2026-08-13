@@ -16,10 +16,9 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-panel signup-panel">
+      <section className="auth-panel">
         <a className="auth-brand" href="#" aria-label="TUTORY 홈">
           <img src="/TUTORY_logo.svg" alt="" />
-          <span>TUTORY</span>
         </a>
 
         <div className="auth-heading">
