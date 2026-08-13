@@ -23,6 +23,8 @@ import {
 import { STARTER_CODE, TESTS } from './problem'
 import { preparePython, runPython, type ExecutionResult } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
+import { ProblemList } from './problemList'
+import type { ProblemSummary } from './problemService'
 
 type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
@@ -38,7 +40,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
-  const [activity, setActivity] = useState<'problem' | 'trace'>('problem')
+  const [activity, setActivity] = useState<'problem' | 'trace' | 'list'>('problem')
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -114,6 +116,7 @@ function App() {
           <img src="/TUTORY_logo.svg" alt="" />
         </a>
         <div className="topbar-actions">
+          <button className="problem-list-trigger" onClick={() => setActivity('list')}><BookOpen size={16} /> 문제 목록</button>
           <div className={`runtime-pill ${runtimeStatus}`}>
             <span className="status-dot" />
             {runtimeStatus === 'loading' && 'Python 준비 중'}
@@ -152,7 +155,8 @@ function App() {
         </div>
       </header>
 
-      {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} /> : (
+      {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
+        : activity === 'list' ? <ProblemList onExit={() => setActivity('problem')} onSelect={(problem: ProblemSummary) => { console.info('Selected problem:', problem.problem_id); setActivity('problem') }} /> : (
 
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
