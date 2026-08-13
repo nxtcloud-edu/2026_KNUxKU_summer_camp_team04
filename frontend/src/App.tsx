@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
+  ArrowLeft,
   BookOpen,
   Check,
   ChevronDown,
@@ -14,7 +15,6 @@ import {
   Moon,
   MoreVertical,
   Play,
-  RotateCcw,
   Send,
   Sun,
   Terminal,
@@ -29,6 +29,7 @@ import MyPage from './MyPage'
 import { preparePython, runPython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
+import { getLearningProgress, saveCompleted, saveInProgress } from './learningProgress'
 import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
 import { isJudgeUnavailable, runJudge } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
@@ -141,7 +142,8 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     getProblemDetail(selectedProblemId, controller.signal)
       .then((detail) => {
         setProblem(detail)
-        setCode(localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`) ?? detail.code_template)
+        const savedProgress = getLearningProgress(detail.problem_id)
+        setCode(savedProgress?.code ?? localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`) ?? detail.code_template)
         setResult(null)
         setJudgeError('')
       })
@@ -163,7 +165,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     resumeSession()
       .then((session) => {
         if (cancelled || !session?.current_code) return
-        if (localStorage.getItem(`codetrace:checkpoint:${problemId}`) !== null) return
+        if (getLearningProgress(problemId) || localStorage.getItem(`codetrace:checkpoint:${problemId}`) !== null) return
         setCode(session.current_code)
       })
       .catch((error) => console.warn('세션 복구를 건너뜁니다.', error))
@@ -215,10 +217,17 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setResult(null)
     setJudgeError('')
 
+    const applyJudgeResult = (judgeResult: JudgeResult) => {
+      setResult(judgeResult)
+      if (nextMode === 'submit' && judgeResult.status === 'ACCEPTED') {
+        saveCompleted(problem.problem_id, problem.title, code)
+      }
+    }
+
     // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
     // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
     const judgeInBrowser = async () => {
-      setResult(toJudgePayload(await runPython(code, problem), nextMode))
+      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode))
     }
 
     try {
@@ -236,7 +245,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       trace.recordEvent(nextMode === 'run' ? 'RUN' : 'SUBMIT')
       // 이 한 번의 호출이 스냅샷 생성 → 채점 → TEST_RESULT 기록 → monitor 평가를 전부 한다.
       // 클라이언트가 채점 결과를 보고하던 POST /results 는 제거됐다. 서버가 채점의 권위다.
-      setResult(await runJudge(session, code, nextMode))
+      applyJudgeResult(await runJudge(session, code, nextMode))
     } catch (caught) {
       // 서버 judge 가 미구성이면(JUDGE_BACKEND=none → 503 JUDGE_UNAVAILABLE) 브라우저로 넘어간다.
       if (isJudgeUnavailable(caught)) {
@@ -259,17 +268,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     const next = value ?? ''
     setCode(next)
     trace.recordEdit(next)
-  }
-
-  const resetCode = () => {
-    if (!problem) return
-    if (code === problem.code_template || window.confirm('작성한 코드를 기본 코드로 되돌릴까요?')) {
-      setCode(problem.code_template)
-      setResult(null)
-      trace.recordEvent('RESET')
-      trace.recordEdit(problem.code_template)
-      editorRef.current?.focus()
-    }
   }
 
   const saveCheckpoint = () => {
@@ -296,6 +294,18 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     }
     setSelectedProblemId(selected.problem_id)
     setActivity('problem')
+  }
+
+  const leaveProblem = () => {
+    if (!problem) {
+      setActivity('list')
+      return
+    }
+    if (window.confirm('작성 중인 코드를 임시저장하시겠습니까?')) {
+      saveInProgress(problem.problem_id, problem.title, code)
+      localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
+    }
+    setActivity('list')
   }
 
   const openRestrictedActivity = (service: string, nextActivity: 'trace' | 'mypage') => {
@@ -348,9 +358,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
                   <ThemeButton icon={<Moon />} label="Dark" selected={themeMode === 'dark'} onClick={() => setThemeMode('dark')} />
                 </div>
                 <div className="menu-divider" />
-                <button className="menu-row" role="menuitem" onClick={() => { resetCode(); setMenuOpen(false) }}>
-                  <span>코드 초기화</span><RotateCcw size={16} />
-                </button>
                 {userRole === 'educator' && <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); setActivity('educator') }}>
                   <span>교육자 페이지</span><GraduationCap size={16} />
                 </button>}
@@ -370,7 +377,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
 
       {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
         : activity === 'educator' ? <EducatorPage />
-        : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} />
+        : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} onProblemSelect={(problemId) => { setSelectedProblemId(problemId); setActivity('problem') }} />
         : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
 
       <main className="workspace">
@@ -382,6 +389,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
           {problemLoading ? <div className="problem-load-state"><LoaderCircle className="spin" /> 문제를 불러오는 중...</div>
           : problemError || !problem ? <div className="problem-load-state error"><CircleAlert /> {problemError || '문제를 불러오지 못했습니다.'}</div>
           : <div className="problem-content">
+            <button className="problem-back-button" type="button" onClick={leaveProblem}><ArrowLeft size={15} /> 문제 목록</button>
             <div className="problem-meta" aria-label="문제 정보">
               <span>Python</span><i />
               <span>{problem.check_type === 'function_call' ? '함수형' : '입출력형'}</span><i />
@@ -399,7 +407,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button><button className="icon-text-button" onClick={resetCode} title="기본 코드로 되돌리기"><RotateCcw size={15} /> 초기화</button></div>
+            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button></div>
           </div>
           <div className="editor-wrap">
             <Editor

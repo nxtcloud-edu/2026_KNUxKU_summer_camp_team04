@@ -1,5 +1,7 @@
 import { apiRequest, isApiConfigured, setAccessToken } from './api'
 
+const LOCAL_USER_KEY = 'tutory:local-user'
+
 export type UserRole = 'student' | 'educator'
 
 export type AuthUser = {
@@ -20,7 +22,7 @@ type AuthResponse = {
 }
 
 export async function loginUser(email: string, password: string, role: UserRole): Promise<AuthUser> {
-  if (!isApiConfigured) return demoUser(email, role)
+  if (!isApiConfigured) return persistLocalUser(normalizeUser(undefined, email, role))
   const response = await apiRequest<AuthResponse>('/auth/login', {
     method: 'POST',
     auth: false,
@@ -82,10 +84,11 @@ export async function logoutUser() {
     })
   }
   setAccessToken('')
+  localStorage.removeItem(LOCAL_USER_KEY)
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
-  if (!isApiConfigured) return null
+  if (!isApiConfigured) return getLocalUser()
   const response = await apiRequest<Partial<AuthUser> | AuthResponse>('/auth/me')
   if (isAuthResponse(response)) return normalizeUser(response.user, '', 'student')
   return normalizeUser(response, '', 'student')
@@ -115,6 +118,21 @@ function persistToken(response: AuthResponse) {
   setAccessToken(response.access_token ?? response.token ?? '')
 }
 
+function persistLocalUser(user: AuthUser) {
+  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(user))
+  return user
+}
+
+function getLocalUser(): AuthUser | null {
+  try {
+    const saved = localStorage.getItem(LOCAL_USER_KEY)
+    return saved ? JSON.parse(saved) as AuthUser : null
+  } catch {
+    localStorage.removeItem(LOCAL_USER_KEY)
+    return null
+  }
+}
+
 function normalizeUser(payload: (Partial<AuthUser> & { role?: string }) | undefined, email: string, fallbackRole: UserRole, fallbackName = ''): AuthUser {
   const rawRole = String(payload?.role ?? '').toLowerCase()
   const role = rawRole === 'educator'
@@ -137,13 +155,4 @@ function normalizeUser(payload: (Partial<AuthUser> & { role?: string }) | undefi
 
 function isAuthResponse(value: Partial<AuthUser> | AuthResponse): value is AuthResponse {
   return 'user' in value || 'access_token' in value || 'token' in value
-}
-
-function demoUser(email: string, role: UserRole, name = ''): AuthUser {
-  return {
-    id: 'demo-user',
-    email,
-    name: name || email.split('@')[0] || 'Tutory User',
-    role,
-  }
 }

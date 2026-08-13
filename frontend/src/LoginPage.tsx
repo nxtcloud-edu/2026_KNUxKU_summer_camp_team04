@@ -1,6 +1,7 @@
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Info, LockKeyhole, Mail, Play, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import { loginUser, type UserRole } from './auth'
+import { loginUser, requestPasswordReset, type UserRole } from './auth'
+import { ApiError } from './api'
 
 type LoginPageProps = {
   onLogin: (role: UserRole) => void
@@ -26,7 +27,7 @@ function LoginPage({ onLogin, onSignupClick, onBack, notice = '' }: LoginPagePro
       const user = await loginUser(String(form.get('email') ?? ''), String(form.get('password') ?? ''), role)
       onLogin(user.role)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '로그인에 실패했습니다.')
+      setMessage(getLoginErrorMessage(error))
     } finally {
       setIsSubmitting(false)
     }
@@ -146,6 +147,13 @@ function LoginPage({ onLogin, onSignupClick, onBack, notice = '' }: LoginPagePro
       </section>
     </main>
   )
+}
+
+function getLoginErrorMessage(error: unknown) {
+  if (error instanceof ApiError && error.status === 401) {
+    return '가입되지 않은 아이디입니다. 회원가입을 진행해주세요.'
+  }
+  return error instanceof Error ? error.message : '로그인에 실패했습니다.'
 }
 
 function RoleSelector({ value, onChange }: { value: UserRole; onChange: (role: UserRole) => void }) {
