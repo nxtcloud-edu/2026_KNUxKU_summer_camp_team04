@@ -53,7 +53,7 @@ export async function signupUser(
   role: UserRole,
   inviteCode = '',
 ): Promise<AuthUser> {
-  if (!isApiConfigured) return demoUser(email, role, name)
+  if (!isApiConfigured) throw new Error('API 서버가 연결되지 않았습니다. VITE_API_BASE_URL을 설정해 주세요.')
   const trimmedInviteCode = inviteCode.trim()
   const response = await apiRequest<AuthResponse>('/auth/signup', {
     method: 'POST',

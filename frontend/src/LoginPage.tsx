@@ -1,6 +1,6 @@
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Info, LockKeyhole, Mail, Play, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import { loginUser, requestPasswordReset, type UserRole } from './auth'
+import { loginUser, type UserRole } from './auth'
 import { ApiError } from './api'
 
 type LoginPageProps = {
