@@ -146,10 +146,26 @@ function MyPage({ onAvatarChange }: MyPageProps) {
                 <img src={currentBadge.image} alt="" />
               </div>
             </div>
-            <div>
+            <div className="profile-copy">
               <span className="section-kicker">MY TUTORY</span>
-              <h1>{profile.nickname}</h1>
+              <div className="profile-name-row">
+                <h1>{profile.nickname}</h1>
+                <button className="profile-mini-button" type="button" onClick={saveNickname}>
+                  <Pencil size={13} />
+                  수정
+                </button>
+                <button className="profile-mini-button" type="button" onClick={() => fileInputRef.current?.click()}>
+                  <ImageUp size={13} />
+                  업로드
+                </button>
+              </div>
+              <div className="profile-inline-edit">
+                <input value={draftNickname} onChange={(event) => setDraftNickname(event.target.value)} aria-label="닉네임" />
+                <span>변경 비용: 닉네임 도토리 {NICKNAME_COST}개 · 사진 도토리 {AVATAR_COST}개</span>
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={uploadAvatar} />
+              </div>
               <p>도토리를 모아 뱃지를 성장시키고, 푼 문제 기록을 확인해보세요.</p>
+              {message && <p className="profile-message">{message}</p>}
             </div>
           </div>
           <div className="acorn-wallet">
@@ -159,68 +175,40 @@ function MyPage({ onAvatarChange }: MyPageProps) {
           </div>
         </section>
 
-        <section className="mypage-grid">
-          <div className="mypage-panel profile-editor">
-            <div className="mypage-panel-title">
-              <Pencil size={17} />
-              <strong>프로필 수정</strong>
-            </div>
-            <label className="mypage-field">
-              <span>닉네임</span>
-              <div>
-                <input value={draftNickname} onChange={(event) => setDraftNickname(event.target.value)} />
-                <button type="button" onClick={saveNickname}>수정</button>
-              </div>
-              <small>닉네임 변경 시 도토리 {NICKNAME_COST}개가 필요합니다.</small>
-            </label>
-
-            <div className="profile-upload-row">
-              <button type="button" onClick={() => fileInputRef.current?.click()}>
-                <ImageUp size={16} />
-                프로필 사진 업로드
-              </button>
-              <span>등록 및 변경 시 도토리 {AVATAR_COST}개</span>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={uploadAvatar} />
-            </div>
-
-            {message && <p className="profile-message">{message}</p>}
+        <section className="mypage-panel badge-panel">
+          <div className="mypage-panel-title">
+            <Award size={17} />
+            <strong>현재 뱃지 상태</strong>
           </div>
-
-          <div className="mypage-panel badge-panel">
-            <div className="mypage-panel-title">
-              <Award size={17} />
-              <strong>현재 뱃지 상태</strong>
+          <div className="current-badge">
+            <div className="badge-mark">
+              <img src={currentBadge.image} alt="" />
             </div>
-            <div className="current-badge">
-              <div className="badge-mark">
-                <img src={currentBadge.image} alt="" />
-              </div>
-              <div>
-                <span>{currentBadge.name}</span>
-                <p>{currentBadge.description}</p>
-              </div>
+            <div>
+              <span>{currentBadge.name}</span>
+              <p>{currentBadge.description}</p>
             </div>
-            <div className="badge-progress">
-              <div>
-                <span>누적 도토리</span>
-                <strong>{profile.totalAcorns}</strong>
-              </div>
-              {nextBadge ? <small>다음: {nextBadge.name} ({nextBadge.minAcorns}개)</small> : <small>최고 뱃지 달성</small>}
-              <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+          <div className="badge-progress">
+            <div>
+              <span>누적 도토리</span>
+              <strong>{profile.totalAcorns}</strong>
             </div>
-            <div className="badge-list">
-              {BADGES.map((badge) => {
-                const earned = profile.totalAcorns >= badge.minAcorns
-                return (
-                  <div className={earned ? 'earned' : ''} key={badge.name}>
-                    <img src={badge.image} alt="" />
-                    <span>{badge.name}</span>
-                    <small>{badge.minAcorns}개</small>
-                    {earned && <BadgeCheck size={15} />}
-                  </div>
-                )
-              })}
-            </div>
+            {nextBadge ? <small>다음: {nextBadge.name} ({nextBadge.minAcorns}개)</small> : <small>최고 뱃지 달성</small>}
+            <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+          <div className="badge-list">
+            {BADGES.map((badge) => {
+              const earned = profile.totalAcorns >= badge.minAcorns
+              return (
+                <div className={earned ? 'earned' : ''} key={badge.name}>
+                  <img src={badge.image} alt="" />
+                  <span>{badge.name}</span>
+                  <small>{badge.minAcorns}개</small>
+                  {earned && <BadgeCheck size={15} />}
+                </div>
+              )
+            })}
           </div>
         </section>
 
