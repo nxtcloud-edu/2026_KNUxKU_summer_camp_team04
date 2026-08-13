@@ -17,6 +17,9 @@ htmlcov/
 venv/
 .env
 
+# macOS Finder metadata
+.DS_Store
+
 # SQLite (backend). WAL 모드 사이드카는 *.db 패턴에 안 걸린다
 *.db
 *.db-shm
