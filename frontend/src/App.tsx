@@ -15,13 +15,40 @@ import {
   Terminal,
   X,
 } from 'lucide-react'
+import LoginPage from './LoginPage'
 import { STARTER_CODE, TESTS } from './problem'
 import { preparePython, runPython, type ExecutionResult } from './pythonRunner'
+import SignupPage from './SignupPage'
 
 type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
+type AuthView = 'login' | 'signup' | 'workspace'
 
 function App() {
+  const [authView, setAuthView] = useState<AuthView>('login')
+
+  if (authView === 'login') {
+    return (
+      <LoginPage
+        onLogin={() => setAuthView('workspace')}
+        onSignupClick={() => setAuthView('signup')}
+      />
+    )
+  }
+
+  if (authView === 'signup') {
+    return (
+      <SignupPage
+        onSignup={() => setAuthView('workspace')}
+        onLoginClick={() => setAuthView('login')}
+      />
+    )
+  }
+
+  return <LearningWorkspace />
+}
+
+function LearningWorkspace() {
   const [code, setCode] = useState(STARTER_CODE)
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [mode, setMode] = useState<RunMode>('run')
