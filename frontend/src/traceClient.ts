@@ -1,13 +1,18 @@
 /**
- * Coding Trace API 클라이언트.
+ * Coding Trace + 채점 API 클라이언트.
  *
- * 학생이 코딩하는 **동안** 편집·실행 이력을 백엔드에 기록한다.
- * (같은 이름의 traceActivity.tsx 는 전혀 다른 것 -- 학생이 코드 실행을
+ * 학생이 코딩하는 **동안** 편집·실행 이력을 백엔드에 기록하고, 채점을 요청한다.
+ * (같은 이름처럼 보이는 traceActivity.tsx 는 전혀 다른 것 -- 학생이 코드 실행을
  *  손으로 따라가는 학습 화면이다. 이 파일은 그것과 무관하다.)
  *
  * 계약 전문: plans/FRONTEND_INTEGRATION.md
+ *
+ * 모든 요청은 api.ts 의 apiRequest 를 통과한다. **세션·이벤트·채점 엔드포인트는
+ * 전부 로그인을 요구하므로**(backend/app/auth/deps.py) Authorization 헤더를
+ * 직접 fetch 로 우회하면 401 이 된다.
  */
-import { API_BASE_URL, isObject, type JudgeResult, type JudgeStatus } from './problemService'
+import { API_BASE_URL, ApiError, apiKeepalive, apiRequest } from './api'
+import { isObject, normalizeJudgeResponse, type JudgeResult } from './problemService'
 
 /** 클라이언트가 보낼 수 있는 이벤트. 서버 전용 타입(SESSION_START, TEST_RESULT 등)을 보내면 422. */
 export type TraceEventType =
@@ -40,53 +45,14 @@ export function newEventId(): string {
   return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
-function requireBase(): string {
-  if (!API_BASE_URL) throw new Error('VITE_API_BASE_URL 이 설정되지 않았습니다.')
-  return API_BASE_URL
-}
-
-/** FastAPI 에러 봉투에서 사람이 읽을 메시지를 뽑는다. 우리 에러는 객체, 검증 실패(422)는 배열. */
-function errorMessage(payload: unknown, status: number): string {
-  if (isObject(payload)) {
-    const detail = payload.detail
-    if (typeof detail === 'string') return detail
-    if (isObject(detail) && typeof detail.message === 'string') return detail.message
-    if (Array.isArray(detail) && detail.length > 0) {
-      const first = detail[0]
-      if (isObject(first) && typeof first.msg === 'string') return first.msg
-    }
-  }
-  return `요청이 실패했습니다 (${status})`
-}
-
-async function request(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`${requireBase()}${path}`, {
-    ...init,
-    headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
-  })
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) {
-    const error = new Error(errorMessage(payload, response.status)) as Error & { status?: number }
-    error.status = response.status
-    throw error
-  }
-  return payload
-}
-
 export type SessionInfo = {
   session_id: string
   current_code: string
   current_code_version: number
 }
 
-export async function createSession(problemId: string, userId = 'demo-user'): Promise<SessionInfo> {
-  const payload = await request('/sessions', {
-    method: 'POST',
-    body: JSON.stringify({ problem_id: problemId, user_id: userId }),
-  })
-  if (!isObject(payload) || typeof payload.session_id !== 'string') {
-    throw new Error('세션 생성 응답이 올바르지 않습니다.')
-  }
+function normalizeSession(payload: unknown): SessionInfo | null {
+  if (!isObject(payload) || typeof payload.session_id !== 'string') return null
   return {
     session_id: payload.session_id,
     current_code: typeof payload.current_code === 'string' ? payload.current_code : '',
@@ -94,16 +60,20 @@ export async function createSession(problemId: string, userId = 'demo-user'): Pr
   }
 }
 
+export async function createSession(problemId: string, signal?: AbortSignal): Promise<SessionInfo> {
+  const session = normalizeSession(await apiRequest<unknown>('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ problem_id: problemId }),
+    signal,
+  }))
+  if (!session) throw new Error('세션 생성 응답이 올바르지 않습니다.')
+  return session
+}
+
 /** 살아있는 세션이면 정보를, 없으면(404) null 을 준다. 새로고침 복구에 쓴다. */
 export async function getSession(sessionId: string): Promise<SessionInfo | null> {
   try {
-    const payload = await request(`/sessions/${encodeURIComponent(sessionId)}`)
-    if (!isObject(payload) || typeof payload.session_id !== 'string') return null
-    return {
-      session_id: payload.session_id,
-      current_code: typeof payload.current_code === 'string' ? payload.current_code : '',
-      current_code_version: typeof payload.current_code_version === 'number' ? payload.current_code_version : 0,
-    }
+    return normalizeSession(await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}`))
   } catch {
     return null
   }
@@ -112,7 +82,7 @@ export async function getSession(sessionId: string): Promise<SessionInfo | null>
 /** 이벤트 배치 전송. 응답의 current_code_version 을 돌려준다. */
 export async function postEvents(sessionId: string, events: TraceEvent[]): Promise<number | null> {
   if (events.length === 0) return null
-  const payload = await request(`/sessions/${encodeURIComponent(sessionId)}/events`, {
+  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/events`, {
     method: 'POST',
     body: JSON.stringify({ events: events.slice(0, MAX_EVENTS_PER_BATCH) }),
   })
@@ -122,58 +92,35 @@ export async function postEvents(sessionId: string, events: TraceEvent[]): Promi
   return null
 }
 
-const JUDGE_STATUSES: readonly string[] = [
-  'ACCEPTED',
-  'WRONG_ANSWER',
-  'RUNTIME_ERROR',
-  'SYNTAX_ERROR',
-  'TIME_LIMIT',
-  'INTERNAL_ERROR',
-]
-
 /**
- * 채점. POST /sessions/{id}/run|submit 하나가
+ * 채점. `POST /sessions/{id}/run|submit` 하나가
  * **스냅샷 생성 → 채점 → TEST_RESULT 기록 → monitor 평가**를 전부 한다.
  *
- * 응답(ResultIngestResponse)에서 기존 JudgeResult 모양만 뽑아 돌려준다.
- * 그래야 App.tsx 의 JudgeResultView 를 한 줄도 안 고친다.
- * process_state / agent_decision 은 이번 범위(기록만)에서는 쓰지 않는다.
+ * `POST /sessions/{id}/results`(클라이언트가 채점 결과를 보고하던 경로)는 **제거됐다.**
+ * 서버가 채점의 유일한 권위다.
+ *
+ * 서버 judge 가 꺼져 있으면(`JUDGE_BACKEND=none`) 503 JUDGE_UNAVAILABLE 이 온다.
+ * 그 경우 호출부가 로컬 실행으로 폴백할 수 있도록 ApiError.status 를 그대로 흘린다.
  */
 export async function runJudge(sessionId: string, code: string, mode: 'run' | 'submit'): Promise<JudgeResult> {
-  const payload = await request(`/sessions/${encodeURIComponent(sessionId)}/${mode}`, {
+  return normalizeJudgeResponse(await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/${mode}`, {
     method: 'POST',
     body: JSON.stringify({ code }),
-  })
-  if (!isObject(payload) || !isObject(payload.event) || !isObject(payload.event.payload)) {
-    throw new Error('채점 응답이 올바르지 않습니다.')
-  }
-  const result = payload.event.payload
-  if (typeof result.passed !== 'number' || typeof result.total !== 'number' || typeof result.status !== 'string') {
-    throw new Error('채점 응답이 올바르지 않습니다.')
-  }
-  if (!JUDGE_STATUSES.includes(result.status)) {
-    throw new Error(`알 수 없는 채점 상태입니다: ${result.status}`)
-  }
-  return {
-    passed: result.passed,
-    total: result.total,
-    status: result.status as JudgeStatus,
-    message: typeof result.message === 'string' ? result.message : undefined,
-    failed_categories: Array.isArray(result.failed_categories)
-      ? result.failed_categories.filter((c): c is string => typeof c === 'string')
-      : undefined,
-  }
+  }))
+}
+
+/** 서버 judge 가 미구성이라 채점을 수행할 수 없다는 뜻인가? */
+export function isJudgeUnavailable(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 503
 }
 
 /**
  * 페이지 이탈 시 마지막 이벤트를 흘려보낸다.
- * sendBeacon 은 응답을 못 받지만 unload 중에도 전송이 보장된다.
+ * keepalive fetch 는 unload 중에도 전송되면서 Authorization 헤더를 실을 수 있다.
  */
 export function beaconEvents(sessionId: string, events: TraceEvent[]): void {
   if (!API_BASE_URL || events.length === 0) return
-  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return
-  const body = new Blob([JSON.stringify({ events: events.slice(0, MAX_EVENTS_PER_BATCH) })], {
-    type: 'application/json',
+  apiKeepalive(`/sessions/${encodeURIComponent(sessionId)}/events`, {
+    events: events.slice(0, MAX_EVENTS_PER_BATCH),
   })
-  navigator.sendBeacon(`${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/events`, body)
 }
