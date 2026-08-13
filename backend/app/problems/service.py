@@ -49,16 +49,31 @@ class ProblemRecord:
         return seen
 
 
-def _parse_test_cases(raw: Any) -> list[TestCase]:
+def _parse_test_cases(raw: Any, check_type: str) -> list[TestCase]:
+    """check_type별로 테스트케이스 키가 다르다.
+
+    function_call: {"input": [...], "expected": ...}
+    stdout_match:  {"stdin": "...", "expected_stdout": "..."} -- input에는
+    호환을 위해 [stdin]을 담는다 (TestCase.input이 list[Any]라서).
+    """
     out: list[TestCase] = []
     for tc in raw or []:
-        out.append(
-            TestCase(
-                input=tc["input"],
-                expected=tc["expected"],
-                category=tc.get("category", "basic"),
+        if check_type == "stdout_match":
+            out.append(
+                TestCase(
+                    input=[tc["stdin"]],
+                    expected=tc["expected_stdout"],
+                    category=tc.get("category", "basic"),
+                )
             )
-        )
+        else:
+            out.append(
+                TestCase(
+                    input=tc["input"],
+                    expected=tc["expected"],
+                    category=tc.get("category", "basic"),
+                )
+            )
     return out
 
 
@@ -69,23 +84,23 @@ def parse_problem(data: dict[str, Any]) -> ProblemRecord:
     병합 시 rename이 0이 된다. backend_plan §5의 id/starter_code/concepts도 입력으로 받아준다.
     description/difficulty는 judge 파일에 없으므로 부재를 허용한다.
 
-    **주의: judge/problems 26개 중 3개만 파싱된다.** stdout_match 문제 23개는
-    function_name 키가 없어(stdin/stdout으로 채점하므로 불필요) KeyError가 나고,
-    그걸 고쳐도 테스트케이스 키가 {stdin, expected_stdout}이라 다시 깨진다.
-    PROBLEMS_DIR을 judge 쪽으로 돌리려면 stdout_match 지원을 먼저 넣어야 한다.
+    judge/problems의 stdout_match 문제는 function_name이 없다(stdin/stdout으로
+    채점하므로 불필요) -- 빈 문자열로 둔다. 테스트케이스 키 모양도 check_type별로
+    달라서 _parse_test_cases가 분기한다. 이제 judge/problems 26개가 전부 파싱된다.
     """
     concepts = data.get("concepts") or data.get("concept") or []
+    check_type = data.get("check_type", "function_call")
     return ProblemRecord(
         problem_id=data.get("problem_id") or data["id"],
         title=data["title"],
         description=data.get("description", ""),
         difficulty=data.get("difficulty", "BEGINNER"),
         concepts=list(concepts),
-        check_type=data.get("check_type", "function_call"),
-        function_name=data["function_name"],
+        check_type=check_type,
+        function_name=data.get("function_name", ""),
         code_template=data.get("code_template") or data.get("starter_code", ""),
-        public_test_cases=_parse_test_cases(data.get("public_test_cases")),
-        hidden_test_cases=_parse_test_cases(data.get("hidden_test_cases")),
+        public_test_cases=_parse_test_cases(data.get("public_test_cases"), check_type),
+        hidden_test_cases=_parse_test_cases(data.get("hidden_test_cases"), check_type),
     )
 
 
