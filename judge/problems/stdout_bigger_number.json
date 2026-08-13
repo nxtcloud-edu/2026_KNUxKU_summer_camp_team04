@@ -1,6 +1,7 @@
 {
   "problem_id": "stdout_bigger_number",
   "title": "더 큰 수는?",
+  "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n두 정수 `A`, `B`가 주어진다.\n\n`B`가 `A`보다 크면 `1`, 아니면 `0`을 출력하시오.\n\n## 입력\n한 줄에 두 정수 `A`, `B`가 공백으로 구분되어 주어진다.\n\n## 출력\n`B`가 `A`보다 크면 `1`, 아니면 `0`을 출력한다.\n\n## 제한\n- `-10^9 <= A, B <= 10^9`",
   "concept": [],
   "check_type": "stdout_match",
   "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",

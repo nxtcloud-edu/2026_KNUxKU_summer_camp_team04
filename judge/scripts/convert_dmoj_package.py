@@ -54,12 +54,27 @@ def extract_examples(md_text: str) -> dict:
     return examples
 
 
+def extract_description(md_text: str) -> str:
+    """제목 다음부터 첫 '## 예제 ...' 헤더 전까지를 문제 지문으로 추출한다.
+    (## 문제/## 입력/## 출력/## 제한 등 — 소스마다 섹션 구성이 조금씩 달라서
+    특정 헤더만 골라내지 않고 '예제 앞부분 전체'를 그대로 지문으로 쓴다)"""
+    lines = md_text.splitlines()
+    title_idx = next((i for i, line in enumerate(lines) if TITLE_RE.match(line)), -1)
+    example_idx = next(
+        (i for i, line in enumerate(lines) if EXAMPLE_HEADER_RE.match(line.strip())),
+        len(lines),
+    )
+    body = "\n".join(lines[title_idx + 1:example_idx])
+    return body.strip()
+
+
 def convert_one(problem_dir: Path) -> dict:
     md_text = (problem_dir / "problem.md").read_text(encoding="utf-8")
     cfg = yaml.safe_load((problem_dir / "init.yml").read_text(encoding="utf-8"))
 
     title_match = TITLE_RE.search(md_text)
     title = title_match.group(1).strip() if title_match else problem_dir.name
+    description = extract_description(md_text)
 
     examples = extract_examples(md_text)
 
@@ -88,6 +103,7 @@ def convert_one(problem_dir: Path) -> dict:
     data = {
         "problem_id": problem_id,
         "title": title,
+        "description": description,
         "concept": [],
         "check_type": "stdout_match",
         "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",

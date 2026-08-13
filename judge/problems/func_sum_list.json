@@ -1,6 +1,7 @@
 {
   "problem_id": "func_sum_list",
   "title": "리스트 합 구하기",
+  "description": "## 문제\n정수로 이루어진 리스트 `arr`가 주어진다. 리스트에 있는 모든 정수의 합을 구하는 함수 `sum_list(arr)`를 작성하시오.\n\n## 입력\n`arr`: 정수로 이루어진 리스트 (빈 리스트일 수도 있음)\n\n## 출력\n`arr`에 있는 모든 정수의 합 (정수)",
   "concept": ["loop", "function"],
   "check_type": "function_call",
   "function_name": "sum_list",
