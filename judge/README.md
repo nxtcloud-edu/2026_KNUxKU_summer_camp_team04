@@ -26,3 +26,14 @@ DMOJ류 문제 패키지(problem.md + init.yml + N.in/N.out)가 있으면 변환
 ```
 python scripts/convert_dmoj_package.py <소스폴더1> [<소스폴더2> ...]
 ```
+
+## API 서버 (임시 — backend 생기기 전까지 프론트 연동용)
+```
+python -m uvicorn main:app --reload --port 8000
+```
+- `GET /problems` — 문제 목록
+- `GET /problems/{problem_id}` — 문제 상세 (hidden 테스트케이스 제외)
+- `POST /judge` — `{ "student_code", "problem_id", "mode" }` → 채점 결과
+
+CORS는 전체 허용(`*`)해뒀음 — 로컬 데모용이라 그런 거고, 실제 배포 시엔
+반드시 프론트 도메인으로 제한할 것.
