@@ -1,6 +1,6 @@
 import { ArrowLeft, Check, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, UserRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { UserRole } from './auth'
+import { signupUser, type UserRole } from './auth'
 
 type SignupPageProps = {
   onSignup: (role: UserRole) => void
@@ -13,20 +13,36 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [role, setRole] = useState<UserRole>('student')
   const [message, setMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const passwordRules = useMemo(() => ({
     minLength: password.length >= 6,
     hasLetterAndNumber: /[A-Za-z]/.test(password) && /\d/.test(password),
   }), [password])
   const isPasswordValid = passwordRules.minLength && passwordRules.hasLetterAndNumber
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!isPasswordValid) {
       setMessage('비밀번호 조건을 모두 만족해야 회원가입할 수 있어요.')
       return
     }
+
+    const form = new FormData(event.currentTarget)
     setMessage('')
-    onSignup(role)
+    setIsSubmitting(true)
+    try {
+      const user = await signupUser(
+        String(form.get('name') ?? ''),
+        String(form.get('email') ?? ''),
+        password,
+        role,
+      )
+      onSignup(user.role)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '회원가입에 실패했습니다.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -44,12 +60,25 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
-          <fieldset className="role-selector"><legend>이용 유형</legend><div><button type="button" className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}><UserRound size={17} /><span><strong>학생</strong><small>문제를 풀고 튜터링을 받아요</small></span></button><button type="button" className={role === 'educator' ? 'selected' : ''} onClick={() => setRole('educator')}><GraduationCap size={17} /><span><strong>교수자</strong><small>수강생과 과제를 관리해요</small></span></button></div></fieldset>
+          <fieldset className="role-selector">
+            <legend>이용 유형</legend>
+            <div>
+              <button type="button" className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>
+                <UserRound size={17} />
+                <span><strong>학생</strong><small>문제를 풀고 튜터링을 받아요</small></span>
+              </button>
+              <button type="button" className={role === 'educator' ? 'selected' : ''} onClick={() => setRole('educator')}>
+                <GraduationCap size={17} />
+                <span><strong>교수자</strong><small>수강생과 과제를 관리해요</small></span>
+              </button>
+            </div>
+          </fieldset>
+
           <label className="auth-field">
             <span>이름</span>
             <div>
               <UserRound size={17} />
-              <input type="text" placeholder="이름을 입력하세요" required />
+              <input name="name" type="text" placeholder="이름을 입력하세요" required />
             </div>
           </label>
 
@@ -57,7 +86,7 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
             <span>이메일</span>
             <div>
               <Mail size={17} />
-              <input type="email" placeholder="name@example.com" required />
+              <input name="email" type="email" placeholder="name@example.com" required />
             </div>
           </label>
 
@@ -89,9 +118,9 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
           </div>
           {message && <p className="auth-message error">{message}</p>}
 
-          <button className="auth-primary-button" type="submit">
+          <button className="auth-primary-button" type="submit" disabled={isSubmitting}>
             <Check size={17} />
-            회원가입
+            {isSubmitting ? '가입 중...' : '회원가입'}
           </button>
         </form>
 

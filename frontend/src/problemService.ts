@@ -1,5 +1,6 @@
 import localProblems from '../../judge/problems-index.json'
 import localProblemDetails from '../../judge/problems-detail.json'
+import { API_BASE_URL, apiRequest, getApiErrorMessage } from './api'
 
 export type ProblemSummary = {
   problem_id: string
@@ -64,7 +65,6 @@ export type JudgeResult = {
   agent_decision?: AgentDecision | null
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
 export const isJudgeApiConfigured = Boolean(API_BASE_URL)
 
 export async function getProblems(signal?: AbortSignal): Promise<ProblemListResult> {
@@ -108,15 +108,11 @@ export async function getProblemDetail(problemId: string, signal?: AbortSignal):
 
 export async function createSession(problemId: string, signal?: AbortSignal): Promise<SessionInfo | null> {
   if (!API_BASE_URL) return null
-  const response = await fetch(`${API_BASE_URL}/sessions`, {
+  return apiRequest<SessionInfo>('/sessions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ problem_id: problemId, user_id: 'demo-user' }),
     signal,
   })
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(getApiErrorMessage(payload, `Session API returned ${response.status}`))
-  return normalizeSession(payload)
 }
 
 export async function judgeCode(
@@ -129,26 +125,19 @@ export async function judgeCode(
   const session = sessionId ?? (await createSession(problemId))?.session_id
   if (!session) throw new Error('학습 세션을 만들 수 없습니다.')
 
-  const response = await fetch(`${API_BASE_URL}/sessions/${encodeURIComponent(session)}/${mode}`, {
+  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(session)}/${mode}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ code: studentCode }),
   })
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(getApiErrorMessage(payload, `Judge API returned ${response.status}`))
   return normalizeJudgeResponse(payload)
 }
 
 export async function decideTutorHelp(sessionId: string): Promise<AgentDecision | null> {
   if (!API_BASE_URL || !sessionId) return null
-  const response = await fetch(`${API_BASE_URL}/agent/decide`, {
+  return normalizeAgentDecision(await apiRequest<unknown>('/agent/decide', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ session_id: sessionId, trigger: 'HELP_REQUESTED' }),
-  })
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(getApiErrorMessage(payload, `Agent API returned ${response.status}`))
-  return normalizeAgentDecision(payload)
+  }))
 }
 
 function normalizeProblemList(payload: unknown): ProblemSummary[] {
@@ -195,24 +184,6 @@ function normalizeConcepts(payload: Record<string, unknown>): string[] {
   return Array.isArray(concepts) ? concepts.filter((value): value is string => typeof value === 'string') : []
 }
 
-function normalizeSession(payload: unknown): SessionInfo {
-  if (!isObject(payload) || typeof payload.session_id !== 'string' || typeof payload.problem_id !== 'string') {
-    throw new Error('Invalid session response')
-  }
-  return {
-    session_id: payload.session_id,
-    user_id: typeof payload.user_id === 'string' ? payload.user_id : 'demo-user',
-    problem_id: payload.problem_id,
-    status: typeof payload.status === 'string' ? payload.status : 'active',
-    started_at: typeof payload.started_at === 'string' ? payload.started_at : '',
-    finished_at: typeof payload.finished_at === 'string' || payload.finished_at === null ? payload.finished_at : null,
-    last_code_version: typeof payload.last_code_version === 'number' ? payload.last_code_version : 0,
-    last_event_seq: typeof payload.last_event_seq === 'number' ? payload.last_event_seq : 0,
-    current_code: typeof payload.current_code === 'string' ? payload.current_code : '',
-    current_code_version: typeof payload.current_code_version === 'number' ? payload.current_code_version : 0,
-  }
-}
-
 function normalizeJudgeResponse(payload: unknown): JudgeResult {
   const judgePayload = isObject(payload) && isObject(payload.event) && isObject(payload.event.payload)
     ? payload.event.payload
@@ -248,18 +219,6 @@ function normalizeAgentDecision(payload: unknown): AgentDecision | null {
 function normalizeJudgeStatus(status: string): JudgeStatus {
   const knownStatuses: JudgeStatus[] = ['ACCEPTED', 'WRONG_ANSWER', 'RUNTIME_ERROR', 'SYNTAX_ERROR', 'TIME_LIMIT', 'INTERNAL_ERROR']
   return knownStatuses.includes(status as JudgeStatus) ? status as JudgeStatus : 'INTERNAL_ERROR'
-}
-
-function getApiErrorMessage(payload: unknown, fallback: string) {
-  if (!isObject(payload)) return fallback
-  if (typeof payload.detail === 'string') return payload.detail
-  if (Array.isArray(payload.detail)) {
-    const messages = payload.detail
-      .map((item) => isObject(item) && typeof item.msg === 'string' ? item.msg : null)
-      .filter(Boolean)
-    return messages.join(', ') || fallback
-  }
-  return fallback
 }
 
 function isAbortError(error: unknown) {

@@ -30,7 +30,7 @@ import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
 import { createSession, getProblemDetail, isJudgeApiConfigured, judgeCode, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
 import SignupPage from './SignupPage'
-import type { UserRole } from './auth'
+import { getCurrentUser, logoutUser, type UserRole } from './auth'
 
 type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
@@ -40,6 +40,14 @@ type AuthView = 'login' | 'signup' | 'workspace'
 function App() {
   const [authView, setAuthView] = useState<AuthView>('workspace')
   const [userRole, setUserRole] = useState<UserRole | null>(null)
+
+  useEffect(() => {
+    getCurrentUser()
+      .then((user) => {
+        if (user) setUserRole(user.role)
+      })
+      .catch((error) => console.warn('Current user API unavailable. Staying in guest mode.', error))
+  }, [])
 
   const finishAuth = (role: UserRole) => {
     setUserRole(role)
@@ -66,7 +74,7 @@ function App() {
     )
   }
 
-  return <LearningWorkspace userRole={userRole} onLogin={() => setAuthView('login')} onSignup={() => setAuthView('signup')} onLogout={() => setUserRole(null)} />
+  return <LearningWorkspace userRole={userRole} onLogin={() => setAuthView('login')} onSignup={() => setAuthView('signup')} onLogout={async () => { await logoutUser(); setUserRole(null) }} />
 }
 
 function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole: UserRole | null; onLogin: () => void; onSignup: () => void; onLogout: () => void }) {

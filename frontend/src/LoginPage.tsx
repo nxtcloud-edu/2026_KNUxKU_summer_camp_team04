@@ -1,6 +1,6 @@
 import { ArrowLeft, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, Play, Send, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import type { UserRole } from './auth'
+import { loginUser, requestPasswordReset, type UserRole } from './auth'
 
 type LoginPageProps = {
   onLogin: (role: UserRole) => void
@@ -13,15 +13,37 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
   const [resetRequested, setResetRequested] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [role, setRole] = useState<UserRole>('student')
+  const [message, setMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onLogin(role)
+    const form = new FormData(event.currentTarget)
+    setMessage('')
+    setIsSubmitting(true)
+    try {
+      const user = await loginUser(String(form.get('email') ?? ''), String(form.get('password') ?? ''), role)
+      onLogin(user.role)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '로그인에 실패했습니다.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  const handlePasswordReset = (event: React.FormEvent<HTMLFormElement>) => {
+  const handlePasswordReset = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setResetRequested(true)
+    const form = new FormData(event.currentTarget)
+    setMessage('')
+    setIsSubmitting(true)
+    try {
+      await requestPasswordReset(String(form.get('email') ?? ''))
+      setResetRequested(true)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '비밀번호 재설정 요청에 실패했습니다.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   if (isFindingPassword) {
@@ -43,15 +65,16 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
               <span>이메일</span>
               <div>
                 <Mail size={17} />
-                <input type="email" placeholder="name@example.com" required />
+                <input name="email" type="email" placeholder="name@example.com" required />
               </div>
             </label>
 
             {resetRequested && (
               <p className="auth-message">입력한 이메일로 재설정 안내를 보냈습니다.</p>
             )}
+            {message && <p className="auth-message error">{message}</p>}
 
-            <button className="auth-primary-button" type="submit">
+            <button className="auth-primary-button" type="submit" disabled={isSubmitting}>
               <Send size={17} />
               재설정 안내 받기
             </button>
@@ -95,7 +118,7 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
             <span>이메일</span>
             <div>
               <Mail size={17} />
-              <input type="email" placeholder="name@example.com" required />
+              <input name="email" type="email" placeholder="name@example.com" required />
             </div>
           </label>
 
@@ -105,6 +128,7 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
               <LockKeyhole size={17} />
               <input
                 type={showPassword ? 'text' : 'password'}
+                name="password"
                 placeholder="비밀번호를 입력하세요"
                 required
               />
@@ -129,8 +153,9 @@ function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
 
           <button className="auth-primary-button" type="submit">
             <Play size={17} fill="currentColor" />
-            로그인
+            {isSubmitting ? '로그인 중...' : '로그인'}
           </button>
+          {message && <p className="auth-message error">{message}</p>}
         </form>
 
         <div className="auth-switch">
