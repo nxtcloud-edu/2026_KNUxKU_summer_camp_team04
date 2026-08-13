@@ -9,7 +9,7 @@ API를 노출한다. 엔드포인트는 judge_service.py의 함수를 그대로 
 로컬 데모용이라 CORS를 전체 허용해뒀다. 실제로 배포한다면 반드시 프론트
 도메인으로 제한할 것.
 
-실행: uvicorn main:app --reload --port 8000   (judge/ 디렉터리에서)
+실행: python -m uvicorn main:app --reload --port 8000   (judge/ 디렉터리에서)
 """
 from __future__ import annotations
 

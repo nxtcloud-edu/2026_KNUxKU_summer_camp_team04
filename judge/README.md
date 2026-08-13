@@ -29,7 +29,7 @@ python scripts/convert_dmoj_package.py <소스폴더1> [<소스폴더2> ...]
 
 ## API 서버 (임시 — backend 생기기 전까지 프론트 연동용)
 ```
-uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 ```
 - `GET /problems` — 문제 목록
 - `GET /problems/{problem_id}` — 문제 상세 (hidden 테스트케이스 제외)
