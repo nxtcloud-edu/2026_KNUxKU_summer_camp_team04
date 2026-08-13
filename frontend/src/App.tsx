@@ -481,7 +481,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} />
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} intervention={trace.intervention} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
