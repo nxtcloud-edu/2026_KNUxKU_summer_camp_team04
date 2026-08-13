@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_sumuntilzero",
+  "title": "0이 나올 때까지 합 구하기",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "0\n",
+      "expected_stdout": "0\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "10\n5\n-3\n0\n",
+      "expected_stdout": "12\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "5\n0\n",
+      "expected_stdout": "5\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "-5\n0\n",
+      "expected_stdout": "-5\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "1\n2\n3\n4\n0\n",
+      "expected_stdout": "10\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "-1\n-2\n-3\n0\n",
+      "expected_stdout": "-6\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "100\n-50\n25\n-25\n0\n",
+      "expected_stdout": "50\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "7\n7\n7\n7\n7\n0\n",
+      "expected_stdout": "35\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "1000\n-1\n-999\n0\n",
+      "expected_stdout": "0\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "123\n456\n789\n-100\n0\n",
+      "expected_stdout": "1268\n",
+      "category": "case_10"
+    }
+  ]
+}

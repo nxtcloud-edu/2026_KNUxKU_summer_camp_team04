@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_perfectnumber",
+  "title": "완전수 판별",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "6\n",
+      "expected_stdout": "PERFECT",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "12\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_2"
+    },
+    {
+      "stdin": "28\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_5"
+    },
+    {
+      "stdin": "496\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_6"
+    },
+    {
+      "stdin": "8128\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_7"
+    },
+    {
+      "stdin": "9999\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_8"
+    },
+    {
+      "stdin": "100000\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_9"
+    },
+    {
+      "stdin": "945\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_10"
+    }
+  ]
+}

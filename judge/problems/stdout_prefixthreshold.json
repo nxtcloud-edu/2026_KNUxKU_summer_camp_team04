@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_prefixthreshold",
+  "title": "합이 처음으로 N 이상이 되는 순간",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "10\n",
+      "expected_stdout": "4\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "11\n",
+      "expected_stdout": "5\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "2\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "2\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "55\n",
+      "expected_stdout": "10\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "56\n",
+      "expected_stdout": "11\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1000\n",
+      "expected_stdout": "45\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "999999999\n",
+      "expected_stdout": "44721\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "1000000000\n",
+      "expected_stdout": "44721\n",
+      "category": "case_10"
+    }
+  ]
+}

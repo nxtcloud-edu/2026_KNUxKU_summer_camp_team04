@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_skipmultiples",
+  "title": "3의 배수 건너뛰기",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "3\n",
+      "expected_stdout": "1 2\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "1 2 4 5 7 8 10\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "1 2\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "4\n",
+      "expected_stdout": "1 2 4\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "11\n",
+      "expected_stdout": "1 2 4 5 7 8 10 11\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "12\n",
+      "expected_stdout": "1 2 4 5 7 8 10 11\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "13\n",
+      "expected_stdout": "1 2 4 5 7 8 10 11 13\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "30\n",
+      "expected_stdout": "1 2 4 5 7 8 10 11 13 14 16 17 19 20 22 23 25 26 28 29\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "31\n",
+      "expected_stdout": "1 2 4 5 7 8 10 11 13 14 16 17 19 20 22 23 25 26 28 29 31\n",
+      "category": "case_10"
+    }
+  ]
+}

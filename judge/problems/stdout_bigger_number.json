@@ -1,0 +1,51 @@
+{
+  "problem_id": "stdout_bigger_number",
+  "title": "더 큰 수는?",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "10 -3\n",
+      "expected_stdout": "0\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "3 8\n",
+      "expected_stdout": "1\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "239 239\n",
+      "expected_stdout": "0\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "-5 -3\n",
+      "expected_stdout": "1\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "-3 -5\n",
+      "expected_stdout": "0\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "0 1\n",
+      "expected_stdout": "1\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "1 0\n",
+      "expected_stdout": "0\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "-1000000000 1000000000\n",
+      "expected_stdout": "1\n",
+      "category": "case_8"
+    }
+  ]
+}

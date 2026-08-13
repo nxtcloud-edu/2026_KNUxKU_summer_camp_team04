@@ -20,3 +20,9 @@ pytest tests/
 ## 문제 추가
 `problems/*.json`에 파일을 추가하면 코드 수정 없이 바로 채점 가능하다.
 JSON 스키마와 API 응답 스펙은 [CLAUDE.md](CLAUDE.md) 참고.
+
+DMOJ류 문제 패키지(problem.md + init.yml + N.in/N.out)가 있으면 변환 스크립트로
+일괄 등록 가능:
+```
+python scripts/convert_dmoj_package.py <소스폴더1> [<소스폴더2> ...]
+```

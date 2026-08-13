@@ -1,0 +1,51 @@
+{
+  "problem_id": "stdout_classify_three_numbers",
+  "title": "세 수를 조건으로 분류하기",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "5 5 5\n",
+      "expected_stdout": "ALL\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "7 3 7\n",
+      "expected_stdout": "TWO\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "1 2 3\n",
+      "expected_stdout": "NONE\n",
+      "category": "sample_3"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "4 4 2\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "9 1 1\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "-1 -1 -1\n",
+      "expected_stdout": "ALL\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "-5 0 5\n",
+      "expected_stdout": "NONE\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1000000000 -1000000000 1000000000\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_8"
+    }
+  ]
+}

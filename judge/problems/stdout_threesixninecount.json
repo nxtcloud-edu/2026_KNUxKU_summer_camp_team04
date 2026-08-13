@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_threesixninecount",
+  "title": "369 카운트",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "9\n",
+      "expected_stdout": "3",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "40\n",
+      "expected_stdout": "19",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "0",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "0",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "1",
+      "category": "case_3"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "3",
+      "category": "case_5"
+    },
+    {
+      "stdin": "29\n",
+      "expected_stdout": "9",
+      "category": "case_6"
+    },
+    {
+      "stdin": "30\n",
+      "expected_stdout": "10",
+      "category": "case_7"
+    },
+    {
+      "stdin": "99\n",
+      "expected_stdout": "51",
+      "category": "case_9"
+    },
+    {
+      "stdin": "100000\n",
+      "expected_stdout": "83193",
+      "category": "case_10"
+    }
+  ]
+}

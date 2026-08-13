@@ -1,0 +1,51 @@
+{
+  "problem_id": "stdout_discount_shop",
+  "title": "할인 규칙이 많은 상점",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "5000 10\n",
+      "expected_stdout": "46500\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "300 2\n",
+      "expected_stdout": "600\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "4999 10\n",
+      "expected_stdout": "47491\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "5000 9\n",
+      "expected_stdout": "44000\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "100 10\n",
+      "expected_stdout": "950\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "5000 1\n",
+      "expected_stdout": "4000\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "5001 10\n",
+      "expected_stdout": "46510\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "5000 0\n",
+      "expected_stdout": "0\n",
+      "category": "case_8"
+    }
+  ]
+}

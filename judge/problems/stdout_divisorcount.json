@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_divisorcount",
+  "title": "약수의 개수",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "12\n",
+      "expected_stdout": "6",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "13\n",
+      "expected_stdout": "2",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "2",
+      "category": "case_2"
+    },
+    {
+      "stdin": "36\n",
+      "expected_stdout": "9",
+      "category": "case_5"
+    },
+    {
+      "stdin": "64\n",
+      "expected_stdout": "7",
+      "category": "case_6"
+    },
+    {
+      "stdin": "72\n",
+      "expected_stdout": "12",
+      "category": "case_7"
+    },
+    {
+      "stdin": "97\n",
+      "expected_stdout": "2",
+      "category": "case_8"
+    },
+    {
+      "stdin": "840\n",
+      "expected_stdout": "32",
+      "category": "case_9"
+    },
+    {
+      "stdin": "100000\n",
+      "expected_stdout": "36",
+      "category": "case_10"
+    }
+  ]
+}

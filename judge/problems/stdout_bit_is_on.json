@@ -1,0 +1,51 @@
+{
+  "problem_id": "stdout_bit_is_on",
+  "title": "비트 켜져 있나요?",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "13 0\n",
+      "expected_stdout": "1\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "13 1\n",
+      "expected_stdout": "0\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "13 2\n",
+      "expected_stdout": "1\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "0 0\n",
+      "expected_stdout": "0\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "1 0\n",
+      "expected_stdout": "1\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "1024 10\n",
+      "expected_stdout": "1\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "1024 9\n",
+      "expected_stdout": "0\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "2147483647 30\n",
+      "expected_stdout": "1\n",
+      "category": "case_8"
+    }
+  ]
+}

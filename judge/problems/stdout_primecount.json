@@ -1,0 +1,61 @@
+{
+  "problem_id": "stdout_primecount",
+  "title": "소수의 개수",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "public_test_cases": [
+    {
+      "stdin": "11\n",
+      "expected_stdout": "5",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "0",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "1",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "2",
+      "category": "case_3"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "4",
+      "category": "case_4"
+    },
+    {
+      "stdin": "30\n",
+      "expected_stdout": "10",
+      "category": "case_6"
+    },
+    {
+      "stdin": "49\n",
+      "expected_stdout": "15",
+      "category": "case_7"
+    },
+    {
+      "stdin": "100\n",
+      "expected_stdout": "25",
+      "category": "case_8"
+    },
+    {
+      "stdin": "499\n",
+      "expected_stdout": "95",
+      "category": "case_9"
+    },
+    {
+      "stdin": "5000\n",
+      "expected_stdout": "669",
+      "category": "case_10"
+    }
+  ]
+}

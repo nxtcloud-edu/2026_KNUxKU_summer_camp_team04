@@ -20,6 +20,17 @@ TIMEOUT_SEC = 5
 MEM_LIMIT = "128m"
 PIDS_LIMIT = 64
 
+# check_type별로 컨테이너 안에서 돌릴 하네스 스크립트.
+# 새 check_type을 추가하려면 harness/에 스크립트를 추가하고 여기 등록만 하면 됨.
+HARNESS_BY_CHECK_TYPE = {
+    "function_call": "/harness/run_function_call.py",
+    "stdout_match": "/harness/run_stdout_match.py",
+}
+
+
+class UnsupportedCheckTypeError(Exception):
+    """문제의 check_type에 대응하는 하네스가 없을 때."""
+
 
 class ProblemNotFoundError(Exception):
     """요청한 problem_id에 해당하는 문제 JSON이 없을 때."""
@@ -52,6 +63,10 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
     mode="submit" -> public_test_cases + hidden_test_cases 전체 채점
     """
     problem = load_problem(problem_id)
+    check_type = problem["check_type"]
+    if check_type not in HARNESS_BY_CHECK_TYPE:
+        raise UnsupportedCheckTypeError(f"지원하지 않는 check_type입니다: {check_type}")
+
     test_cases = list(problem["public_test_cases"])
     if mode == "submit":
         test_cases += problem.get("hidden_test_cases", [])
@@ -64,7 +79,7 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
         return {"passed": 0, "total": total, "status": "SYNTAX_ERROR", "message": str(e)}
 
     # 2) 샌드박스 컨테이너에서 실행
-    outcome = _run_in_sandbox(student_code, problem["function_name"], test_cases)
+    outcome = _run_in_sandbox(check_type, student_code, problem, test_cases)
 
     if outcome["status"] == "TIME_LIMIT":
         return {
@@ -87,7 +102,7 @@ def run_judge(student_code: str, problem_id: str, mode: str = "run") -> dict:
     return response
 
 
-def _run_in_sandbox(student_code: str, function_name: str, test_cases: list) -> dict:
+def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_cases: list) -> dict:
     """격리된 컨테이너에서 학생 코드를 실행하고 결과를 반환한다.
 
     반환값은 {"status": "OK", "results": [...]} 또는
@@ -98,11 +113,9 @@ def _run_in_sandbox(student_code: str, function_name: str, test_cases: list) -> 
     except DockerException as e:
         return {"status": "RUNTIME_ERROR", "message": f"Docker 데몬에 연결할 수 없습니다: {e}"}
 
-    payload = {
-        "student_code": student_code,
-        "function_name": function_name,
-        "test_cases": test_cases,
-    }
+    payload = {"student_code": student_code, "test_cases": test_cases}
+    if check_type == "function_call":
+        payload["function_name"] = problem["function_name"]
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         payload_path = Path(tmp_dir) / "payload.json"
@@ -111,6 +124,7 @@ def _run_in_sandbox(student_code: str, function_name: str, test_cases: list) -> 
         try:
             container = client.containers.run(
                 SANDBOX_IMAGE,
+                entrypoint=["python", HARNESS_BY_CHECK_TYPE[check_type]],
                 command=["/payload/payload.json"],
                 volumes={tmp_dir: {"bind": "/payload", "mode": "ro"}},
                 network_disabled=True,
