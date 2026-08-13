@@ -15,9 +15,11 @@ import {
   Send,
   Sun,
   Terminal,
+  UserRound,
   Waypoints,
 } from 'lucide-react'
 import LoginPage from './LoginPage'
+import MyPage from './MyPage'
 import { preparePython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
@@ -68,7 +70,7 @@ function LearningWorkspace() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
-  const [activity, setActivity] = useState<'problem' | 'trace' | 'list'>('problem')
+  const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('problem')
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -173,9 +175,15 @@ function LearningWorkspace() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
-          <img src="/TUTORY_logo.svg" alt="" />
-        </button>
+        <div className="topbar-left">
+          <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
+            <img src="/TUTORY_logo.svg" alt="" />
+          </button>
+          <button className="mypage-trigger" onClick={() => setActivity('mypage')}>
+            <UserRound size={16} />
+            마이페이지
+          </button>
+        </div>
         <div className="topbar-actions">
           <div className={`runtime-pill ${runtimeStatus}`}>
             <span className="status-dot" />
@@ -216,6 +224,7 @@ function LearningWorkspace() {
       </header>
 
       {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
+        : activity === 'mypage' ? <MyPage onExit={() => setActivity('problem')} />
         : activity === 'list' ? <ProblemList onExit={() => setActivity('problem')} onSelect={selectProblem} /> : (
 
       <main className="workspace">
