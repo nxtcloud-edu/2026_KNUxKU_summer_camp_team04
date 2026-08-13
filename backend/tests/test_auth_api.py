@@ -183,3 +183,28 @@ def test_all_session_endpoints_require_auth(anon_client):
     ]:
         r = getattr(anon_client, method)(path, **({"json": {}} if method == "post" else {}))
         assert r.status_code == 401, f"{method} {path}"
+
+
+def test_agent_decide_requires_auth_and_ownership(client, anon_client):
+    """POST /agent/decide 가 남의 세션 컨텍스트를 흘리면 안 된다.
+
+    build_context() 가 학생의 현재 코드와 trace 를 통째로 담아 오므로,
+    소유권 검사가 빠지면 session_id 만 알면 학습 내용을 그대로 읽을 수 있다.
+    """
+    sid = client.post("/sessions", json={"problem_id": "func_sum_list"}).json()["session_id"]
+
+    # 토큰 없음
+    assert anon_client.post("/agent/decide", json={"session_id": sid}).status_code == 401
+
+    # 남의 토큰
+    intruder = signup(anon_client, email="agentintruder@example.com").json()["access_token"]
+    r = anon_client.post(
+        "/agent/decide",
+        json={"session_id": sid},
+        headers={"Authorization": f"Bearer {intruder}"},
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "SESSION_NOT_FOUND"
+
+    # 본인은 통과
+    assert client.post("/agent/decide", json={"session_id": sid}).status_code == 200

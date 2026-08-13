@@ -359,3 +359,19 @@ def test_acorns_awarded_once_even_with_multiple_course_rows(anon_client, educato
     anon_client.post(f"/sessions/{s}/submit", json={"code": LOOP_V2}, headers=h(stok))
 
     assert anon_client.get("/users/me/acorns", headers=h(stok)).json()["balance"] == 10
+
+
+def test_seeded_emails_are_actually_loginable():
+    """시드 스크립트가 만드는 계정이 로그인 API 를 통과해야 한다.
+
+    모델을 직접 쓰는 스크립트는 EmailStr 검증을 우회하므로, @demo.local 같은
+    예약 TLD 를 쓰면 계정은 만들어지지만 **로그인만 조용히 막힌다.**
+    """
+    from pydantic import TypeAdapter
+    from pydantic import EmailStr
+
+    from scripts.seed_org import EDUCATOR_EMAIL, STUDENT_EMAILS
+
+    adapter = TypeAdapter(EmailStr)
+    for email in [EDUCATOR_EMAIL, *STUDENT_EMAILS]:
+        adapter.validate_python(email)  # 실패하면 여기서 터진다
