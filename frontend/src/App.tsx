@@ -17,10 +17,12 @@ import {
   Send,
   Sun,
   Terminal,
+  Waypoints,
   X,
 } from 'lucide-react'
 import { STARTER_CODE, TESTS } from './problem'
 import { preparePython, runPython, type ExecutionResult } from './pythonRunner'
+import { TraceActivity } from './traceActivity'
 
 type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
@@ -36,6 +38,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
+  const [activity, setActivity] = useState<'problem' | 'trace'>('problem')
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -149,6 +152,8 @@ function App() {
         </div>
       </header>
 
+      {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} /> : (
+
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
           <button className="mobile-panel-toggle" onClick={() => setProblemOpen(!problemOpen)}>
@@ -257,6 +262,9 @@ function App() {
           </div>
 
           <div className="action-bar">
+            <button className="trace-button" onClick={() => setActivity('trace')} disabled={isRunning || runtimeStatus !== 'ready'}>
+              <Waypoints size={17} /> TRACE 학습
+            </button>
             <button
               className="run-button"
               onClick={() => execute('run')}
@@ -273,10 +281,11 @@ function App() {
               {isRunning && mode === 'submit' ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
               제출하기
             </button>
-            <p>실행은 공개 테스트만 확인해요.</p>
+            <p>실행은 공개 테스트만 확인해요. · TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
           </div>
         </section>
       </main>
+      )}
     </div>
   )
 }
