@@ -355,10 +355,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
 
       {activity === 'landing' ? (
         <LandingPage
-          isLoggedIn={Boolean(userRole)}
           onStart={() => (userRole ? setActivity('list') : onSignup())}
-          onLogin={onLogin}
-          onBrowse={() => setActivity('list')}
         />
       )
         : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />

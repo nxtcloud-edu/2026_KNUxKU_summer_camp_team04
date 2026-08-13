@@ -950,9 +950,11 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   background-clip: text;
   color: transparent;
 }
-/* 로고(TUTORY_logo.svg)의 fill과 같은 색. 라이트 테마의 --brand가 #9B5D00로 동일하고,
-   다크 테마에서는 토큰이 밝은 쪽으로 바뀌어 대비가 유지된다. */
+/* 로고(TUTORY_logo.svg)의 두 색을 그대로 쓴다: 위쪽 'TUT'은 #9B5D00(=라이트 테마 --brand),
+   아래쪽 'ORY'는 검정. 검정을 하드코딩하면 다크 모드에서 안 보이므로 본문 텍스트
+   토큰(--text)을 쓴다 — 라이트에서는 #27231f로 사실상 같은 인상이다. */
 .lp-title-brand { color: var(--brand); }
+.lp-title-ink { color: var(--text); }
 
 .lp-lede {
   margin: 0;

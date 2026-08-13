@@ -59,14 +59,9 @@ const STEPS = [
 
 export default function LandingPage({
   onStart,
-  onLogin,
-  onBrowse,
-  isLoggedIn,
 }: {
+  /** 시작하기 버튼. 로그인 여부에 따라 회원가입/문제 목록으로 보내는 판단은 호출측(App)이 한다. */
   onStart: () => void
-  onLogin: () => void
-  onBrowse: () => void
-  isLoggedIn: boolean
 }) {
   const [lineIndex, setLineIndex] = useState(0)
   const reducedMotion = useRef(false)
@@ -91,7 +86,7 @@ export default function LandingPage({
             <span className="lp-title-accent">막혔을 때</span>
             <br />
             먼저 다가오는
-            <br /><span className="lp-title-brand">TUTORY</span>
+            <br /><span className="lp-title-brand">TUT</span><span className="lp-title-ink">ORY</span>
           </h1>
           <p className="lp-lede">
             정답을 알려주는 도구는 이미 많습니다. TUTORY는 학생이 코드를 쓰는 <strong>과정</strong>을 읽고,
@@ -99,18 +94,9 @@ export default function LandingPage({
           </p>
           <div className="lp-cta-row">
             <button className="lp-btn lp-btn-primary" type="button" onClick={onStart}>
-              {isLoggedIn ? '문제 풀러 가기' : '무료로 시작하기'}
+              시작하기
               <ArrowRight size={18} aria-hidden />
             </button>
-            {isLoggedIn ? (
-              <button className="lp-btn lp-btn-ghost" type="button" onClick={onBrowse}>
-                문제 둘러보기
-              </button>
-            ) : (
-              <button className="lp-btn lp-btn-ghost" type="button" onClick={onLogin}>
-                이미 계정이 있어요
-              </button>
-            )}
           </div>
           <p className="lp-note">설치 없이 브라우저에서 바로 실행됩니다.</p>
         </div>
@@ -187,7 +173,7 @@ export default function LandingPage({
         <h2 className="lp-h2">오늘 한 문제부터 시작해볼까요?</h2>
         <div className="lp-cta-row lp-cta-center">
           <button className="lp-btn lp-btn-primary" type="button" onClick={onStart}>
-            {isLoggedIn ? '문제 풀러 가기' : '무료로 시작하기'}
+            시작하기
             <ArrowRight size={18} aria-hidden />
           </button>
         </div>
