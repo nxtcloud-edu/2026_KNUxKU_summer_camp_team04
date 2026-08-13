@@ -56,17 +56,51 @@ ALLOWED_DETAIL_KEYS = {
 }
 
 
+REQUIRED_DETAIL_KEYS = {
+    "problem_id",
+    "title",
+    "concept",
+    "difficulty",
+    "description",
+    "code_template",
+    "check_type",
+    "public_test_cases",
+    "hidden_test_case_count",
+    "hidden_test_categories",
+}
+
+
 def test_problem_detail_has_no_field_capable_of_holding_hidden_data(client):
     """유출 방지가 절차가 아니라 구조라는 것을 실행 가능하게 만든 가드.
 
-    응답 키를 allowlist와 정확히 대조한다. 나중에 누가 ProblemDetail에 필드를
+    응답 키를 allowlist와 대조한다. 나중에 누가 ProblemDetail에 필드를
     추가하면 -- 그게 hidden 데이터를 담든 안 담든 -- 이 테스트가 먼저 실패하고
     사람이 그 필드를 의식적으로 allowlist에 넣게 된다.
+
+    라우터가 response_model_exclude_none=True 라서 값이 None인 필드는 아예
+    빠진다(check_type에 따라 function_name이나 time_limit_sec이 없다). 그래서
+    정확한 일치가 아니라 **부분집합 + 필수키 포함**으로 검사한다.
+    유출 방지에 필요한 성질은 "예상 못 한 키가 나타나지 않는 것"이므로 그대로 유지된다.
     """
     repo = get_problem_repository()
     for record in repo.list():
-        body = client.get(f"/problems/{record.problem_id}").json()
-        assert set(body.keys()) == ALLOWED_DETAIL_KEYS, record.problem_id
+        keys = set(client.get(f"/problems/{record.problem_id}").json().keys())
+        unexpected = keys - ALLOWED_DETAIL_KEYS
+        assert not unexpected, f"{record.problem_id}: 예상 못 한 응답 키 {unexpected}"
+        assert REQUIRED_DETAIL_KEYS <= keys, f"{record.problem_id}: 필수 키 누락 {REQUIRED_DETAIL_KEYS - keys}"
+
+
+def test_null_fields_are_omitted_not_sent_as_null(client):
+    """check_type에 안 맞는 필드는 null이 아니라 **키 자체가 없어야** 한다.
+
+    프론트의 formatPublicTest가 `stdin`의 존재로 렌더링을 분기하는데,
+    null을 보내면 그 분기를 타고 들어가 null.trim()에서 화면이 죽는다.
+    """
+    body = client.get("/problems/func_sum_list").json()
+    tc = body["public_test_cases"][0]
+    assert "input" in tc and "expected" in tc
+    assert "stdin" not in tc, "function_call 문제에 stdin 키가 있으면 프론트 렌더가 깨진다"
+    assert "expected_stdout" not in tc
 
 
 def test_hidden_test_inputs_never_reach_the_client(client):
