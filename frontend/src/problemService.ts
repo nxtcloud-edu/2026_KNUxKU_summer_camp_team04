@@ -1,3 +1,10 @@
+/**
+ * 문제 조회와 채점 결과 타입.
+ *
+ * 이 파일은 **세션이나 이벤트를 다루지 않는다.** 세션 생명주기 · trace 이벤트 ·
+ * 채점 호출은 전부 traceClient.ts 가 소유한다 (그쪽이 배치 큐와 재시도를 갖고 있다).
+ * 여기 남은 것은 "문제를 가져오는 일"과 "응답을 우리 타입으로 정규화하는 일"뿐이다.
+ */
 import localProblems from '../../judge/problems-index.json'
 import localProblemDetails from '../../judge/problems-detail.json'
 import { API_BASE_URL, apiRequest } from './api'
@@ -37,19 +44,6 @@ export type ProblemDetail = ProblemSummary & {
 
 export type JudgeStatus = 'ACCEPTED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'SYNTAX_ERROR' | 'TIME_LIMIT' | 'INTERNAL_ERROR'
 
-export type SessionInfo = {
-  session_id: string
-  user_id: string
-  problem_id: string
-  status: string
-  started_at: string
-  finished_at?: string | null
-  last_code_version: number
-  last_event_seq: number
-  current_code: string
-  current_code_version: number
-}
-
 export type AgentDecision = {
   state: string
   concept?: string | null
@@ -67,6 +61,12 @@ export type JudgeResult = {
   agent_decision?: AgentDecision | null
 }
 
+/**
+ * 브라우저(Pyodide)에서 만든 채점 결과.
+ *
+ * 서버 judge 가 꺼져 있을 때(`JUDGE_BACKEND=none` → 503)의 폴백 경로에서 쓴다.
+ * 서버가 채점할 때는 이 타입이 등장하지 않는다.
+ */
 export type LocalJudgePayload = {
   mode: 'run' | 'submit'
   status: JudgeStatus
@@ -75,16 +75,6 @@ export type LocalJudgePayload = {
   runtime_ms?: number | null
   message?: string
   failed_categories?: string[]
-}
-
-export type ClientEventType = 'CODE_SNAPSHOT' | 'RUN' | 'SUBMIT' | 'UNDO' | 'RESET' | 'HINT_REQUEST' | 'ACTIVITY_OPENED' | 'ACTIVITY_RESPONSE' | 'SESSION_END'
-
-export type EventIngestResponse = {
-  accepted: unknown[]
-  duplicate_client_event_ids: string[]
-  current_code_version: number
-  last_event_seq: number
-  session_finished: boolean
 }
 
 export const isJudgeApiConfigured = Boolean(API_BASE_URL)
@@ -118,65 +108,14 @@ export async function getProblemDetail(problemId: string, signal?: AbortSignal):
   return normalizeProblemDetail(detail)
 }
 
-export async function createSession(problemId: string, signal?: AbortSignal): Promise<SessionInfo | null> {
-  if (!API_BASE_URL) return null
-  return apiRequest<SessionInfo>('/sessions', {
-    method: 'POST',
-    body: JSON.stringify({ problem_id: problemId, user_id: 'demo-user' }),
-    signal,
-  })
-}
-
-export async function postSessionEvent(
-  sessionId: string,
-  type: ClientEventType,
-  payload: Record<string, unknown> = {},
-): Promise<EventIngestResponse | null> {
-  if (!API_BASE_URL || !sessionId) return null
-  return apiRequest<EventIngestResponse>(`/sessions/${encodeURIComponent(sessionId)}/events`, {
-    method: 'POST',
-    body: JSON.stringify({
-      events: [{
-        type,
-        client_event_id: createClientEventId(),
-        client_timestamp: new Date().toISOString(),
-        payload,
-      }],
-    }),
-  })
-}
-
-export async function postCodeSnapshot(sessionId: string, code: string): Promise<EventIngestResponse | null> {
-  return postSessionEvent(sessionId, 'CODE_SNAPSHOT', { code })
-}
-
-export async function postJudgeResult(
-  sessionId: string,
-  result: LocalJudgePayload,
-  codeVersion?: number | null,
-): Promise<JudgeResult> {
-  if (!API_BASE_URL || !sessionId) return result
-  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/results`, {
-    method: 'POST',
-    body: JSON.stringify({
-      mode: result.mode,
-      status: result.status,
-      passed: result.passed,
-      total: result.total,
-      runtime_ms: result.runtime_ms ?? null,
-      message: result.message ?? null,
-      failed_categories: result.failed_categories ?? [],
-      code_version: codeVersion ?? null,
-      client_event_id: createClientEventId(),
-      client_timestamp: new Date().toISOString(),
-    }),
-  })
-  return normalizeJudgeResponse(payload)
-}
-
+/**
+ * 학생이 직접 도움을 요청했을 때의 개입 판단.
+ *
+ * `HINT_REQUEST` 이벤트 기록은 **여기서 하지 않는다.** trace 큐를 소유한 쪽
+ * (App 의 useCodingTrace)이 기록해야 순서가 보장되고 재시도도 얻는다.
+ */
 export async function decideTutorHelp(sessionId: string): Promise<AgentDecision | null> {
   if (!API_BASE_URL || !sessionId) return null
-  await postSessionEvent(sessionId, 'HINT_REQUEST')
   return normalizeAgentDecision(await apiRequest<unknown>('/agent/decide', {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId, trigger: 'HELP_REQUESTED' }),
@@ -227,18 +166,25 @@ function normalizeProblemDetail(payload: unknown): ProblemDetail {
   }
 }
 
+/** 백엔드는 `concepts`, 로컬 인덱스는 `concept` 를 쓴다. 둘 다 받는다. */
 function normalizeConcepts(payload: Record<string, unknown>): string[] {
   const concepts = Array.isArray(payload.concepts) ? payload.concepts : payload.concept
   return Array.isArray(concepts) ? concepts.filter((value): value is string => typeof value === 'string') : []
 }
 
-function normalizeJudgeResponse(payload: unknown): JudgeResult {
+/**
+ * `POST /sessions/{id}/run|submit` 의 ResultIngestResponse 를 JudgeResult 로 좁힌다.
+ *
+ * 채점 결과는 `event.payload` 안에, 개입 판단은 최상위 `agent_decision` 에 있다.
+ * **둘 다 필요하다** -- AiTutorPanel 이 agent_decision 으로 힌트를 만든다.
+ */
+export function normalizeJudgeResponse(payload: unknown): JudgeResult {
   const judgePayload = isObject(payload) && isObject(payload.event) && isObject(payload.event.payload)
     ? payload.event.payload
     : payload
 
   if (!isObject(judgePayload) || typeof judgePayload.status !== 'string') {
-    throw new Error('Invalid judge response')
+    throw new Error('채점 응답이 올바르지 않습니다.')
   }
 
   return {
@@ -253,6 +199,7 @@ function normalizeJudgeResponse(payload: unknown): JudgeResult {
   }
 }
 
+/** Agent 호출이 실패해도 채점 결과는 돌아온다. `null` 은 정상 케이스다. */
 function normalizeAgentDecision(payload: unknown): AgentDecision | null {
   if (!isObject(payload) || typeof payload.action !== 'string' || typeof payload.reason !== 'string') return null
   return {
@@ -269,14 +216,10 @@ function normalizeJudgeStatus(status: string): JudgeStatus {
   return knownStatuses.includes(status as JudgeStatus) ? status as JudgeStatus : 'INTERNAL_ERROR'
 }
 
-function createClientEventId() {
-  return crypto.randomUUID()
-}
-
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

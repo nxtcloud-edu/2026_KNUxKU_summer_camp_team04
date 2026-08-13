@@ -30,7 +30,7 @@ open http://localhost:8000/docs
 ## Test
 
 ```bash
-pytest -q          # 146 tests
+pytest -q          # 217 tests
 ```
 
 `tests/test_monitor.py`가 **데모 게이트**다. backend_plan §22의 필수 시나리오
@@ -40,11 +40,12 @@ pytest -q          # 146 tests
 ## Demo seed
 
 ```bash
-python -m scripts.seed_demo
+python -m scripts.seed_demo   # 데모 세션 4종 (trace 파이프라인 확인용)
+python -m scripts.seed_org    # 기관·교수자·학생·강의 (교육자 기능에 필수)
 ```
 
-4개 데모 세션(PROGRESSING / STUCK / UNDERSTANDING_UNCERTAIN / RECOVERED)을 만들고
-session_id를 출력한다. 그 다음:
+`seed_demo`는 4개 세션(PROGRESSING / STUCK / UNDERSTANDING_UNCERTAIN / RECOVERED)을
+만들고 session_id를 출력한다. 그 다음:
 
 ```bash
 curl localhost:8000/sessions/<id>/process-state | python -m json.tool
@@ -64,15 +65,26 @@ POST /sessions/{id}/finish                      멱등
 
 POST /sessions/{id}/events                      배치 전용 {"events":[...]}
 GET  /sessions/{id}/events?since_seq=&limit=
-POST /sessions/{id}/results                     ★ 파이프라인의 척추
+POST /sessions/{id}/run, /submit                ★ 파이프라인의 척추 (채점+기록+판정+보상)
 GET  /sessions/{id}/process-state               ★ 데모 패널용, 읽기 전용
 GET  /sessions/{id}/timeline?collapse=true
 GET  /sessions/{id}/snapshots
 GET  /sessions/{id}/snapshots/{version}
 GET  /sessions/{id}/snapshots/{version}/diff?from=
 
-POST /sessions/{id}/run, /submit                → 503 JUDGE_UNAVAILABLE  (seam)
 POST /agent/decide                              → action=WAIT            (seam)
+
+POST /auth/signup, /auth/login                  공개
+POST /auth/logout      GET /auth/me
+GET  /users/me/profile          PATCH /users/me/nickname
+GET  /users/me/acorns           /users/me/acorns/transactions
+GET  /users/me/progress         /users/me/progress/{problem_id}
+PUT  /users/me/progress/{problem_id}/checkpoint
+GET  /users/me/solved-problems
+
+GET/POST /educator/courses      GET /educator/courses/{id}
+POST/DELETE /educator/courses/{id}/students[/{sid}]
+GET  /educator/courses/{id}/dashboard  /students  /students/{sid}  /attention
 ```
 
 에러 봉투: `{"detail": {"code": "...", "message": "...", "context": {...}}}`.
@@ -115,15 +127,12 @@ FastAPI의 422는 네이티브 배열 형태를 유지한다. 둘 다 `detail` �
 2. `.env`: `JUDGE_BACKEND=docker`, `JUDGE_PATH=../judge`
 3. **문제 디렉터리를 하나로 정한다.** 단 아래 경고를 먼저 읽을 것.
 
-> **`PROBLEMS_DIR=../judge/problems`를 지금 켜면 앱이 기동 중 죽는다.**
-> judge 문제 26개 중 `function_call` 3개만 파싱되고 `stdout_match` 23개는
-> `KeyError('function_name')`이 난다. `reload()`가 전체를 한 번에 파싱하므로
-> 파일 하나 실패가 저장소 전체를 죽이고, `/problems`·`/sessions`가 전부 500이 된다.
-> 실측: OK 3 / FAIL 23.
+> **파서는 준비됐다.** `stdout_match` 지원이 들어가서 judge 26문제가 전부 파싱된다
+> (실측 OK 26 / FAIL 0). `PROBLEMS_DIR=../judge/problems`로 전환 가능하다.
 >
-> 켜기 전에 필요한 작업 —
-> `function_name`을 Optional로, 테스트케이스 파서가 `{stdin, expected_stdout}`도 받도록,
-> `reload()`가 개별 파일 실패를 skip 하도록. 그때까지는 기본값(`app/problems/data`)을 유지한다.
+> 다만 judge 문제 23개는 `concept`이 비어 있고 `difficulty`가 26개 전부 없다.
+> 전환하면 교육자 대시보드의 약점 개념 분석과 난이도별 도토리 지급이
+> 의미 없는 값을 낸다. **누가 그 메타데이터를 채울지 정하고 전환할 것.**
 4. `run_judge()`는 `runtime_ms`를 반환하지 않는다 → BE1이 한 줄 추가하거나 `null`로 남는다.
 5. 어댑터(`app/judge/docker_judge.py`)는 이미 작성되어 있다.
 
@@ -159,9 +168,11 @@ rm -f codetrace.db && uvicorn app.main:app --reload --workers 1
 
 ## 알려진 제약
 
-- **인증이 없다.** 악의적 클라이언트가 `/results`에 조작된 `5/5`를 보낼 수 있다.
-  MVP 범위 밖이고, `POST /run`(서버 judge)이 유일한 결과 경로가 되면 닫힌다.
-  값싼 방어(`0 <= passed <= total <= 100`, `status ∈ JudgeStatus`)는 이미 들어 있다.
+- **`/auth/refresh`가 없다.** access token 하나만 쓰고 만료되면 다시 로그인한다.
+- **비밀번호 재설정 API가 없다.** 테이블만 있다.
+- **기관 생성 API가 없다.** `python -m scripts.seed_org`가 그 자리를 메운다.
+  이게 없으면 EDUCATOR로 가입할 수 없다 (초대 코드가 존재하지 않으므로).
+- **감사 로그가 없다.** 교육자가 학생 코드를 열람한 기록이 남지 않는다.
 - `FINISHED` 세션의 이벤트도 409가 아니라 플래그(`session_finished: true`)와 함께 수락한다.
   현실적 원인은 `/finish` 직후 큐 flush뿐인데 409는 무대에 빨간 배너를 띄운다.
 

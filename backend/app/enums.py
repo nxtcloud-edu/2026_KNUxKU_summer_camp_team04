@@ -138,6 +138,61 @@ class RegionTag(str, Enum):
     OTHER = "other"
 
 
+class UserRole(str, Enum):
+    """역할은 **서버 토큰에서만** 확인한다. 프런트 요청의 role 필드를 신뢰하지 않는다."""
+
+    STUDENT = "STUDENT"
+    EDUCATOR = "EDUCATOR"
+    ADMIN = "ADMIN"
+
+
+class EnrollmentStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    DROPPED = "DROPPED"
+
+
+class LearningStatus(str, Enum):
+    """교육자 화면의 학생 상태. risk_score 구간에서 파생된다."""
+
+    ON_TRACK = "ON_TRACK"  # 순조로움
+    WATCH = "WATCH"  # 관찰 필요
+    NEEDS_HELP = "NEEDS_HELP"  # 도움 필요
+    INACTIVE = "INACTIVE"  # 장기 미접속
+
+
+class CodeVisibility(str, Enum):
+    """교육자가 학생 코드를 어디까지 볼 수 있는지. **강의별로 교수자가 정한다.**
+
+    기본값이 SUBMITTED_ONLY인 이유: 작성 중인 코드를 들여다보는 것은 감시에
+    가깝다. 지도에 더 필요하다고 판단한 교수자가 명시적으로 올리게 한다.
+    """
+
+    SUBMITTED_ONLY = "SUBMITTED_ONLY"  # submit으로 채점된 코드만
+    LATEST_SNAPSHOT = "LATEST_SNAPSHOT"  # 가장 최근 저장된 코드까지
+
+
+class ProgressStatus(str, Enum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SOLVED = "SOLVED"
+
+
+class AcornTransactionType(str, Enum):
+    """원장 항목의 종류. 양수/음수는 amount 가 정하고 이건 '왜'를 담는다."""
+
+    # 획득
+    PROBLEM_SOLVED = "PROBLEM_SOLVED"
+    FIRST_ACCEPTED = "FIRST_ACCEPTED"
+    DAILY_STREAK = "DAILY_STREAK"
+    TRACE_COMPLETED = "TRACE_COMPLETED"
+    # 사용
+    NICKNAME_CHANGED = "NICKNAME_CHANGED"
+    AVATAR_CHANGED = "AVATAR_CHANGED"
+    # 운영
+    ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+
+
 class AgentAction(str, Enum):
     WAIT = "WAIT"
     HINT = "HINT"

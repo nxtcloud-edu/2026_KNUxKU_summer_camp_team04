@@ -11,6 +11,13 @@ type AiTutorPanelProps = {
   sessionId?: string
   isAuthenticated: boolean
   onRequireLogin: () => void
+  /**
+   * HINT_REQUEST 를 trace 큐에 남긴다.
+   *
+   * 이 패널이 직접 이벤트를 POST 하지 않는 이유: 큐를 소유한 쪽(App 의
+   * useCodingTrace)이 기록해야 다른 이벤트와의 순서가 보장되고 재시도도 얻는다.
+   */
+  onHintRequest?: () => void
 }
 
 type ChatMessage = {
@@ -24,7 +31,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [nextMessageId, setNextMessageId] = useState(1)
@@ -78,6 +85,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     saveAcorns(nextAcorns)
     setAcorns(nextAcorns)
     addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
+    // /agent/decide 보다 **먼저** 큐에 넣는다. Agent 는 이 이벤트까지 본 상태를 읽어야 한다.
+    onHintRequest?.()
     addMessage('tutor', await getTutorHelpMessage(sessionId, tutorHint))
     setOfferState('dismissed')
     setSosConfirmOpen(false)

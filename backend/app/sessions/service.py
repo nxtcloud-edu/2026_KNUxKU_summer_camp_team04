@@ -18,7 +18,7 @@ def create_session(
     repo: ProblemRepository,
     *,
     problem_id: str,
-    user_id: str = "demo-user",
+    user_id: str,
     at: datetime | None = None,
 ) -> Session:
     """세션 생성. 한 트랜잭션에서 네 가지를 한다.

@@ -1,15 +1,19 @@
 # CodeTrace MVP 기능 목록
 
-체크박스는 **현재 실제 구현 상태**다.
+체크박스는 **현재 실제 구현 상태**다. 백엔드 테스트 217개 통과.
 
 | 레이어 | 상태 |
 |---|---|
-| Backend — Trace / Feature / Monitor / Timeline | 완료 (테스트 146개) |
-| Backend — Judge, Agent LLM | seam (`503` / 항상 `WAIT`) |
+| Backend — Trace / Feature / Monitor / Timeline | 완료 |
+| Backend — 인증 · 도토리 · 진행 상태 | 완료 |
+| Backend — 교육기관 (기관·강의·대시보드) | 완료 (UI 없음) |
+| Backend — Judge | 어댑터 완료. `JUDGE_BACKEND=docker` 로 켠다 |
+| Backend — Agent LLM | seam (항상 `WAIT`, 어댑터 없음) |
 | Backend — Activity, Learner State, Analytics | 미착수 |
 | Frontend — 문제 화면 / Monaco / Pyodide 실행 | 완료 |
-| Frontend — Backend 연동 | 미착수 |
-| Agent — prompt / LLM 호출 | 미착수 |
+| Frontend — Coding Trace 수집 | 완료 |
+| Frontend — 인증 연결 | **미착수** (화면만 있음) |
+| Agent — 에이전트 4종 + 문제 생성기 | 코드 완료, backend 미연결 |
 
 ---
 
@@ -130,8 +134,8 @@ Tests
 * [x] `TIME_LIMIT` — 관측 없음
 * [x] `INTERNAL_ERROR` — 관측 없음
 
-오늘은 브라우저 Pyodide가 채점하고 결과를 `POST /sessions/{id}/results`로 보낸다.
-Docker judge는 seam으로 준비되어 있다 (`POST /run` → 현재 503).
+채점은 서버가 한다. `POST /sessions/{id}/run|submit` 하나가 스냅샷·채점·기록·판정을
+전부 처리한다. `JUDGE_BACKEND=docker` 를 켜야 동작한다 (기본값 `none` 이면 503).
 
 ### Agent 내부용 정보
 

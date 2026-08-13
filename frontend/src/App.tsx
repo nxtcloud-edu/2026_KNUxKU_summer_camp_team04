@@ -28,7 +28,9 @@ import MyPage from './MyPage'
 import { preparePython, runPython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { createSession, getProblemDetail, isJudgeApiConfigured, postCodeSnapshot, postJudgeResult, postSessionEvent, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { isJudgeUnavailable, runJudge } from './traceClient'
+import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
 import { getCurrentUser, logoutUser, type UserRole } from './auth'
 
@@ -85,8 +87,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [code, setCode] = useState('')
   const [result, setResult] = useState<JudgeResult | null>(null)
   const [judgeError, setJudgeError] = useState('')
-  const [sessionId, setSessionId] = useState('')
-  const [codeVersion, setCodeVersion] = useState<number | null>(null)
   const [mode, setMode] = useState<RunMode>('run')
   const [isRunning, setIsRunning] = useState(false)
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>('loading')
@@ -106,40 +106,47 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
+  // Coding Trace 수집. 세션은 **첫 편집이나 첫 실행 때** 지연 생성된다 --
+  // 아래 문제 로드 useEffect 는 마운트 즉시 1회 돌기 때문에, 거기서 세션을 만들면
+  // 학생이 아직 목록 화면에 있는데도 세션이 생긴다.
+  // 비로그인 상태에서는 전부 끈다: 세션·이벤트·채점 API가 모두 로그인을 요구한다.
+  const trace = useCodingTrace(problem?.problem_id ?? null, { enabled: Boolean(userRole) })
+
   useEffect(() => {
     const controller = new AbortController()
     setProblemLoading(true)
     setProblemError('')
     getProblemDetail(selectedProblemId, controller.signal)
-      .then(async (detail) => {
+      .then((detail) => {
         setProblem(detail)
-        const checkpoint = localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`)
-        setCode(checkpoint ?? detail.code_template)
+        setCode(localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`) ?? detail.code_template)
         setResult(null)
         setJudgeError('')
-        setSessionId('')
-        setCodeVersion(null)
-        if (userRole) {
-          try {
-            const session = await createSession(detail.problem_id, controller.signal)
-            if (session) {
-              setSessionId(session.session_id)
-              setCodeVersion(session.current_code_version)
-              if (!checkpoint && session.current_code) setCode(session.current_code)
-            }
-          } catch (error) {
-            if (!(error instanceof DOMException && error.name === 'AbortError')) {
-              console.warn('Session API unavailable. Judge will create a session when needed.', error)
-            }
-          }
-        }
       })
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === 'AbortError')) setProblemError(caught instanceof Error ? caught.message : String(caught))
       })
       .finally(() => setProblemLoading(false))
     return () => controller.abort()
-  }, [selectedProblemId, userRole])
+  }, [selectedProblemId])
+
+  // 새로고침 복구. 살아있는 세션이 있으면 이어받고 서버가 들고 있던 코드를 되살린다.
+  // **세션을 새로 만들지는 않는다** -- 그건 첫 편집/첫 실행의 몫이다.
+  // 로컬 체크포인트가 있으면 학생이 명시적으로 저장한 그쪽을 존중한다.
+  const problemId = problem?.problem_id
+  const resumeSession = trace.resume
+  useEffect(() => {
+    if (!problemId || !userRole) return
+    let cancelled = false
+    resumeSession()
+      .then((session) => {
+        if (cancelled || !session?.current_code) return
+        if (localStorage.getItem(`codetrace:checkpoint:${problemId}`) !== null) return
+        setCode(session.current_code)
+      })
+      .catch((error) => console.warn('세션 복구를 건너뜁니다.', error))
+    return () => { cancelled = true }
+  }, [problemId, userRole, resumeSession])
 
   useEffect(() => {
     preparePython()
@@ -185,22 +192,51 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setIsRunning(true)
     setResult(null)
     setJudgeError('')
+
+    // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
+    // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
+    const judgeInBrowser = async () => {
+      setResult(toJudgePayload(await runPython(code, problem), nextMode))
+    }
+
     try {
-      let latestCodeVersion = codeVersion
-      if (sessionId) {
-        const snapshot = await postCodeSnapshot(sessionId, code)
-        latestCodeVersion = snapshot?.current_code_version ?? latestCodeVersion
-        setCodeVersion(latestCodeVersion)
-        await postSessionEvent(sessionId, nextMode === 'run' ? 'RUN' : 'SUBMIT')
+      // 백엔드를 아예 붙이지 않은 데모 모드. 세션을 만들 곳이 없다.
+      if (!isJudgeApiConfigured) {
+        await judgeInBrowser()
+        return
       }
 
-      const localResult = toJudgePayload(await runPython(code, problem), nextMode)
-      setResult(sessionId ? await postJudgeResult(sessionId, localResult, latestCodeVersion) : localResult)
+      const session = await trace.ensureSession()
+      // 대기 중인 편집을 결과보다 **먼저** 도착시킨다. 백엔드는 "직전 결과 이후의
+      // 편집"을 code_version 으로 자르므로, 스냅샷이 늦게 오면 그 편집이 다음
+      // 결과의 창으로 밀려 same_region_edit_count 가 한 칸씩 어긋난다.
+      await trace.flush()
+      trace.recordEvent(nextMode === 'run' ? 'RUN' : 'SUBMIT')
+      // 이 한 번의 호출이 스냅샷 생성 → 채점 → TEST_RESULT 기록 → monitor 평가를 전부 한다.
+      // 클라이언트가 채점 결과를 보고하던 POST /results 는 제거됐다. 서버가 채점의 권위다.
+      setResult(await runJudge(session, code, nextMode))
     } catch (caught) {
-      setJudgeError(caught instanceof Error ? caught.message : String(caught))
+      // 서버 judge 가 미구성이면(JUDGE_BACKEND=none → 503 JUDGE_UNAVAILABLE) 브라우저로 넘어간다.
+      if (isJudgeUnavailable(caught)) {
+        try {
+          await judgeInBrowser()
+        } catch (localCaught) {
+          setJudgeError(localCaught instanceof Error ? localCaught.message : String(localCaught))
+        }
+      } else {
+        setJudgeError(caught instanceof Error ? caught.message : String(caught))
+      }
     } finally {
       setIsRunning(false)
     }
+  }
+
+  // 코드 편집의 유일한 관측점. 여기서만 학생의 타이핑을 볼 수 있다 --
+  // useEffect([code]) 로는 안 된다. 문제 전환 시의 setCode 와 구분이 안 되기 때문.
+  const handleCodeChange = (value: string | undefined) => {
+    const next = value ?? ''
+    setCode(next)
+    trace.recordEdit(next)
   }
 
   const resetCode = () => {
@@ -208,6 +244,8 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     if (code === problem.code_template || window.confirm('작성한 코드를 기본 코드로 되돌릴까요?')) {
       setCode(problem.code_template)
       setResult(null)
+      trace.recordEvent('RESET')
+      trace.recordEdit(problem.code_template)
       editorRef.current?.focus()
     }
   }
@@ -220,7 +258,13 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const restoreCheckpoint = () => {
     if (!problem) return
     const checkpoint = localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`)
-    if (checkpoint !== null) { setCode(checkpoint); setResult(null) }
+    if (checkpoint !== null) {
+      setCode(checkpoint)
+      setResult(null)
+      // 학생 입장에서 "되돌리기"다. 백엔드의 UNDO 이벤트가 이 의미를 갖는다.
+      trace.recordEvent('UNDO')
+      trace.recordEdit(checkpoint)
+    }
   }
 
   const selectProblem = (selected: ProblemSummary) => {
@@ -233,6 +277,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       setLoginPrompt(service)
       return
     }
+    if (nextActivity === 'trace') trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' })
     setActivity(nextActivity)
   }
 
@@ -335,7 +380,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
               height="100%"
               defaultLanguage="python"
               value={code}
-              onChange={(value) => setCode(value ?? '')}
+              onChange={handleCodeChange}
               onMount={handleEditorMount}
               theme={isDark ? 'vs-dark' : 'vs-light'}
               loading={<EditorLoading />}
@@ -402,7 +447,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} />
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}

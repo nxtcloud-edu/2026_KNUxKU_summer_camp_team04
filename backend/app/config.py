@@ -51,6 +51,39 @@ class Settings(BaseSettings):
     judge_path: str = "../judge"
     agent_backend: str = "none"  # none | llm
 
+    # 인증. jwt_secret은 **운영에서 반드시 바꾼다.**
+    # 기본값을 그대로 쓰면 누구나 아무 사용자의 토큰을 발급할 수 있다.
+    # HS256은 32바이트 이상을 권장한다(RFC 7518 §3.2). 기본값도 그 길이를 맞춘다.
+    jwt_secret: str = "dev-only-change-me-in-production-0123456789abcdef"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 12  # 데모 편의상 길게
+
+    # 도토리 지급/차감 정책 (문서 §6의 권장 MVP)
+    # judge 문제 26개에 difficulty가 전부 없어서 지금은 모두 BEGINNER=10으로 수렴한다.
+    # BE1이 difficulty를 채우면 아래 매핑이 그대로 동작한다.
+    acorn_reward_beginner: int = 10
+    acorn_reward_intermediate: int = 15
+    acorn_reward_advanced: int = 20
+    acorn_reward_trace_completed: int = 3
+    acorn_cost_nickname: int = 5
+    acorn_cost_avatar: int = 10
+
+    # 닉네임 정책
+    nickname_min_length: int = 2
+    nickname_max_length: int = 16
+    nickname_banned_words: str = "admin,관리자,운영자,operator,root,system"
+
+    @property
+    def banned_nickname_list(self) -> list[str]:
+        return [w.strip().lower() for w in self.nickname_banned_words.split(",") if w.strip()]
+
+    def acorn_reward_for(self, difficulty: str) -> int:
+        return {
+            "BEGINNER": self.acorn_reward_beginner,
+            "INTERMEDIATE": self.acorn_reward_intermediate,
+            "ADVANCED": self.acorn_reward_advanced,
+        }.get((difficulty or "").upper(), self.acorn_reward_beginner)
+
     # Monitor
     monitor_no_progress_seconds: int = 90
     monitor_same_result_threshold: int = 3

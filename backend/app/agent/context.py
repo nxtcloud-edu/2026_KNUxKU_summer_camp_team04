@@ -22,6 +22,19 @@ from app.trace.timeline import recent_trace_labels
 RECENT_TRACE_LIMIT = 10
 
 
+def _first_prose_line(description: str) -> str:
+    """마크다운 헤딩과 빈 줄을 건너뛴 첫 실제 문장.
+
+    judge 문제의 description은 "## 문제\n정수로 이루어진..." 형태라
+    split("\n")[0]이 "## 문제"가 된다.
+    """
+    for line in description.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return ""
+
+
 def build_context(
     db: DbSession,
     session_id: str,
@@ -60,7 +73,10 @@ def build_context(
             "problem_id": problem.problem_id,
             "title": problem.title,
             "concepts": problem.concepts,
-            "description_summary": problem.description.split("\n")[0],
+            # 첫 줄이 아니라 **첫 의미 있는 줄**을 쓴다. judge 문제의 description은
+            # 마크다운이라 첫 줄이 리터럴 "## 문제"다. 그걸 그대로 넣으면
+            # 모든 에이전트 프롬프트에 무의미한 문자열이 들어간다.
+            "description_summary": _first_prose_line(problem.description),
             "function_name": problem.function_name,
         },
         current_code=snapshot.code if snapshot else "",

@@ -32,10 +32,12 @@ Frontend의 핵심 책임은 세 가지다.
 |---|---|
 | Vite + React + TS 프로젝트 | 세팅 완료 |
 | Monaco Editor / 문제 화면 | 구현 완료 |
-| Pyodide 브라우저 실행 | 구현 완료 (`src/pythonRunner.ts`) |
-| Backend 연동 | **미구현** — `src/`에 API 호출이 아직 없다 |
-| Agent Panel / Activity UI | 미구현 |
-| Process State Panel / Timeline | 미구현 |
+| Pyodide 실행 | TRACE 학습 화면(`runTrace`)에만 쓰인다. **채점은 서버가 한다** |
+| Backend 연동 | 구현 완료 — `traceClient.ts`, `useCodingTrace.ts` |
+| Agent Panel / Activity UI | 부분 (`AiTutorPanel.tsx` 있음, 백엔드 미연결) |
+| Process State Panel / Timeline | 미구현 (백엔드 API는 준비됨) |
+| 로그인·회원가입 API 연결 | **미구현** — 화면만 있고 API를 안 부른다 |
+| 교육자 대시보드 | 미구현 (백엔드 9개 엔드포인트 준비됨) |
 
 Backend는 전부 준비되어 있다. **요청/응답 필드 규약은
 [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)가 진실이고**, 이 문서는 화면 구성과
@@ -45,7 +47,8 @@ UX 설계를 다룬다. 서버를 띄우고 <http://localhost:8000/docs>를 열�
 기억할 세 가지:
 
 - **JSON은 전부 `snake_case`다.**
-- 오늘의 채점은 브라우저(Pyodide)가 하고 결과를 `POST /sessions/{id}/results`로 보낸다.
+- 채점은 **서버가 한다.** `POST /sessions/{id}/run|submit` 한 번이 전부 처리한다.
+- **거의 모든 API가 로그인을 요구한다.** `Authorization: Bearer <token>`
 - 모든 이벤트에 `client_event_id`(`crypto.randomUUID()`)를 넣는다.
 
 ---
@@ -136,7 +139,9 @@ MVP는 한 화면에서 문제풀이, Agent 활동, Timeline을 확인할 수 �
 - Agent panel
 - Timeline
 
-별도 로그인, 마이페이지, 교수자 dashboard는 MVP 범위에서 제외한다.
+로그인·회원가입·마이페이지 화면은 구현됐다 (`LoginPage.tsx`, `SignupPage.tsx`, `MyPage.tsx`).
+다만 **셋 다 백엔드 API를 부르지 않고 로컬 상태만 바꾼다.**
+교수자 dashboard는 백엔드 9개 엔드포인트가 준비됐고 화면이 없다.
 
 ---
 
@@ -221,7 +226,7 @@ Frontend는 Sensor 역할을 한다. 이벤트의 교육적 의미는 Backend가
 
 `SESSION_START`는 **서버가 만든다.** `POST /sessions` 시점에 이미 기록되므로
 클라이언트가 보내면 422다. `TEST_RESULT`도 마찬가지로 서버 전용이고,
-채점 결과는 `POST /results`라는 별도 문으로 보낸다.
+채점은 `POST /sessions/{id}/run|submit` 으로 보낸다.
 
 ### 이벤트 형태
 
@@ -824,16 +829,16 @@ Frontend MVP는 다음 조건을 만족해야 한다.
 - [x] 문제 하나 이상이 정상 표시됨
 - [x] Monaco에서 Python 코드 작성 가능
 - [x] Run 결과가 표시됨 (브라우저 Pyodide)
-- [ ] Coding snapshot과 Run event가 Backend에 기록됨 ← **다음 작업**
+- [x] Coding snapshot과 Run event가 Backend에 기록됨
 - [ ] Agent의 `WAIT`, `HINT`, `TRACE`, `PREDICT`를 화면에 표시 가능
 - [ ] TRACE 또는 PREDICT 답변 제출 가능
 - [ ] Activity 이후 원래 문제로 복귀 가능
 - [ ] Coding Timeline에서 Agent 개입 지점을 확인 가능
 - [ ] Agent API가 실패해도 Judge 기능은 계속 사용 가능
 
-가장 시급한 것은 **Event Collector와 `POST /results` 연결**이다. 이게 붙는 순간
-Process State Panel과 Timeline은 서버가 만들어준 문자열을 렌더하기만 하면 되므로
-빠르게 완성된다.
+가장 시급한 것은 **로그인 API 연결**이다. 지금 `LoginPage`가 입력값을 아무 데도
+보내지 않아서, 백엔드에 붙이면 `POST /sessions`부터 401이 나고 Coding Trace와
+채점이 전부 멈춘다. 계약은 [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md) §0에 있다.
 
 Frontend가 증명해야 할 핵심 메시지는 다음과 같다.
 

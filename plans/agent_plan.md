@@ -31,11 +31,16 @@ Observe Coding Trace
 | Agent Context Builder | **완료** — `build_context()`가 실제 trace로 payload를 채운다 |
 | `POST /agent/decide` 엔드포인트 | **완료** — 스키마 확정, 지금은 항상 `WAIT` |
 | `AgentProtocol` 인터페이스 | **완료** — 이걸 구현하면 끝 |
-| LLM provider / prompt / Activity 생성 | 미착수 |
+| 에이전트 4종 (state/guidance/action/evaluation) | 코드 완료 |
+| 문제 생성기 (오답 기반 복습) | 코드 완료 (`problem_generator_agent.py`) |
+| LLM provider 스위치 | 완료 (Anthropic/OpenAI/LiteLLM/Bedrock) |
+| **backend 어댑터** | **없음** — `AGENT_BACKEND=llm` 을 켜도 `WaitAgent` 로 폴백한다 |
+| Activity 생성 | 미착수 |
 | Activity 저장소 · 답변 평가 API | 미착수 |
 
-Agent 담당자가 **day 1부터 할 수 있는 일**: `app/agent/interface.py`의 `AgentProtocol`을
-구현하고 `.env`에 `AGENT_BACKEND=llm`을 넣으면 파이프라인에 바로 꽂힌다.
+**아직 꽂히지 않았다.** `backend/app/agent/__init__.py` 의 `get_agent()` 에 `llm` 분기가
+없어서 `AGENT_BACKEND=llm` 을 넣어도 경고만 찍고 `WaitAgent` 를 돌려준다.
+연결하려면 `AgentProtocol` 을 구현하는 어댑터와 그 분기가 필요하다.
 입력(`AgentContext`)은 이미 실제 데이터로 채워져 오고, 출력 스키마도 고정되어 있다.
 
 Monitor가 `trigger`를 만들 때만 Agent가 호출된다. 호출 시점 판단은 이미 끝나 있으므로
@@ -494,7 +499,7 @@ Monitor를 우회할 수 있다.
 **이 스키마는 확정이다.** 오늘은 stub이 항상 `action: "WAIT"`을 반환하지만,
 프론트는 6종 action UI를 지금 다 만들어둘 수 있다.
 
-실전에서 Agent가 호출되는 주 경로는 이 엔드포인트가 아니라 **`POST /sessions/{id}/results`**다.
+실전에서 Agent가 호출되는 주 경로는 이 엔드포인트가 아니라 **`POST /sessions/{id}/run|submit`**이다.
 Monitor가 trigger를 만들면 서버가 내부에서 Context Builder → `agent.decide()`를 부르고,
 결과를 응답의 `agent_decision` 필드에 실어 보낸다. `/agent/decide`는 수동 호출·디버그용이다.
 

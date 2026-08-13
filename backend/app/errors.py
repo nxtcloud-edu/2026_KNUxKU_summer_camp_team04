@@ -45,6 +45,119 @@ class SessionNotFound(AppError):
         super().__init__("세션을 찾을 수 없습니다.", session_id=session_id)
 
 
+# --------------------------------------------------------------------- 인증
+
+
+class InvalidCredentials(AppError):
+    """이메일이 없든 비밀번호가 틀렸든 **같은 에러**를 던진다.
+
+    구분해서 알려주면 "이 이메일은 가입되어 있다"를 확인시켜 주는 계정 열거
+    취약점이 된다.
+    """
+
+    status_code = 401
+    code = "INVALID_CREDENTIALS"
+
+    def __init__(self) -> None:
+        super().__init__("이메일 또는 비밀번호가 올바르지 않습니다.")
+
+
+class NotAuthenticated(AppError):
+    status_code = 401
+    code = "NOT_AUTHENTICATED"
+
+    def __init__(self, message: str = "로그인이 필요합니다.") -> None:
+        super().__init__(message)
+
+
+class Forbidden(AppError):
+    """역할이 모자란 경우. 리소스 소유권 문제는 404를 쓴다(존재를 숨기려고)."""
+
+    status_code = 403
+    code = "FORBIDDEN"
+
+    def __init__(self, message: str = "권한이 없습니다.") -> None:
+        super().__init__(message)
+
+
+class InvalidInviteCode(AppError):
+    status_code = 422
+    code = "INVALID_INVITE_CODE"
+
+    def __init__(self, message: str = "초대 코드가 올바르지 않습니다.") -> None:
+        super().__init__(message)
+
+
+class CourseNotFound(AppError):
+    """소유하지 않은 강의도 여기로 온다. 존재 여부를 알려주지 않는다."""
+
+    status_code = 404
+    code = "COURSE_NOT_FOUND"
+
+    def __init__(self, course_id: str) -> None:
+        super().__init__("강의를 찾을 수 없습니다.", course_id=course_id)
+
+
+class StudentNotInCourse(AppError):
+    status_code = 404
+    code = "STUDENT_NOT_IN_COURSE"
+
+    def __init__(self, student_id: str) -> None:
+        super().__init__("이 강의에 등록된 학생이 아닙니다.", student_id=student_id)
+
+
+class AlreadyEnrolled(AppError):
+    status_code = 409
+    code = "ALREADY_ENROLLED"
+
+    def __init__(self) -> None:
+        super().__init__("이미 등록된 학생입니다.")
+
+
+class EmailAlreadyRegistered(AppError):
+    status_code = 409
+    code = "EMAIL_ALREADY_REGISTERED"
+
+    def __init__(self) -> None:
+        super().__init__("이미 가입된 이메일입니다.")
+
+
+class NicknameTaken(AppError):
+    status_code = 409
+    code = "NICKNAME_TAKEN"
+
+    def __init__(self, nickname: str) -> None:
+        super().__init__("이미 사용 중인 닉네임입니다.", nickname=nickname)
+
+
+class InvalidNickname(AppError):
+    status_code = 422
+    code = "INVALID_NICKNAME"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class UserNotFound(AppError):
+    status_code = 404
+    code = "USER_NOT_FOUND"
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__("사용자를 찾을 수 없습니다.", user_id=user_id)
+
+
+class InsufficientAcorns(AppError):
+    status_code = 402
+    code = "INSUFFICIENT_ACORNS"
+
+    def __init__(self, *, required: int, balance: int) -> None:
+        super().__init__(
+            f"도토리가 부족합니다. {required}개가 필요하지만 {balance}개를 가지고 있습니다.",
+            required=required,
+            balance=balance,
+        )
+
+
 class ProblemNotFound(AppError):
     status_code = 404
     code = "PROBLEM_NOT_FOUND"
