@@ -14,7 +14,6 @@ import {
   Moon,
   MoreVertical,
   Play,
-  RotateCcw,
   Send,
   Sun,
   Terminal,
@@ -239,17 +238,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     trace.recordEdit(next)
   }
 
-  const resetCode = () => {
-    if (!problem) return
-    if (code === problem.code_template || window.confirm('작성한 코드를 기본 코드로 되돌릴까요?')) {
-      setCode(problem.code_template)
-      setResult(null)
-      trace.recordEvent('RESET')
-      trace.recordEdit(problem.code_template)
-      editorRef.current?.focus()
-    }
-  }
-
   const saveCheckpoint = () => {
     if (!problem) return
     localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
@@ -326,9 +314,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
                   <ThemeButton icon={<Moon />} label="Dark" selected={themeMode === 'dark'} onClick={() => setThemeMode('dark')} />
                 </div>
                 <div className="menu-divider" />
-                <button className="menu-row" role="menuitem" onClick={() => { resetCode(); setMenuOpen(false) }}>
-                  <span>코드 초기화</span><RotateCcw size={16} />
-                </button>
                 {userRole === 'educator' && <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); setActivity('educator') }}>
                   <span>교육자 페이지</span><GraduationCap size={16} />
                 </button>}
@@ -377,7 +362,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button><button className="icon-text-button" onClick={resetCode} title="기본 코드로 되돌리기"><RotateCcw size={15} /> 초기화</button></div>
+            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button></div>
           </div>
           <div className="editor-wrap">
             <Editor
