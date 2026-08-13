@@ -28,6 +28,7 @@ import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
 import {
   getProblemDetail,
+  createSession,
   isJudgeApiConfigured,
   judgeCode,
   type JudgeResult,
@@ -99,6 +100,7 @@ function LearningWorkspace({
   const [code, setCode] = useState('')
   const [result, setResult] = useState<JudgeResult | null>(null)
   const [judgeError, setJudgeError] = useState('')
+  const [sessionId, setSessionId] = useState('')
   const [mode, setMode] = useState<RunMode>('run')
   const [isRunning, setIsRunning] = useState(false)
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>('loading')
@@ -123,12 +125,27 @@ function LearningWorkspace({
     setProblemLoading(true)
     setProblemError('')
     getProblemDetail(selectedProblemId, controller.signal)
-      .then((detail) => {
+      .then(async (detail) => {
         setProblem(detail)
         const checkpoint = localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`)
         setCode(checkpoint ?? detail.code_template)
         setResult(null)
         setJudgeError('')
+        setSessionId('')
+
+        if (isAuthenticated) {
+          try {
+            const session = await createSession(detail.problem_id, controller.signal)
+            if (session) {
+              setSessionId(session.session_id)
+              if (!checkpoint && session.current_code) setCode(session.current_code)
+            }
+          } catch (error) {
+            if (!(error instanceof DOMException && error.name === 'AbortError')) {
+              console.warn('Session API unavailable. Judge will create a session when needed.', error)
+            }
+          }
+        }
       })
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
@@ -137,7 +154,7 @@ function LearningWorkspace({
       })
       .finally(() => setProblemLoading(false))
     return () => controller.abort()
-  }, [selectedProblemId])
+  }, [selectedProblemId, isAuthenticated])
 
   useEffect(() => {
     preparePython()
@@ -191,7 +208,8 @@ function LearningWorkspace({
     setResult(null)
     setJudgeError('')
     try {
-      setResult(await judgeCode(code, problem.problem_id, nextMode))
+      const judgeResult = await judgeCode(code, problem.problem_id, nextMode, sessionId || undefined)
+      setResult(judgeResult)
     } catch (caught) {
       setJudgeError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -427,7 +445,7 @@ function LearningWorkspace({
             </section>
           </div>
 
-          <AiTutorPanel problem={problem} result={result} judgeError={judgeError} />
+          <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={sessionId} />
         </main>
       )}
 
@@ -518,6 +536,7 @@ const JUDGE_LABELS: Record<JudgeResult['status'], string> = {
   RUNTIME_ERROR: '실행 중 오류가 발생했어요',
   SYNTAX_ERROR: '문법을 다시 확인해 주세요',
   TIME_LIMIT: '시간 제한을 초과했어요',
+  INTERNAL_ERROR: '채점 서버에서 오류가 발생했어요',
 }
 
 function JudgeResultView({ result, mode }: { result: JudgeResult; mode: RunMode }) {

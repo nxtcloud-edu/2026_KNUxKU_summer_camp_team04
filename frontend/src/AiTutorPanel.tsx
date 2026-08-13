@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { MessageCircle, Send, Sparkles } from 'lucide-react'
 import AcornIcon from './AcornIcon'
 import squirrelTutor from './assets/squirrel-tutor.png'
-import type { JudgeResult, ProblemDetail } from './problemService'
+import { decideTutorHelp, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
 
 type AiTutorPanelProps = {
   problem: ProblemDetail | null
   result: JudgeResult | null
   judgeError: string
+  sessionId?: string
 }
 
 type ChatMessage = {
@@ -21,7 +22,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [nextMessageId, setNextMessageId] = useState(1)
@@ -43,7 +44,7 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
   }
 
   const acceptOffer = () => {
-    addMessage('student', '네, 도움이 필요해요.')
+    addMessage('student', '네, 도와주세요.')
     addMessage('tutor', tutorHint)
     setOfferState('dismissed')
   }
@@ -59,7 +60,7 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
     setSosConfirmOpen(true)
   }
 
-  const confirmSos = () => {
+  const confirmSos = async () => {
     const latestAcorns = loadAcorns()
     if (latestAcorns < SOS_COST) {
       setAcorns(latestAcorns)
@@ -71,7 +72,7 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
     saveAcorns(nextAcorns)
     setAcorns(nextAcorns)
     addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
-    addMessage('tutor', tutorHint)
+    addMessage('tutor', await getTutorHelpMessage(sessionId, tutorHint))
     setOfferState('dismissed')
     setSosConfirmOpen(false)
     setSosError('')
@@ -165,12 +166,29 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
 }
 
 function makeTutorHint(problem: ProblemDetail | null, result: JudgeResult | null, judgeError: string) {
+  if (result?.agent_decision && result.agent_decision.action !== 'WAIT') return formatAgentDecision(result.agent_decision)
   if (judgeError) return '채점 서버 연결부터 확인해볼까요? 지금은 코드보다 실행 환경 문제일 수 있어요.'
   if (result?.status === 'SYNTAX_ERROR') return '문법 오류가 있어 보여요. 괄호, 콜론(:), 들여쓰기를 먼저 차근차근 확인해봐요.'
   if (result?.status === 'RUNTIME_ERROR') return '실행 중 오류가 났어요. 변수 이름이 맞는지, 리스트 인덱스를 벗어나지 않았는지 확인해봐요.'
   if (result?.status === 'WRONG_ANSWER') return '답이 조금 달라요. 예시 입력을 손으로 따라가며 중간값이 어떻게 변하는지 적어보면 좋아요.'
   if (problem?.function_name) return `${problem.function_name} 함수가 어떤 값을 받아서 어떤 값을 반환해야 하는지 먼저 정리해볼까요?`
   return '문제를 작은 단계로 나눠볼게요. 입력, 처리, 출력 순서로 생각하면 훨씬 쉬워져요.'
+}
+
+async function getTutorHelpMessage(sessionId: string | undefined, fallback: string) {
+  if (!sessionId) return fallback
+  try {
+    const decision = await decideTutorHelp(sessionId)
+    return decision && decision.action !== 'WAIT' ? formatAgentDecision(decision) : fallback
+  } catch (error) {
+    console.warn('Agent API unavailable. Using local tutor hint.', error)
+    return fallback
+  }
+}
+
+function formatAgentDecision(decision: AgentDecision) {
+  const concept = decision.concept ? `${decision.concept} 부분을 같이 보면 좋겠어요. ` : ''
+  return `${concept}${decision.reason}`
 }
 
 function loadAcorns() {
