@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft,
   Award,
   BadgeCheck,
   Camera,
@@ -11,10 +10,6 @@ import {
   Trophy,
   UserRound,
 } from 'lucide-react'
-
-type MyPageProps = {
-  onExit: () => void
-}
 
 type Profile = {
   nickname: string
@@ -50,7 +45,7 @@ const BADGES = [
   { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자' },
 ]
 
-function MyPage({ onExit }: MyPageProps) {
+function MyPage() {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
@@ -111,11 +106,6 @@ function MyPage({ onExit }: MyPageProps) {
   return (
     <main className="mypage">
       <div className="mypage-container">
-        <button className="back-button" onClick={onExit}>
-          <ArrowLeft size={16} />
-          학습 화면
-        </button>
-
         <section className="mypage-hero">
           <div className="profile-main">
             <div className="profile-avatar">
