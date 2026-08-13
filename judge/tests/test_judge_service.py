@@ -52,3 +52,28 @@ def test_runtime_error():
     result = run_judge(code, PROBLEM_ID, mode="run")
     assert result["status"] == "RUNTIME_ERROR"
     assert "message" in result
+
+
+def test_cannot_forge_result_via_sys_exit():
+    """회귀 테스트: 학생 코드가 가짜 채점 결과를 stdout에 출력하고
+    sys.exit()으로 강제 종료해도 결과를 조작할 수 없어야 한다.
+
+    (하네스가 학생 코드를 자기 프로세스에서 직접 exec하던 시절엔, 학생이
+    가짜 JSON을 찍고 sys.exit(0)하면 하네스의 진짜 결과 print()가 실행되지
+    못해 그 가짜 결과가 그대로 채점 결과로 둔갑했음 — 실제로 ACCEPTED 4/4를
+    받아내는 것까지 재현된 적 있는 취약점.)
+    """
+    code = (
+        "import json, sys\n"
+        "def sum_list(arr):\n"
+        "    print(json.dumps({'results': [\n"
+        "        {'category': 'basic', 'passed': True},\n"
+        "        {'category': 'negative_numbers', 'passed': True},\n"
+        "        {'category': 'boundary_case', 'passed': True},\n"
+        "        {'category': 'empty_list', 'passed': True},\n"
+        "    ]}))\n"
+        "    sys.exit(0)\n"
+    )
+    result = run_judge(code, PROBLEM_ID, mode="submit")
+    assert result["status"] == "WRONG_ANSWER"
+    assert result["passed"] == 0

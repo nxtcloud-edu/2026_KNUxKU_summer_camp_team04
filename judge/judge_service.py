@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 import docker
+import requests
 from docker.errors import DockerException
 
 PROBLEMS_DIR = Path(__file__).parent / "problems"
@@ -19,6 +20,7 @@ SANDBOX_IMAGE = "judge-sandbox"
 TIMEOUT_SEC = 5
 MEM_LIMIT = "128m"
 PIDS_LIMIT = 64
+CPU_LIMIT_NANO = 1_000_000_000  # 1 vCPU로 제한 (무한루프가 호스트 코어를 통째로 잡는 것 방지)
 
 # check_type별로 컨테이너 안에서 돌릴 하네스 스크립트.
 # 새 check_type을 추가하려면 harness/에 스크립트를 추가하고 여기 등록만 하면 됨.
@@ -129,8 +131,12 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
                 volumes={tmp_dir: {"bind": "/payload", "mode": "ro"}},
                 network_disabled=True,
                 mem_limit=MEM_LIMIT,
+                memswap_limit=MEM_LIMIT,  # mem_limit만 걸면 스왑으로 최대 2배까지 우회 가능해서 동일 값으로 스왑 차단
+                nano_cpus=CPU_LIMIT_NANO,
                 pids_limit=PIDS_LIMIT,
                 read_only=True,
+                cap_drop=["ALL"],  # 컨테이너 탈출/권한상승 표면 축소 (defense in depth)
+                security_opt=["no-new-privileges:true"],
                 detach=True,
             )
         except DockerException as e:
@@ -145,8 +151,10 @@ def _run_in_sandbox(check_type: str, student_code: str, problem: dict, test_case
         try:
             try:
                 container.wait(timeout=TIMEOUT_SEC)
-            except Exception:
-                # docker wait이 타임아웃돼도 컨테이너는 계속 살아있을 수 있어 강제 kill
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+                # 지정 시간 내에 컨테이너가 안 끝난 경우만 TIME_LIMIT으로 처리.
+                # 그 외 예외(진짜 버그)까지 여기서 삼켜서 TIME_LIMIT으로 오분류하지 않도록
+                # 예외 타입을 좁혀뒀다. 컨테이너는 아직 살아있을 수 있어 강제 kill한다.
                 container.kill()
                 return {"status": "TIME_LIMIT"}
 
