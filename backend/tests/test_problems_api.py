@@ -5,16 +5,13 @@ import json
 from app.problems.service import get_problem_repository
 
 
-def test_list_problems_returns_three_with_no_test_data(client):
+def test_list_problems_returns_full_judge_dataset_with_no_test_data(client):
+    """기본 PROBLEMS_DIR이 judge/problems 26개 전부를 가리킨다 (.env 참고)."""
     r = client.get("/problems")
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 3
-    assert {p["problem_id"] for p in body} == {
-        "func_sum_list",
-        "func_find_max",
-        "func_count_positive",
-    }
+    assert len(body) == 26
+    assert {"func_sum_list", "func_find_max", "func_count_positive"} <= {p["problem_id"] for p in body}
     # 목록에는 테스트 데이터가 아예 없어야 한다
     for p in body:
         assert "public_test_cases" not in p
@@ -112,6 +109,9 @@ def test_hidden_test_inputs_never_reach_the_client(client):
 
     expected는 0이나 3 같은 스칼라라 설명문 안의 숫자와 우연히 겹친다 --
     substring 검사가 무의미하므로 위의 구조적 가드가 그 몫을 담당한다.
+    짧은 stdin("1\n" 등)도 같은 이유로 건너뛴다 -- judge/problems 26개 전체를
+    훑으면 다른 문제의 public expected_stdout과 우연히 겹치는 값이 실제로 나온다
+    (test_hidden_leak_guard_covers_judge_dataset와 같은 8자 기준).
     """
     repo = get_problem_repository()
     checked = 0
@@ -122,7 +122,7 @@ def test_hidden_test_inputs_never_reach_the_client(client):
                 assert json.dumps(tc.input) not in body
                 assert json.dumps(tc.input, ensure_ascii=False) not in body
                 checked += 1
-            if tc.stdin:
+            if tc.stdin and len(tc.stdin.strip()) >= 8:
                 assert tc.stdin not in body
                 assert json.dumps(tc.stdin) not in body
                 checked += 1
@@ -130,10 +130,10 @@ def test_hidden_test_inputs_never_reach_the_client(client):
 
 
 def test_hidden_leak_guard_covers_judge_dataset():
-    """위 가드는 현재 PROBLEMS_DIR(func 3개)만 훑는다.
-
-    프로덕션은 judge/problems 26개를 쓰므로, stdout_match 쪽 hidden stdin도
-    실제로 새지 않는지 여기서 직접 확인한다.
+    """기본 PROBLEMS_DIR이 이제 judge/problems 26개라 위 가드가 이미 이걸 훑지만,
+    이 테스트는 기본값이 바뀌어도(예: 로컬 개발용 소규모 디렉터리로 되돌려도)
+    stdout_match 쪽 hidden stdin 유출 검사가 계속 남아 있도록 judge_dir을 직접 지정해
+    독립적으로 확인한다.
 
     **expected_stdout은 검사하지 않는다.** 값이 "0\\n" 같은 스칼라라 같은 문제의
     public 케이스 정답과 그대로 겹친다 -- substring 검사로는 유출과 우연을

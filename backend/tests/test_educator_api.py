@@ -131,7 +131,7 @@ def test_create_and_list_course(anon_client, educator):
     assert body["title"] == "Python 기초 01"
     assert body["invite_code"]
     assert body["code_visibility"] == "SUBMITTED_ONLY"  # 보수적 기본값
-    assert body["assigned_problem_count"] == 3  # 배정 안 하면 저장소 전체
+    assert body["assigned_problem_count"] == 26  # 배정 안 하면 저장소 전체 (기본 PROBLEMS_DIR = judge/problems)
 
     listed = anon_client.get("/educator/courses", headers=h(educator)).json()
     assert len(listed) == 1
@@ -230,9 +230,9 @@ def test_dashboard_reflects_solved_problems(anon_client, educator, course_with_s
     m = anon_client.get(f"/educator/courses/{cid}/dashboard", headers=h(educator)).json()["metrics"]
     assert m["student_count"] == 1
     assert m["total_attempts"] == 1
-    # 문제 3개 중 1개 해결
-    assert m["average_progress"] == 33
-    assert m["completion_rate"] == 33
+    # 배정 안 하면 저장소 전체(26문제) 중 1개 해결 -- round(100/26) = 4
+    assert m["average_progress"] == 4
+    assert m["completion_rate"] == 4
 
 
 # --------------------------------------------------------------------- 학생 상세
