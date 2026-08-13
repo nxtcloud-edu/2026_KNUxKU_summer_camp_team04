@@ -45,7 +45,7 @@ const BADGES = [
   { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자' },
 ]
 
-function MyPage() {
+function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void }) {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
@@ -63,6 +63,7 @@ function MyPage() {
   const updateProfile = (nextProfile: Profile) => {
     setProfile(nextProfile)
     localStorage.setItem(PROFILE_KEY, JSON.stringify(nextProfile))
+    onAvatarChange?.(nextProfile.avatar)
   }
 
   const canSpendAcorns = (cost: number) => {

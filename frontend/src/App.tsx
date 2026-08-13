@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
   BookOpen,
-  Archive,
   Check,
   ChevronDown,
   CircleAlert,
@@ -17,6 +16,7 @@ import {
   Send,
   Sun,
   Terminal,
+  UserRound,
   Waypoints,
 } from 'lucide-react'
 import AiTutorPanel from './AiTutorPanel'
@@ -73,6 +73,13 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
   const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('list')
+  const [profileAvatar, setProfileAvatar] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('tutory:profile') ?? '{}').avatar as string || ''
+    } catch {
+      return ''
+    }
+  })
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -189,6 +196,9 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
             {runtimeStatus === 'ready' && 'Python 준비됨'}
             {runtimeStatus === 'error' && '실행 환경 오류'}
           </div>
+          <button className="profile-trigger" type="button" aria-label="도토리창고 열기" onClick={() => setActivity('mypage')}>
+            {profileAvatar ? <img src={profileAvatar} alt="내 프로필" /> : <UserRound size={18} />}
+          </button>
           <div className="settings" ref={menuRef}>
             <button
               className={`menu-trigger ${menuOpen ? 'active' : ''}`}
@@ -210,10 +220,6 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
                 <button className="menu-row" role="menuitem" onClick={() => { resetCode(); setMenuOpen(false) }}>
                   <span>코드 초기화</span><RotateCcw size={16} />
                 </button>
-                <div className="menu-divider" />
-                <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); setActivity('mypage') }}>
-                  <span>도토리창고</span><Archive size={16} />
-                </button>
                 <button className="menu-row logout" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>
                   <span>로그아웃</span><LogOut size={16} />
                 </button>
@@ -229,7 +235,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
       </header>
 
       {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
-        : activity === 'mypage' ? <MyPage />
+        : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} />
         : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
 
       <main className="workspace">
