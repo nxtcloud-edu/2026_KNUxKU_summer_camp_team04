@@ -42,7 +42,9 @@ export type JudgeResult = {
   failed_categories?: string[]
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
+// traceClient.ts 가 같은 값을 써야 하므로 export 한다.
+// 백엔드 하나가 문제 조회 · 채점 · trace 수집을 전부 담당한다.
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
 export const isJudgeApiConfigured = Boolean(API_BASE_URL)
 
 export async function getProblems(signal?: AbortSignal): Promise<ProblemListResult> {
@@ -142,6 +144,6 @@ function normalizeProblemDetail(payload: unknown): ProblemDetail {
   }
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
