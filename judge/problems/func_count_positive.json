@@ -1,0 +1,16 @@
+{
+  "problem_id": "func_count_positive",
+  "title": "양수 개수 세기",
+  "description": "## 문제\n정수로 이루어진 리스트 `arr`가 주어진다. 리스트에서 0보다 큰(양수) 원소의 개수를 반환하는 함수 `count_positive(arr)`를 작성하시오.\n\n## 입력\n`arr`: 정수로 이루어진 리스트\n\n## 출력\n`arr`에서 양수인 원소의 개수",
+  "concept": ["loop", "function", "conditional"],
+  "check_type": "function_call",
+  "function_name": "count_positive",
+  "code_template": "def count_positive(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[1, -2, 3, -4, 5]], "expected": 3, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-1, -2, -3]], "expected": 0, "category": "no_positive" },
+    { "input": [[0, 0, 0]], "expected": 0, "category": "zero_case" }
+  ]
+}

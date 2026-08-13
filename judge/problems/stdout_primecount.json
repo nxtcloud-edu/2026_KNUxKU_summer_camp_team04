@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_primecount",
+  "title": "소수의 개수",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 자연수 중 소수의 개수를 출력하시오.\n\n소수란 `1`보다 크고, `1`과 자기 자신만을 약수로 가지는 자연수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지 존재하는 소수의 개수를 출력한다.\n\n## 제한\n- `1 <= N <= 5000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "11\n",
+      "expected_stdout": "5",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "0",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "1",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "2",
+      "category": "case_3"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "4",
+      "category": "case_4"
+    },
+    {
+      "stdin": "30\n",
+      "expected_stdout": "10",
+      "category": "case_6"
+    },
+    {
+      "stdin": "49\n",
+      "expected_stdout": "15",
+      "category": "case_7"
+    },
+    {
+      "stdin": "100\n",
+      "expected_stdout": "25",
+      "category": "case_8"
+    },
+    {
+      "stdin": "499\n",
+      "expected_stdout": "95",
+      "category": "case_9"
+    },
+    {
+      "stdin": "5000\n",
+      "expected_stdout": "669",
+      "category": "case_10"
+    }
+  ]
+}

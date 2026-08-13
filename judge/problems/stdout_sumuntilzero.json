@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_sumuntilzero",
+  "title": "0이 나올 때까지 합 구하기",
+  "description": "## 문제\n정수들이 한 줄에 하나씩 입력된다.  \n`0`이 입력될 때까지 입력된 정수들의 합을 출력하시오.\n\n단, 마지막에 입력되는 `0`은 합에 포함하지 않는다.\n\n## 입력\n여러 줄에 걸쳐 정수가 주어진다.  \n마지막 줄에는 반드시 `0`이 주어진다.\n\n## 출력\n첫째 줄에 `0`이 나오기 전까지 입력된 정수들의 합을 출력한다.\n\n## 제한\n- 입력되는 정수의 개수는 `1`개 이상 `1000`개 이하이다.  \n  (마지막 `0` 포함)\n- 각 정수는 `-1000000` 이상 `1000000` 이하이다.",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "0\n",
+      "expected_stdout": "0\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "10\n5\n-3\n0\n",
+      "expected_stdout": "12\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "5\n0\n",
+      "expected_stdout": "5\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "-5\n0\n",
+      "expected_stdout": "-5\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "1\n2\n3\n4\n0\n",
+      "expected_stdout": "10\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "-1\n-2\n-3\n0\n",
+      "expected_stdout": "-6\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "100\n-50\n25\n-25\n0\n",
+      "expected_stdout": "50\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "7\n7\n7\n7\n7\n0\n",
+      "expected_stdout": "35\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "1000\n-1\n-999\n0\n",
+      "expected_stdout": "0\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "123\n456\n789\n-100\n0\n",
+      "expected_stdout": "1268\n",
+      "category": "case_10"
+    }
+  ]
+}

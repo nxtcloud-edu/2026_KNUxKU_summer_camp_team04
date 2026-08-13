@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_perfectnumber",
+  "title": "완전수 판별",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`의 **자기 자신을 제외한 양의 약수들의 합**이 정확히 `N`과 같으면 `PERFECT`, 아니면 `NOT PERFECT`를 출력하시오.\n\n예를 들어 `6`의 자기 자신을 제외한 양의 약수는 `1, 2, 3`이고,  \n이들의 합은 `1 + 2 + 3 = 6` 이므로 `6`은 완전수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n`N`이 완전수이면 `PERFECT`, 아니면 `NOT PERFECT`를 출력한다.\n\n## 제한\n- `1 <= N <= 100000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "6\n",
+      "expected_stdout": "PERFECT",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "12\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_2"
+    },
+    {
+      "stdin": "28\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_5"
+    },
+    {
+      "stdin": "496\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_6"
+    },
+    {
+      "stdin": "8128\n",
+      "expected_stdout": "PERFECT",
+      "category": "case_7"
+    },
+    {
+      "stdin": "9999\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_8"
+    },
+    {
+      "stdin": "100000\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_9"
+    },
+    {
+      "stdin": "945\n",
+      "expected_stdout": "NOT PERFECT",
+      "category": "case_10"
+    }
+  ]
+}

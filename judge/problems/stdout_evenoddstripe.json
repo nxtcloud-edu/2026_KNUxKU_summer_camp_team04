@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_evenoddstripe",
+  "title": "홀짝 줄무늬 출력",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`번 줄부터 `N`번 줄까지 다음 규칙에 따라 출력하시오.\n\n- `i`가 **홀수**이면, 정수 `i`를 **공백 없이 이어서** `i`번 출력한다.\n- `i`가 **짝수**이면, 정수 `i`를 **한 칸 공백으로 구분하여** `i`번 출력한다.\n\n즉,\n- 1번 줄에는 `1`\n- 2번 줄에는 `2 2`\n- 3번 줄에는 `333`\n- 4번 줄에는 `4 4 4 4`\n와 같은 형식이 된다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n조건에 맞는 총 `N`개의 줄을 출력한다.  \n짝수 줄에서는 같은 줄의 숫자 사이를 정확히 한 칸의 공백으로 구분한다.  \n줄 끝에는 불필요한 공백이 없도록 출력한다.\n\n## 제한\n- `1 <= N <= 15`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "4\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "5\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "1\n2 2",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "1\n2 2\n333",
+      "category": "case_3"
+    },
+    {
+      "stdin": "6\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555\n6 6 6 6 6 6",
+      "category": "case_6"
+    },
+    {
+      "stdin": "7\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555\n6 6 6 6 6 6\n7777777",
+      "category": "case_7"
+    },
+    {
+      "stdin": "8\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555\n6 6 6 6 6 6\n7777777\n8 8 8 8 8 8 8 8",
+      "category": "case_8"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555\n6 6 6 6 6 6\n7777777\n8 8 8 8 8 8 8 8\n999999999\n10 10 10 10 10 10 10 10 10 10",
+      "category": "case_9"
+    },
+    {
+      "stdin": "11\n",
+      "expected_stdout": "1\n2 2\n333\n4 4 4 4\n55555\n6 6 6 6 6 6\n7777777\n8 8 8 8 8 8 8 8\n999999999\n10 10 10 10 10 10 10 10 10 10\n1111111111111111111111",
+      "category": "case_10"
+    }
+  ]
+}

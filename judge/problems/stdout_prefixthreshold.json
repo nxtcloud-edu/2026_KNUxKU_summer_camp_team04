@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_prefixthreshold",
+  "title": "합이 처음으로 N 이상이 되는 순간",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`1 + 2 + 3 + ...` 을 차례대로 더해 나갈 때, 누적합이 **처음으로 `N` 이상이 되는 순간**의 마지막 수 `i`를 출력하시오.\n\n즉, 다음을 만족하는 가장 작은 자연수 `i`를 찾아 출력하면 된다.\n\n- `1 + 2 + ... + i >= N`\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 조건을 처음 만족시키는 마지막 수 `i`를 출력한다.\n\n## 제한\n- `1 <= N <= 1000000000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "10\n",
+      "expected_stdout": "4\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "11\n",
+      "expected_stdout": "5\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "case_1"
+    },
+    {
+      "stdin": "2\n",
+      "expected_stdout": "2\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "2\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "55\n",
+      "expected_stdout": "10\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "56\n",
+      "expected_stdout": "11\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1000\n",
+      "expected_stdout": "45\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "999999999\n",
+      "expected_stdout": "44721\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "1000000000\n",
+      "expected_stdout": "44721\n",
+      "category": "case_10"
+    }
+  ]
+}

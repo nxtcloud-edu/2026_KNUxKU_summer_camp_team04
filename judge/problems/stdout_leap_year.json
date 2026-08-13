@@ -1,0 +1,54 @@
+{
+  "problem_id": "stdout_leap_year",
+  "title": "윤년 판별",
+  "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n연도 `Y`가 주어진다.\n\n다음 규칙에 따라 윤년이면 `Leap`, 평년이면 `Common`을 출력하시오.\n\n- 400의 배수이면 윤년이다.\n- 100의 배수이지만 400의 배수는 아니면 평년이다.\n- 4의 배수이지만 100의 배수는 아니면 윤년이다.\n- 그 외에는 평년이다.\n\n## 입력\n연도 `Y`가 한 줄에 주어진다.\n\n## 출력\n윤년이면 `Leap`, 평년이면 `Common`을 출력한다.\n\n## 제한\n- `1 <= Y <= 100000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1.0,
+  "memory_limit_mb": 128,
+  "public_test_cases": [
+    {
+      "stdin": "2024\n",
+      "expected_stdout": "Leap\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "1900\n",
+      "expected_stdout": "Common\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1999\n",
+      "expected_stdout": "Common\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "2000\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "2400\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "2100\n",
+      "expected_stdout": "Common\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "4\n",
+      "expected_stdout": "Leap\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1\n",
+      "expected_stdout": "Common\n",
+      "category": "case_8"
+    }
+  ]
+}

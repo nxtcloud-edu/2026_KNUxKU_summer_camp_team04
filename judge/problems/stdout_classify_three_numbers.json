@@ -1,0 +1,54 @@
+{
+  "problem_id": "stdout_classify_three_numbers",
+  "title": "세 수를 조건으로 분류하기",
+  "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n세 정수 `A`, `B`, `C`가 주어진다.\n\n다음 규칙에 따라 하나의 문자열을 출력하시오.\n\n- 세 수가 모두 같으면 `ALL`\n- 정확히 두 수만 같으면 `TWO`\n- 세 수가 모두 다르면 `NONE`\n\n## 입력\n한 줄에 세 정수 `A`, `B`, `C`가 공백으로 구분되어 주어진다.\n\n## 출력\n규칙에 맞는 문자열을 출력한다.\n\n## 제한\n- `-10^9 <= A, B, C <= 10^9`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1.0,
+  "memory_limit_mb": 128,
+  "public_test_cases": [
+    {
+      "stdin": "5 5 5\n",
+      "expected_stdout": "ALL\n",
+      "category": "sample_1"
+    },
+    {
+      "stdin": "7 3 7\n",
+      "expected_stdout": "TWO\n",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "1 2 3\n",
+      "expected_stdout": "NONE\n",
+      "category": "sample_3"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "4 4 2\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "9 1 1\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "-1 -1 -1\n",
+      "expected_stdout": "ALL\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "-5 0 5\n",
+      "expected_stdout": "NONE\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "1000000000 -1000000000 1000000000\n",
+      "expected_stdout": "TWO\n",
+      "category": "case_8"
+    }
+  ]
+}

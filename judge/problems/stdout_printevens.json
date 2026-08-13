@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_printevens",
+  "title": "짝수만 출력하기",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`1`부터 `N`까지의 정수 중 짝수만 오름차순으로 출력하시오.\n\n각 수는 공백 하나로 구분한다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `1`부터 `N`까지의 짝수를 공백으로 구분하여 출력한다.  \n출력할 짝수가 하나도 없다면 아무 것도 출력하지 않는다.\n\n## 제한\n- `1 <= N <= 1000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "",
+      "category": "sample_2"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "2 4 6 8 10\n",
+      "category": "sample_1"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "2\n",
+      "expected_stdout": "2\n",
+      "category": "case_2"
+    },
+    {
+      "stdin": "3\n",
+      "expected_stdout": "2\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "4\n",
+      "expected_stdout": "2 4\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "11\n",
+      "expected_stdout": "2 4 6 8 10\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "20\n",
+      "expected_stdout": "2 4 6 8 10 12 14 16 18 20\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "21\n",
+      "expected_stdout": "2 4 6 8 10 12 14 16 18 20\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "99\n",
+      "expected_stdout": "2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62 64 66 68 70 72 74 76 78 80 82 84 86 88 90 92 94 96 98\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "100\n",
+      "expected_stdout": "2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62 64 66 68 70 72 74 76 78 80 82 84 86 88 90 92 94 96 98 100\n",
+      "category": "case_10"
+    }
+  ]
+}

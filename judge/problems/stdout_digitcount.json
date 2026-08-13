@@ -1,0 +1,64 @@
+{
+  "problem_id": "stdout_digitcount",
+  "title": "숫자 개수 세기",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`이 몇 자리 수인지 출력하시오.\n\n예를 들어:\n- `7`은 1자리 수\n- `10`은 2자리 수\n- `1234`는 4자리 수\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n첫째 줄에 `N`의 자릿수를 출력한다.\n\n## 제한\n- `1 <= N <= 1000000000`",
+  "concept": [],
+  "check_type": "stdout_match",
+  "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
+  "time_limit_sec": 1,
+  "memory_limit_mb": 256,
+  "public_test_cases": [
+    {
+      "stdin": "7\n",
+      "expected_stdout": "1\n",
+      "category": "sample_2"
+    }
+  ],
+  "hidden_test_cases": [
+    {
+      "stdin": "1\n",
+      "expected_stdout": "1\n",
+      "category": "case_1"
+    },
+    {
+      "stdin": "9\n",
+      "expected_stdout": "1\n",
+      "category": "case_3"
+    },
+    {
+      "stdin": "10\n",
+      "expected_stdout": "2\n",
+      "category": "case_4"
+    },
+    {
+      "stdin": "99\n",
+      "expected_stdout": "2\n",
+      "category": "case_5"
+    },
+    {
+      "stdin": "100\n",
+      "expected_stdout": "3\n",
+      "category": "case_6"
+    },
+    {
+      "stdin": "1000\n",
+      "expected_stdout": "4\n",
+      "category": "case_7"
+    },
+    {
+      "stdin": "999999999\n",
+      "expected_stdout": "9\n",
+      "category": "case_8"
+    },
+    {
+      "stdin": "1000000000\n",
+      "expected_stdout": "10\n",
+      "category": "case_9"
+    },
+    {
+      "stdin": "500050005\n",
+      "expected_stdout": "9\n",
+      "category": "case_10"
+    }
+  ]
+}
