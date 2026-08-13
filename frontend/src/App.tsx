@@ -19,6 +19,7 @@ import {
   Terminal,
   Waypoints,
 } from 'lucide-react'
+import AiTutorPanel from './AiTutorPanel'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
 import { preparePython } from './pythonRunner'
@@ -331,21 +332,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
         </section>
         </div>
 
-        <aside className="tutor-panel panel">
-          <div className="panel-header tutor-header">
-            <div className="file-tab"><span className="tutor-status-dot" /><span>다람쥐 튜터</span></div>
-            <span className="coming-soon-badge">준비 중</span>
-          </div>
-          <div className="tutor-empty-state">
-            <div className="squirrel-avatar" aria-hidden="true">🐿️</div>
-            <strong>다람쥐 튜터가 곧 찾아와요</strong>
-            <p>코드를 함께 살펴보고, 막힌 부분에는 작은 힌트를 건네줄 예정이에요.</p>
-            <div className="tutor-preview-message">
-              <span>다람쥐 튜터</span>
-              <p>문제를 풀다가 도움이 필요하면 언제든 불러주세요!</p>
-            </div>
-          </div>
-        </aside>
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} />
       </main>
       )}
     </div>
