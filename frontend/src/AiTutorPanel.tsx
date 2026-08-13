@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Coins, MessageCircle, Send, Sparkles } from 'lucide-react'
+import { MessageCircle, Send, Sparkles } from 'lucide-react'
+import AcornIcon from './AcornIcon'
 import squirrelTutor from './assets/squirrel-tutor.png'
 import type { JudgeResult, ProblemDetail } from './problemService'
 
@@ -91,7 +92,7 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
           <img src={squirrelTutor} alt="다람쥐 튜터" />
           <div>
             <strong>다람쥐 튜터</strong>
-            <span><Coins size={12} /> 보유 도토리 {acorns}개</span>
+            <span><AcornIcon size={13} /> 보유 도토리 {acorns}개</span>
           </div>
         </div>
 
@@ -144,7 +145,7 @@ function AiTutorPanel({ problem, result, judgeError }: AiTutorPanelProps) {
               </div>
             </div>
             <div className="tutor-modal-wallet">
-              <Coins size={15} />
+              <AcornIcon size={16} />
               <span>현재 보유 도토리 {acorns}개</span>
             </div>
             {sosError && <p className="tutor-modal-error">{sosError}</p>}

@@ -5,12 +5,12 @@ import {
   BadgeCheck,
   CalendarDays,
   Check,
-  Coins,
   ImageUp,
   Lightbulb,
   Pencil,
   UserRound,
 } from 'lucide-react'
+import AcornIcon from './AcornIcon'
 import badgeSeed from './assets/badges/badge-seed.png'
 import badgeSprout from './assets/badges/badge-sprout.png'
 import badgeSapling from './assets/badges/badge-sapling.png'
@@ -169,7 +169,7 @@ function MyPage({ onAvatarChange }: MyPageProps) {
             </div>
           </div>
           <div className="acorn-wallet">
-            <Coins size={22} />
+            <AcornIcon size={24} />
             <span>보유 도토리</span>
             <strong>{profile.acorns}</strong>
           </div>
