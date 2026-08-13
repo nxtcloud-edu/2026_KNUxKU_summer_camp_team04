@@ -1,21 +1,39 @@
 import { useMemo, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import {
   Award,
   BadgeCheck,
-  Camera,
+  CalendarDays,
   Check,
   Coins,
   ImageUp,
+  Lightbulb,
   Pencil,
-  Trophy,
   UserRound,
 } from 'lucide-react'
+import badgeSeed from './assets/badges/badge-seed.png'
+import badgeSprout from './assets/badges/badge-sprout.png'
+import badgeSapling from './assets/badges/badge-sapling.png'
+import badgeOak from './assets/badges/badge-oak.png'
+import badgeGuardian from './assets/badges/badge-guardian.png'
+import badgeLegend from './assets/badges/badge-legend.png'
 
 type Profile = {
   nickname: string
   avatar: string
   acorns: number
   totalAcorns: number
+}
+
+type Badge = {
+  name: string
+  minAcorns: number
+  description: string
+  image: string
+}
+
+type MyPageProps = {
+  onAvatarChange?: (avatar: string) => void
 }
 
 const PROFILE_KEY = 'tutory:profile'
@@ -36,16 +54,27 @@ const SOLVED_PROBLEMS = [
   { id: 'count_vowels', title: '모음 개수 세기', date: '2026.08.10', acorns: 8 },
 ]
 
-const BADGES = [
-  { name: '씨앗 뱃지', minAcorns: 0, description: '첫 문제 풀이를 시작한 학습자' },
-  { name: '새싹 뱃지', minAcorns: 50, description: '꾸준히 기초 문제를 풀고 있어요' },
-  { name: '묘목 뱃지', minAcorns: 150, description: '함수와 조건문에 익숙해졌어요' },
-  { name: '참나무 뱃지', minAcorns: 300, description: '문제 해결 루틴이 단단해졌어요' },
-  { name: '숲지기 뱃지', minAcorns: 600, description: '고난도 문제에도 침착한 학습자' },
-  { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자' },
+const BADGES: Badge[] = [
+  { name: '씨앗 뱃지', minAcorns: 0, description: '첫 문제 풀이를 시작한 학습자', image: badgeSeed },
+  { name: '새싹 뱃지', minAcorns: 50, description: '꾸준히 기초 문제를 풀고 있어요', image: badgeSprout },
+  { name: '묘목 뱃지', minAcorns: 150, description: '함수와 조건문에 익숙해졌어요', image: badgeSapling },
+  { name: '참나무 뱃지', minAcorns: 300, description: '문제 해결 루틴이 단단해졌어요', image: badgeOak },
+  { name: '숲지기 뱃지', minAcorns: 600, description: '고난도 문제에도 침착한 학습자', image: badgeGuardian },
+  { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자', image: badgeLegend },
 ]
 
-function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void }) {
+const LEARNING_STREAK = {
+  days: 4,
+  bestDays: 9,
+  message: '이번 주도 꾸준히 문제를 풀고 있어요.',
+}
+
+const RECENT_WRONG_HINT = {
+  problemTitle: '짝수의 합 구하기',
+  hint: '반복문에서 더하기 전에 짝수인지 먼저 확인해보세요.',
+}
+
+function MyPage({ onAvatarChange }: MyPageProps) {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
@@ -87,7 +116,7 @@ function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void 
     setMessage(`닉네임이 변경됐어요. 도토리 ${NICKNAME_COST}개를 사용했습니다.`)
   }
 
-  const uploadAvatar = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadAvatar = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
     if (!canSpendAcorns(AVATAR_COST)) {
@@ -109,8 +138,13 @@ function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void 
       <div className="mypage-container">
         <section className="mypage-hero">
           <div className="profile-main">
-            <div className="profile-avatar">
-              {profile.avatar ? <img src={profile.avatar} alt="프로필" /> : <UserRound size={48} />}
+            <div className="profile-avatar-frame">
+              <div className="profile-avatar">
+                {profile.avatar ? <img src={profile.avatar} alt="프로필" /> : <UserRound size={48} />}
+              </div>
+              <div className="profile-badge-chip" title={currentBadge.name} aria-label={`현재 뱃지: ${currentBadge.name}`}>
+                <img src={currentBadge.image} alt="" />
+              </div>
             </div>
             <div>
               <span className="section-kicker">MY TUTORY</span>
@@ -158,7 +192,9 @@ function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void 
               <strong>현재 뱃지 상태</strong>
             </div>
             <div className="current-badge">
-              <div className="badge-mark"><Trophy size={30} /></div>
+              <div className="badge-mark">
+                <img src={currentBadge.image} alt="" />
+              </div>
               <div>
                 <span>{currentBadge.name}</span>
                 <p>{currentBadge.description}</p>
@@ -173,13 +209,42 @@ function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void 
               <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
             </div>
             <div className="badge-list">
-              {BADGES.map((badge) => (
-                <div className={profile.totalAcorns >= badge.minAcorns ? 'earned' : ''} key={badge.name}>
-                  <BadgeCheck size={15} />
-                  <span>{badge.name}</span>
-                  <small>{badge.minAcorns}개</small>
-                </div>
-              ))}
+              {BADGES.map((badge) => {
+                const earned = profile.totalAcorns >= badge.minAcorns
+                return (
+                  <div className={earned ? 'earned' : ''} key={badge.name}>
+                    <img src={badge.image} alt="" />
+                    <span>{badge.name}</span>
+                    <small>{badge.minAcorns}개</small>
+                    {earned && <BadgeCheck size={15} />}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="mypage-grid learning-grid">
+          <div className="mypage-panel learning-card">
+            <div className="mypage-panel-title">
+              <CalendarDays size={17} />
+              <strong>연속 학습일</strong>
+            </div>
+            <div className="learning-streak">
+              <strong>{LEARNING_STREAK.days}일</strong>
+              <span>최고 기록 {LEARNING_STREAK.bestDays}일</span>
+              <p>{LEARNING_STREAK.message}</p>
+            </div>
+          </div>
+
+          <div className="mypage-panel learning-card">
+            <div className="mypage-panel-title">
+              <Lightbulb size={17} />
+              <strong>최근 오답 힌트</strong>
+            </div>
+            <div className="wrong-hint">
+              <span>{RECENT_WRONG_HINT.problemTitle}</span>
+              <p>{RECENT_WRONG_HINT.hint}</p>
             </div>
           </div>
         </section>
@@ -199,19 +264,6 @@ function MyPage({ onAvatarChange }: { onAvatarChange?: (avatar: string) => void 
                 <small>+{problem.acorns} 도토리</small>
               </div>
             ))}
-          </div>
-        </section>
-
-        <section className="mypage-panel recommendation-panel">
-          <div className="mypage-panel-title">
-            <Camera size={17} />
-            <strong>추가하면 좋은 기능</strong>
-          </div>
-          <div className="recommendation-list">
-            <span>연속 학습일</span>
-            <span>최근 오답 노트</span>
-            <span>선호 문제 유형</span>
-            <span>다음 추천 문제</span>
           </div>
         </section>
       </div>
