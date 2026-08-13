@@ -20,6 +20,7 @@ cooldown 상태가 AGENT_TRIGGER 이벤트에 살기 때문이다. 데모의 Pro
   R0  HELP_REQUESTED   [cooldown 무시] 새 HINT_REQUEST
   --- 이하 cooldown 적용 ---
   R1  COOLDOWN GATE    status는 분류하되 trigger만 죽인다
+  R1s SYSTEM ERROR     마지막 결과가 채점기 고장 -> 판단 보류, trigger 없음
   R2  UNDERSTANDING_UNCERTAIN  ACCEPTED + large_change    ★시나리오 C
   R3  PROGRESS GUARD   progress_delta > 0 or improved     ★시나리오 1
   R4  SOLVED           ACCEPTED
@@ -40,6 +41,7 @@ from sqlmodel import Session as DbSession
 from app.clock import seconds_between, utcnow
 from app.config import DEFAULT_MONITOR_CONFIG, MonitorConfig
 from app.enums import (
+    SYSTEM_STATUSES,
     EventSource,
     EventType,
     JudgeStatus,
@@ -142,6 +144,25 @@ def _classify(
     보호하는 보장이다. R2가 유일한 예외이고, 그 이유는 아래에 적어뒀다.
     """
     last = f.last_result
+
+    # R1s 채점기 고장 게이트.
+    #
+    # 마지막 결과가 INTERNAL_ERROR면 우리는 학생 코드에 대해 **아무것도 관측하지
+    # 못했다.** 여기서 개입하면 원인이 채점 서버인데 "반복문을 살펴보세요" 같은
+    # 엉뚱한 힌트가 나간다. 학생에게 필요한 말은 "채점 서버가 고장났어요"이고,
+    # 그건 채점 응답의 status가 이미 프론트에 전달한다(JUDGE_LABELS.INTERNAL_ERROR).
+    #
+    # consecutive_error_count 쪽은 features.py가 이미 막았지만(SYSTEM_STATUSES),
+    # R7(90초 무진전 + 실행 2회)은 그것만으로는 막히지 않는다 -- 채점기가 죽어
+    # 있으면 진전이 없는 게 당연하므로 시간이 흐르는 것만으로 발화한다.
+    #
+    # R0(도움 요청)보다는 아래다: 학생이 직접 물었으면 채점기 상태와 무관하게 답한다.
+    if last is not None and last.status in SYSTEM_STATUSES:
+        return (
+            ProcessStatus.PROGRESSING,
+            None,
+            "채점 서버에 문제가 생겨 학습 상태를 판단할 수 없습니다.",
+        )
 
     # R2 이해 불확실 -- agent_plan §14 시나리오 C (대규모 재작성 -> 즉시 통과)
     #

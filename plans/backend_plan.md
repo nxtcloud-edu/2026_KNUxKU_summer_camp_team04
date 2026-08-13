@@ -638,6 +638,13 @@ Raw event를 Agent 입력에 적합한 feature로 압축한다. 20종.
 `SYNTAX_ERROR` / `RUNTIME_ERROR` / `TIME_LIMIT` / `INTERNAL_ERROR`는
 `recent_scores`, `same_result_count`, `progress_delta` 계산에서 제외한다.
 
+> **추가 (구현): `INTERNAL_ERROR`는 한 겹 더 빠진다.** 위 4개 중 앞의 3개는 학생
+> 코드의 실패라 `consecutive_error_count`로 센다. `INTERNAL_ERROR`는 채점 인프라의
+> 실패이므로 그것조차 세지 않는다(`app/enums.py`의 `SYSTEM_STATUSES`). 세면
+> 도커가 죽어 있을 때 Run 세 번으로 `REPEATED_FAILURE`가 발화한다. 단 streak을
+> **끊지도** 않는다 — 학생의 진짜 3연속 에러 중간에 채점기가 딸꾹질했다고 개입을
+> 놓치면 그것도 틀리다. monitor에도 같은 취지의 게이트(R1s)가 있다.
+
 - 0으로 세면 `3/5 → syntax → 3/5`가 `[3, 0, 3]`이 되어 `progress_delta = +3` →
   monitor가 `PROGRESSING`을 선언하고 명백히 막힌 학생을 방치한다.
 - 반대로 `3/5 → 3/5 → syntax → 3/5 → 3/5`는 동일 결과 streak이 리셋되어

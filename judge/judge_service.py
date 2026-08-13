@@ -39,6 +39,19 @@ HARNESS_BY_CHECK_TYPE = {
     "stdout_match": "/harness/run_stdout_match.py",
 }
 
+# 호스트(이 파일)가 결정하는 결과 상태.
+#
+# 하네스는 이 키를 절대 쓰지 않는다 -- 하네스의 출력은 {"results": [...]} /
+# {"outputs": [...]} / {"error": ...} 셋뿐이다. 그래서 `"status" in 하네스출력`은
+# **"호스트 측에서 무언가 결정됐다"의 확실한 판별자**가 된다.
+#
+#   TIME_LIMIT     학생 코드가 제한시간을 넘겼다 (컨테이너 전체 타임아웃 안전망)
+#   INTERNAL_ERROR 채점 인프라가 고장났다. 학생 코드와 무관하다
+#
+# RUNTIME_ERROR가 여기 없는 것이 의도다. 학생 코드의 런타임 예외는 하네스가
+# {"error": "runtime", "message": ...}으로 보고하며, 그 변환은 _run_in_sandbox가 한다.
+HOST_OUTCOME_STATUSES = ("TIME_LIMIT", "INTERNAL_ERROR")
+
 # check_type별로 "정답과 비교하지 않고 실제 출력만 캡처"하는 하네스.
 # 문제 생성 파이프라인이 레퍼런스 정답 코드를 실행해 expected 값을 확정할 때 씀
 # (capture_reference_outputs 참고). 채점용 HARNESS_BY_CHECK_TYPE와는 별도.
@@ -127,9 +140,12 @@ def run_judge_for_problem(student_code: str, problem: dict, mode: str = "run") -
             "passed": 0, "total": total, "status": "TIME_LIMIT",
             "message": f"{time_limit_sec}초 내에 실행이 끝나지 않았습니다.",
         }
-    if outcome["status"] == "RUNTIME_ERROR":
+    # RUNTIME_ERROR(학생 코드 예외)와 INTERNAL_ERROR(채점기 고장)는 응답 모양이
+    # 같고 의미만 다르다. 구분은 backend가 쓴다 -- INTERNAL_ERROR는 학생의
+    # 오류 횟수로 세지 않는다(app/enums.py의 SYSTEM_STATUSES).
+    if outcome["status"] in ("RUNTIME_ERROR", "INTERNAL_ERROR"):
         return {
-            "passed": 0, "total": total, "status": "RUNTIME_ERROR",
+            "passed": 0, "total": total, "status": outcome["status"],
             "message": outcome["message"],
         }
 
@@ -150,7 +166,11 @@ def _run_in_sandbox(
     """격리된 컨테이너에서 학생 코드를 채점 하네스로 실행하고 결과를 반환한다.
 
     반환값은 {"status": "OK", "results": [...]} 또는
-    {"status": "TIME_LIMIT"} / {"status": "RUNTIME_ERROR", "message": str} 중 하나.
+    {"status": "TIME_LIMIT"} / {"status": "RUNTIME_ERROR" | "INTERNAL_ERROR", "message": str} 중 하나.
+
+    **여기가 "학생 잘못"과 "우리 잘못"이 갈리는 지점이다.**
+    호스트가 낸 status는 그대로 통과시키고(INTERNAL_ERROR 포함), 하네스가 보고한
+    `error`만 학생 코드 실패(TIME_LIMIT / RUNTIME_ERROR)로 번역한다.
     """
     payload = {"student_code": student_code, "test_cases": test_cases, "time_limit_sec": time_limit_sec}
     if check_type == "function_call":
@@ -159,12 +179,13 @@ def _run_in_sandbox(
     container_timeout = _container_timeout(time_limit_sec, len(test_cases))
     harness_result = _run_container(HARNESS_BY_CHECK_TYPE[check_type], payload, container_timeout, mem_limit_mb)
 
-    if harness_result.get("status") in ("TIME_LIMIT", "RUNTIME_ERROR"):
+    if harness_result.get("status") in HOST_OUTCOME_STATUSES:
         return harness_result
     if "error" in harness_result:
         if harness_result["error"] == "timeout":
             return {"status": "TIME_LIMIT"}
-        return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
+        # 하네스가 message 없이 error만 보낼 수도 있다(run_capture_stdout).
+        return {"status": "RUNTIME_ERROR", "message": harness_result.get("message") or str(harness_result["error"])}
 
     return {"status": "OK", "results": harness_result["results"]}
 
@@ -192,7 +213,10 @@ def capture_reference_outputs(
 
     반환값: {"status": "OK", "outputs": [{"category": ..., "output": ...} 또는
     {"category": ..., "error": ...}, ...]} 또는 {"status": "SYNTAX_ERROR"|
-    "TIME_LIMIT"|"RUNTIME_ERROR", "message": str}.
+    "TIME_LIMIT"|"RUNTIME_ERROR"|"INTERNAL_ERROR", "message": str}.
+
+    INTERNAL_ERROR는 채점 인프라 고장이다 -- 레퍼런스 코드가 틀린 것과 구분해야
+    호출자(agent)가 "문제를 버릴지" vs "나중에 다시 시도할지"를 판단할 수 있다.
     """
     if check_type not in CAPTURE_HARNESS_BY_CHECK_TYPE:
         raise UnsupportedCheckTypeError(f"지원하지 않는 check_type입니다: {check_type}")
@@ -216,12 +240,12 @@ def capture_reference_outputs(
         CAPTURE_HARNESS_BY_CHECK_TYPE[check_type], payload, container_timeout, memory_limit_mb
     )
 
-    if harness_result.get("status") in ("TIME_LIMIT", "RUNTIME_ERROR"):
+    if harness_result.get("status") in HOST_OUTCOME_STATUSES:
         return harness_result
     if "error" in harness_result:
         if harness_result["error"] == "timeout":
             return {"status": "TIME_LIMIT"}
-        return {"status": "RUNTIME_ERROR", "message": harness_result["message"]}
+        return {"status": "RUNTIME_ERROR", "message": harness_result.get("message") or str(harness_result["error"])}
 
     return {"status": "OK", "outputs": harness_result["outputs"]}
 
@@ -245,12 +269,19 @@ def _run_container(harness_path: str, payload: dict, container_timeout: float, m
     (capture_reference_outputs)가 이 실행/격리 로직을 공유한다.
 
     반환값: 하네스가 출력한 JSON dict (예: {"results": [...]} / {"outputs": [...]} /
-    {"error": "timeout"}) 또는 {"status": "TIME_LIMIT"} / {"status": "RUNTIME_ERROR", "message": str}.
+    {"error": "timeout"}) 또는 HOST_OUTCOME_STATUSES 중 하나를 담은
+    {"status": ..., "message": str}.
+
+    **인프라 장애는 INTERNAL_ERROR다.** 아래 네 지점(데몬 연결 실패, 컨테이너 실행
+    실패, 무출력, 로그 JSON 파싱 실패)은 전부 채점기 쪽 고장이고 학생 코드와
+    무관하다. 예전에는 이것들이 RUNTIME_ERROR로 나갔는데, 그러면 backend가
+    학생 에러로 집계해서 **도커가 죽어 있을 때 학생이 세 번 실행하는 것만으로
+    "반복 실패" 판정이 나고 agent가 개입한다.** 학생은 아무 잘못도 하지 않았다.
     """
     try:
         client = docker.from_env()
     except DockerException as e:
-        return {"status": "RUNTIME_ERROR", "message": f"Docker 데몬에 연결할 수 없습니다: {e}"}
+        return {"status": "INTERNAL_ERROR", "message": f"Docker 데몬에 연결할 수 없습니다: {e}"}
 
     mem_limit_str = f"{int(mem_limit_mb)}m"
 
@@ -276,7 +307,7 @@ def _run_container(harness_path: str, payload: dict, container_timeout: float, m
             )
         except DockerException as e:
             return {
-                "status": "RUNTIME_ERROR",
+                "status": "INTERNAL_ERROR",
                 "message": (
                     f"샌드박스 컨테이너를 실행할 수 없습니다 ({e}). "
                     f"`docker build -t {SANDBOX_IMAGE} .`를 먼저 실행했는지 확인하세요."
@@ -298,9 +329,14 @@ def _run_container(harness_path: str, payload: dict, container_timeout: float, m
             container.remove(force=True)
 
     if not logs:
-        return {"status": "RUNTIME_ERROR", "message": "컨테이너에서 출력이 없습니다."}
+        # 하네스는 항상 JSON 한 줄을 낸다. 아무것도 없으면 하네스가 시작조차
+        # 못 한 것이다(이미지 손상, OOM kill 등) -- 학생 코드의 예외가 아니다.
+        return {"status": "INTERNAL_ERROR", "message": "컨테이너에서 출력이 없습니다."}
 
     try:
         return json.loads(logs.splitlines()[-1])
     except json.JSONDecodeError:
-        return {"status": "RUNTIME_ERROR", "message": logs}
+        # 하네스가 JSON 대신 뭔가를 뱉었다 = 하네스 자체의 버그/크래시.
+        # 학생 코드가 던진 예외는 하네스가 {"error": "runtime", ...}으로 감싸서
+        # 정상 JSON으로 보고하므로 이 경로로 오지 않는다.
+        return {"status": "INTERNAL_ERROR", "message": logs}
