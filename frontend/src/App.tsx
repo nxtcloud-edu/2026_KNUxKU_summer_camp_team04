@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
   BookOpen,
+  Archive,
   Check,
   ChevronDown,
   CircleAlert,
   Code2,
   LoaderCircle,
+  LogOut,
   Monitor,
   Moon,
   MoreVertical,
@@ -52,10 +54,10 @@ function App() {
     )
   }
 
-  return <LearningWorkspace />
+  return <LearningWorkspace onLogout={() => setAuthView('login')} />
 }
 
-function LearningWorkspace() {
+function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   const [selectedProblemId, setSelectedProblemId] = useState('func_sum_list')
   const [problem, setProblem] = useState<ProblemDetail | null>(null)
   const [problemLoading, setProblemLoading] = useState(true)
@@ -70,7 +72,7 @@ function LearningWorkspace() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
-  const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('problem')
+  const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('list')
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -213,6 +215,13 @@ function LearningWorkspace() {
                   <span>코드 초기화</span><RotateCcw size={16} />
                 </button>
                 <div className="menu-divider" />
+                <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); window.alert('도토리창고는 준비 중이에요.') }}>
+                  <span>도토리창고</span><Archive size={16} />
+                </button>
+                <button className="menu-row logout" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>
+                  <span>로그아웃</span><LogOut size={16} />
+                </button>
+                <div className="menu-divider" />
                 <div className="menu-runtime">
                   <span className={`status-dot ${runtimeStatus}`} />
                   <span>{runtimeStatus === 'ready' ? 'Python 3.12 준비됨' : runtimeStatus === 'loading' ? 'Python 준비 중' : '실행 환경 오류'}</span>
@@ -249,6 +258,7 @@ function LearningWorkspace() {
           </div>}
         </section>
 
+        <div className="center-workbench">
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
@@ -324,6 +334,23 @@ function LearningWorkspace() {
             <p>실행은 공개 테스트만 확인해요. · TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
           </div>
         </section>
+        </div>
+
+        <aside className="tutor-panel panel">
+          <div className="panel-header tutor-header">
+            <div className="file-tab"><span className="tutor-status-dot" /><span>다람쥐 튜터</span></div>
+            <span className="coming-soon-badge">준비 중</span>
+          </div>
+          <div className="tutor-empty-state">
+            <div className="squirrel-avatar" aria-hidden="true">🐿️</div>
+            <strong>다람쥐 튜터가 곧 찾아와요</strong>
+            <p>코드를 함께 살펴보고, 막힌 부분에는 작은 힌트를 건네줄 예정이에요.</p>
+            <div className="tutor-preview-message">
+              <span>다람쥐 튜터</span>
+              <p>문제를 풀다가 도움이 필요하면 언제든 불러주세요!</p>
+            </div>
+          </div>
+        </aside>
       </main>
       )}
     </div>
