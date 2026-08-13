@@ -1,0 +1,17 @@
+{
+  "problem_id": "func_count_positive",
+  "title": "양수 개수 세기",
+  "description": "정수 리스트를 인자로 받아 0보다 큰 값의 개수를 반환하는 함수 count_positive(arr)를 작성하세요.\n\n예: count_positive([1, -2, 3, -4, 5]) -> 3\n\n0은 양수가 아닙니다.",
+  "difficulty": "BEGINNER",
+  "concept": ["loop", "condition", "accumulator", "function"],
+  "check_type": "function_call",
+  "function_name": "count_positive",
+  "code_template": "def count_positive(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[1, -2, 3, -4, 5]], "expected": 3, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-1, -2, -3]], "expected": 0, "category": "no_positive" },
+    { "input": [[0, 0, 0]], "expected": 0, "category": "zero_case" }
+  ]
+}

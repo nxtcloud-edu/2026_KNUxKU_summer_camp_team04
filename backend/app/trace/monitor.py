@@ -1,0 +1,392 @@
+"""Lightweight Process Monitor (backend_plan §12).
+
+Monitor는 Agent가 아니다. LLM을 부르지 않고 결정론적 규칙만으로
+"지금 Agent를 불러야 하는가"를 판정한다.
+
+pure/recording 분리 -- 이 모듈의 가장 중요한 구조적 결정
+--------------------------------------------------------
+evaluate()는 아무것도 쓰지 않는다. evaluate_and_record()만 AGENT_TRIGGER를 쓴다.
+
+  GET  /sessions/{id}/process-state  -> evaluate()
+  POST /sessions/{id}/results        -> evaluate_and_record()
+
+cooldown 상태가 AGENT_TRIGGER 이벤트에 살기 때문이다. 데모의 Process State 패널은
+/process-state를 몇 초마다 폴링한다. GET이 cooldown을 소진해버리면 trigger 직후
+첫 폴링이 그걸 먹고, 정작 agent를 호출해야 할 실제 Run이 cooldown에 걸린다.
+(GET이 상태를 바꾸는 건 그 자체로도 틀렸다.)
+
+규칙 체인 (first match wins)
+---------------------------
+  R0  HELP_REQUESTED   [cooldown 무시] 새 HINT_REQUEST
+  --- 이하 cooldown 적용 ---
+  R1  COOLDOWN GATE    status는 분류하되 trigger만 죽인다
+  R2  UNDERSTANDING_UNCERTAIN  ACCEPTED + large_change    ★시나리오 C
+  R3  PROGRESS GUARD   progress_delta > 0 or improved     ★시나리오 1
+  R4  SOLVED           ACCEPTED
+  R5  REPEATED_FAILURE same_result>=3 and same_region>=2  ★시나리오 2
+  R5b REPEATED_FAILURE same_result>=3 and streak 내 편집 0
+  R6  REPEATED_ERROR   consecutive_error>=3
+  R7  NO_PROGRESS      90초 무진전 and attempt>=2
+  R8  PRODUCTIVE_STRUGGLE  attempt>=2
+  R9  기본             PROGRESSING
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlmodel import Session as DbSession
+
+from app.clock import seconds_between, utcnow
+from app.config import DEFAULT_MONITOR_CONFIG, MonitorConfig
+from app.enums import (
+    EventSource,
+    EventType,
+    JudgeStatus,
+    ProcessStatus,
+    TriggerType,
+)
+from app.models import Session
+from app.sessions import store
+from app.trace import service as trace_service
+from app.trace.diff import region_label
+from app.trace.features import ProcessFeatures, extract_features
+
+
+@dataclass(frozen=True)
+class ProcessState:
+    status: ProcessStatus
+    trigger: TriggerType | None
+    reason: str
+    evidence: list[str]
+    cooldown_active: bool
+    cooldown_remaining_seconds: int
+    features: ProcessFeatures
+    evaluated_at: datetime
+
+    @property
+    def triggered(self) -> bool:
+        return self.trigger is not None
+
+
+# --------------------------------------------------------------------- cooldown
+
+
+def _cooldown(
+    f: ProcessFeatures, events_after_trigger_has_result: bool, now: datetime, cfg: MonitorConfig
+) -> tuple[bool, int]:
+    """backend_plan §12의 "개입 후 최소 30초 **또는** 다음 Run까지"를 문자 그대로 읽는다.
+
+    둘 중 먼저 오는 쪽이 cooldown을 푼다 -> 두 조건이 **모두** 살아 있을 때만 유지된다.
+
+    상태를 sessions 컬럼이 아니라 events에 두는 이유:
+      1. trigger는 원래 이벤트다 (계획서가 이미 AGENT_TRIGGER를 이벤트 타입으로 명시).
+         컬럼으로 복제하면 동기화 의무가 생긴다.
+      2. GET /timeline에 그대로 보인다 -- 데모가 어차피 필요로 하는 "AGENT: TRACE" 마커.
+      3. 세션 상태를 조작하는 대신 행 하나를 넣어 cooldown을 테스트할 수 있다.
+      4. agent 모듈의 previous_interventions(backend_plan §13)가 공짜로 나온다.
+    """
+    if f.last_trigger_at is None:
+        return False, 0
+    elapsed = seconds_between(f.last_trigger_at, now)
+    if elapsed >= cfg.cooldown_seconds:
+        return False, 0
+    if events_after_trigger_has_result:
+        return False, 0
+    return True, cfg.cooldown_seconds - elapsed
+
+
+# --------------------------------------------------------------------- evidence
+
+
+def _evidence(f: ProcessFeatures, cfg: MonitorConfig) -> list[str]:
+    """사람이 읽는 근거 문자열.
+
+    서버에서 만드는 이유: feature_plan §21과 frontend_plan §12가 정확히 이 리스트를
+    렌더한다. 여기서 만들면 프론트는 멍청한 <ul>이 되고, 문자열이 백엔드 테스트로
+    커버되고, agent context builder가 같은 함수를 재사용한다.
+    """
+    out: list[str] = []
+    if f.same_result_count >= 2 and f.last_result is not None:
+        r = f.last_result
+        out.append(f"동일 결과 {r.passed}/{r.total} ×{f.same_result_count}")
+    if f.same_region_edit_count >= 2 and f.repeated_edit_region:
+        out.append(
+            f"{region_label(f.repeated_edit_region)} 영역 ×{f.same_region_edit_count} 반복 수정"
+        )
+    if f.attempt_count >= 1 and f.seconds_without_progress >= cfg.no_progress_seconds:
+        out.append(f"{f.seconds_without_progress}초 동안 진전 없음")
+    if f.consecutive_error_count >= 2 and f.recent_error_types:
+        out.append(f"{f.recent_error_types[-1]} ×{f.consecutive_error_count} 연속")
+    if f.large_change_detected:
+        out.append("직전 실행 전 대규모 코드 변경")
+    if f.progress_delta > 0:
+        out.append(f"직전 실행 대비 +{f.progress_delta} 테스트 통과")
+    if f.recent_scores:
+        out.append("최근 점수 " + " → ".join(str(s) for s in f.recent_scores))
+    if f.hint_count:
+        out.append(f"힌트 요청 ×{f.hint_count}")
+    return out
+
+
+# --------------------------------------------------------------------- 규칙 체인
+
+
+def _classify(
+    f: ProcessFeatures, cfg: MonitorConfig
+) -> tuple[ProcessStatus, TriggerType | None, str]:
+    """R2~R9. first match wins. **순서가 설계다.**
+
+    새 규칙을 추가할 일이 있으면 반드시 R3(진전 가드) **아래**에 넣는다.
+    R3가 위에 있다는 사실 자체가, 눈에 띄게 개선 중인 학생을 미래의 공격적인 규칙으로부터
+    보호하는 보장이다. R2가 유일한 예외이고, 그 이유는 아래에 적어뒀다.
+    """
+    last = f.last_result
+
+    # R2 이해 불확실 -- agent_plan §14 시나리오 C (대규모 재작성 -> 즉시 통과)
+    #
+    # **진전 가드보다 위에 있어야 한다.** 3/5 -> 5/5는 progress_delta=+2라 R3가
+    # 먼저 잡아버리는데, 이 시나리오의 요점이 바로 "겉보기 진전이 의심스러운 경우"다.
+    # backend_plan §12의 규칙 나열도 이 순서다 (UNDERSTANDING_UNCERTAIN이 progress_delta 앞).
+    # 진전 가드가 보호해야 할 대상은 2/5 -> 3/5 -> 4/5로 기어오르는 학생이지,
+    # 재작성을 붙여넣고 5/5로 점프한 학생이 아니다.
+    if (
+        last is not None
+        and last.status is JudgeStatus.ACCEPTED
+        and f.large_change_detected
+    ):
+        return (
+            ProcessStatus.UNDERSTANDING_UNCERTAIN,
+            TriggerType.UNDERSTANDING_UNCERTAIN,
+            "대규모 코드 변경 직후 통과해 이해 근거가 불충분합니다.",
+        )
+
+    # R3 진전 가드 -- backend_plan §22 시나리오 1 (2/5 -> 3/5 -> 4/5)
+    if f.progress_delta > 0 or f.improved_recently:
+        return (
+            ProcessStatus.PROGRESSING,
+            None,
+            "테스트 결과가 개선되고 있어 개입하지 않습니다.",
+        )
+
+    # R4 해결됨
+    if last is not None and last.status is JudgeStatus.ACCEPTED:
+        return ProcessStatus.PROGRESSING, None, "문제를 통과했습니다."
+
+    # R5 반복 실패 -- backend_plan §22 시나리오 2
+    if (
+        f.same_result_count >= cfg.same_result_threshold
+        and f.same_region_edit_count >= cfg.same_region_threshold
+    ):
+        return (
+            ProcessStatus.STUCK,
+            TriggerType.REPEATED_FAILURE,
+            "같은 코드 영역을 반복 수정했지만 테스트 결과가 동일합니다.",
+        )
+
+    # R5b 편집 없이 반복 실행.
+    # backend_plan §12의 문자 그대로의 규칙이 놓치는 케이스다: 아무것도 안 고치고 Run만 3번이면
+    # same_region_edit_count가 0이라 R5가 안 걸리는데, 동일 코드 3연속 실행은 명백히 stuck이다.
+    if f.same_result_count >= cfg.same_result_threshold and f.edits_in_result_streak == 0:
+        return (
+            ProcessStatus.STUCK,
+            TriggerType.REPEATED_FAILURE,
+            "코드를 수정하지 않은 채 같은 결과를 반복해서 확인하고 있습니다.",
+        )
+
+    # R6 연속 에러
+    if f.consecutive_error_count >= cfg.consecutive_error_threshold:
+        return (
+            ProcessStatus.STUCK,
+            TriggerType.REPEATED_FAILURE,
+            "실행 오류가 연속으로 발생하고 있습니다.",
+        )
+
+    # R7 무진전
+    if (
+        f.seconds_without_progress >= cfg.no_progress_seconds
+        and f.attempt_count >= 2
+    ):
+        return (
+            ProcessStatus.POSSIBLE_STUCK,
+            TriggerType.NO_PROGRESS,
+            f"{f.seconds_without_progress}초 동안 테스트 결과에 진전이 없습니다.",
+        )
+
+    # R8 생산적 고전.
+    # same_result_count 가드를 걸지 않는다: 진짜로 막힌 경우는 R5/R5b/R6가 이미 위에서
+    # 다 잡았다. 여기까지 내려온 학생은 "같은 점수지만 서로 다른 영역을 시도 중"이고,
+    # 그게 정확히 agent_plan §3.1의 PRODUCTIVE_STRUGGLE 정의다.
+    # (가드를 걸면 이 학생이 R9로 떨어져 PROGRESSING으로 잘못 표시된다.)
+    if f.attempt_count >= 2:
+        return (
+            ProcessStatus.PRODUCTIVE_STRUGGLE,
+            None,
+            "다양한 시도를 하고 있어 스스로 해결할 여지가 있습니다.",
+        )
+
+    # R9 기본. 실행이 0~1회라 아직 판단할 증거가 없다.
+    return (
+        ProcessStatus.PROGRESSING,
+        None,
+        "개입이 필요한 신호가 아직 없습니다.",
+    )
+
+
+def decide(
+    f: ProcessFeatures,
+    *,
+    now: datetime,
+    cooldown_active: bool,
+    cooldown_remaining: int,
+    hint_pending: bool,
+    cfg: MonitorConfig | None = None,
+) -> ProcessState:
+    """순수 판정 함수. DB를 모른다 -- 테스트가 feature만 넘겨 호출할 수 있다."""
+    cfg = cfg or DEFAULT_MONITOR_CONFIG
+    evidence = _evidence(f, cfg)
+
+    # R0 도움 요청 -- cooldown을 무시한다.
+    # "도와줘"를 눌렀는데 침묵하는 건 데모 킬러이고, 명시적 요청은 어떤 휴리스틱보다
+    # 강한 신호다. hint_pending(= 마지막 AGENT_TRIGGER보다 나중의 HINT_REQUEST)이라는
+    # 조건이 anti-spam 가드다: 없으면 힌트 클릭 한 번이 이후 모든 평가에서 영원히 재발화한다.
+    if hint_pending:
+        return ProcessState(
+            status=ProcessStatus.HELP_REQUESTED,
+            trigger=TriggerType.HELP_REQUESTED,
+            reason="학생이 직접 도움을 요청했습니다.",
+            evidence=evidence,
+            cooldown_active=cooldown_active,
+            cooldown_remaining_seconds=cooldown_remaining,
+            features=f,
+            evaluated_at=now,
+        )
+
+    status, trigger, reason = _classify(f, cfg)
+
+    # R1 cooldown 게이트: status는 그대로 분류하되 trigger만 죽인다.
+    # 데모에서 중요한 성질이다 -- 심사위원은 시스템이 stuck임을 *알면서도*
+    # 다시 끼어들지 않기로 *선택*했다는 걸 본다.
+    if cooldown_active and trigger is not None:
+        trigger = None
+        reason = f"{reason} (직전 개입 후 {cooldown_remaining}초 대기 중)"
+
+    return ProcessState(
+        status=status,
+        trigger=trigger,
+        reason=reason,
+        evidence=evidence,
+        cooldown_active=cooldown_active,
+        cooldown_remaining_seconds=cooldown_remaining,
+        features=f,
+        evaluated_at=now,
+    )
+
+
+# --------------------------------------------------------------------- 진입점
+
+
+def evaluate(
+    db: DbSession,
+    session_id: str,
+    *,
+    now: datetime | None = None,
+    cfg: MonitorConfig | None = None,
+) -> ProcessState:
+    """순수 판정. **아무것도 쓰지 않는다.** 폴링해도 안전하다."""
+    cfg = cfg or DEFAULT_MONITOR_CONFIG
+    now = now or utcnow()
+
+    session = store.require_session(db, session_id)
+    events = trace_service.all_events(db, session_id)
+    snapshots = store.all_snapshots(db, session_id)
+    f = extract_features(
+        db, session_id, now=now, cfg=cfg, session=session, events=events, snapshots=snapshots
+    )
+
+    has_result_after_trigger = f.last_trigger_seq is not None and any(
+        EventType(e.type) is EventType.TEST_RESULT and e.seq > f.last_trigger_seq
+        for e in events
+    )
+    cooldown_active, remaining = _cooldown(f, has_result_after_trigger, now, cfg)
+
+    hint_pending = f.last_hint_seq is not None and (
+        f.last_trigger_seq is None or f.last_hint_seq > f.last_trigger_seq
+    )
+
+    return decide(
+        f,
+        now=now,
+        cooldown_active=cooldown_active,
+        cooldown_remaining=remaining,
+        hint_pending=hint_pending,
+        cfg=cfg,
+    )
+
+
+def evaluate_and_record(
+    db: DbSession,
+    session: Session,
+    *,
+    now: datetime | None = None,
+    cfg: MonitorConfig | None = None,
+) -> ProcessState:
+    """evaluate() 후 trigger가 있으면 AGENT_TRIGGER 이벤트를 기록한다."""
+    now = now or utcnow()
+    state = evaluate(db, session.id, now=now, cfg=cfg)
+    if state.trigger is None:
+        return state
+
+    trace_service.append_event(
+        db,
+        session_id=session.id,
+        type=EventType.AGENT_TRIGGER,
+        source=EventSource.SERVER,
+        payload={
+            "trigger": state.trigger.value,
+            "status": state.status.value,
+            "reason": state.reason,
+            "evidence": state.evidence,
+            # 그 순간의 feature를 통째로 스냅샷한다. 사후에 "왜 이 숫자로 호출됐는지"를
+            # 정확히 설명할 수 있다 -- backend_plan §18이 발표용으로 요구하는 것.
+            "features": features_to_dict(state.features),
+        },
+        code_version=session.last_code_version or None,
+        at=now,
+    )
+    db.commit()
+    return state
+
+
+def features_to_dict(f: ProcessFeatures) -> dict:
+    """JSON 직렬화 가능한 형태로. datetime과 dataclass를 평평하게 만든다."""
+    last = f.last_result
+    return {
+        "elapsed_seconds": f.elapsed_seconds,
+        "run_count": f.run_count,
+        "submit_count": f.submit_count,
+        "attempt_count": f.attempt_count,
+        "recent_scores": f.recent_scores,
+        "same_result_count": f.same_result_count,
+        "progress_delta": f.progress_delta,
+        "improved_recently": f.improved_recently,
+        "seconds_without_progress": f.seconds_without_progress,
+        "same_region_edit_count": f.same_region_edit_count,
+        "repeated_edit_region": f.repeated_edit_region,
+        "edits_since_progress": f.edits_since_progress,
+        "edits_in_result_streak": f.edits_in_result_streak,
+        "undo_count": f.undo_count,
+        "hint_count": f.hint_count,
+        "large_change_detected": f.large_change_detected,
+        "recent_error_types": f.recent_error_types,
+        "consecutive_error_count": f.consecutive_error_count,
+        "snapshot_count": f.snapshot_count,
+        "last_result": None
+        if last is None
+        else {
+            "mode": last.mode,
+            "status": last.status.value,
+            "passed": last.passed,
+            "total": last.total,
+        },
+    }
