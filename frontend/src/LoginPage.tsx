@@ -1,19 +1,22 @@
-import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail, Play, Send } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, Play, Send, UserRound } from 'lucide-react'
 import { useState } from 'react'
+import type { UserRole } from './auth'
 
 type LoginPageProps = {
-  onLogin: () => void
+  onLogin: (role: UserRole) => void
   onSignupClick: () => void
+  onBack: () => void
 }
 
-function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
+function LoginPage({ onLogin, onSignupClick, onBack }: LoginPageProps) {
   const [isFindingPassword, setIsFindingPassword] = useState(false)
   const [resetRequested, setResetRequested] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [role, setRole] = useState<UserRole>('student')
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onLogin()
+    onLogin(role)
   }
 
   const handlePasswordReset = (event: React.FormEvent<HTMLFormElement>) => {
@@ -75,6 +78,7 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
   return (
     <main className="auth-shell">
       <section className="auth-panel">
+        <button className="auth-home-button" type="button" onClick={onBack}><ArrowLeft size={15} /> 홈으로</button>
         <a className="auth-brand" href="#" aria-label="TUTORY 홈">
           <img src="/TUTORY_logo.svg" alt="" />
         </a>
@@ -86,6 +90,7 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
+          <RoleSelector value={role} onChange={setRole} />
           <label className="auth-field">
             <span>이메일</span>
             <div>
@@ -135,6 +140,10 @@ function LoginPage({ onLogin, onSignupClick }: LoginPageProps) {
       </section>
     </main>
   )
+}
+
+function RoleSelector({ value, onChange }: { value: UserRole; onChange: (role: UserRole) => void }) {
+  return <fieldset className="role-selector"><legend>이용 유형</legend><div><button type="button" className={value === 'student' ? 'selected' : ''} onClick={() => onChange('student')}><UserRound size={17} /><span><strong>학생</strong><small>문제를 풀고 튜터링을 받아요</small></span></button><button type="button" className={value === 'educator' ? 'selected' : ''} onClick={() => onChange('educator')}><GraduationCap size={17} /><span><strong>교수자</strong><small>수강생과 과제를 관리해요</small></span></button></div></fieldset>
 }
 
 export default LoginPage

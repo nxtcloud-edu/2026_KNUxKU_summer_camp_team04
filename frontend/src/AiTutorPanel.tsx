@@ -9,6 +9,8 @@ type AiTutorPanelProps = {
   result: JudgeResult | null
   judgeError: string
   sessionId?: string
+  isAuthenticated: boolean
+  onRequireLogin: () => void
 }
 
 type ChatMessage = {
@@ -22,7 +24,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [nextMessageId, setNextMessageId] = useState(1)
@@ -44,7 +46,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId }: AiTutorPanelPr
   }
 
   const acceptOffer = () => {
-    addMessage('student', '네, 도와주세요.')
+    addMessage('student', '네, 도움이 필요해요.')
     addMessage('tutor', tutorHint)
     setOfferState('dismissed')
   }
@@ -55,6 +57,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId }: AiTutorPanelPr
   }
 
   const requestSos = () => {
+    if (!isAuthenticated) {
+      onRequireLogin()
+      return
+    }
     setSosError('')
     setAcorns(loadAcorns())
     setSosConfirmOpen(true)
@@ -103,7 +109,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId }: AiTutorPanelPr
             <div>
               <p>도움이 필요한가요?</p>
               <div>
-                <button type="button" onClick={acceptOffer}>네</button>
+                <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
                 <button type="button" onClick={declineOffer}>아니요</button>
               </div>
             </div>

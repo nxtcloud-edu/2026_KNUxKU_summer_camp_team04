@@ -1,16 +1,18 @@
-import { Check, Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { ArrowLeft, Check, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, UserRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import type { UserRole } from './auth'
 
 type SignupPageProps = {
-  onSignup: () => void
+  onSignup: (role: UserRole) => void
   onLoginClick: () => void
+  onBack: () => void
 }
 
-function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
+function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [role, setRole] = useState<UserRole>('student')
   const [message, setMessage] = useState('')
-
   const passwordRules = useMemo(() => ({
     minLength: password.length >= 6,
     hasLetterAndNumber: /[A-Za-z]/.test(password) && /\d/.test(password),
@@ -24,23 +26,25 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
       return
     }
     setMessage('')
-    onSignup()
+    onSignup(role)
   }
 
   return (
     <main className="auth-shell">
       <section className="auth-panel">
+        <button className="auth-home-button" type="button" onClick={onBack}><ArrowLeft size={15} /> 홈으로</button>
         <a className="auth-brand" href="#" aria-label="TUTORY 홈">
           <img src="/TUTORY_logo.svg" alt="" />
         </a>
 
         <div className="auth-heading">
           <span className="section-kicker">새 학습자 등록</span>
-          <h1>튜토리를 함께 시작해요</h1>
-          <p>간단한 정보를 입력하면 바로 Python 문제 학습 화면으로 이동합니다.</p>
+          <h1>튜토리와 함께 시작해요</h1>
+          <p>간단한 정보만 입력하면 바로 Python 문제 풀이 화면으로 이동합니다.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
+          <fieldset className="role-selector"><legend>이용 유형</legend><div><button type="button" className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}><UserRound size={17} /><span><strong>학생</strong><small>문제를 풀고 튜터링을 받아요</small></span></button><button type="button" className={role === 'educator' ? 'selected' : ''} onClick={() => setRole('educator')}><GraduationCap size={17} /><span><strong>교수자</strong><small>수강생과 과제를 관리해요</small></span></button></div></fieldset>
           <label className="auth-field">
             <span>이름</span>
             <div>
@@ -80,16 +84,9 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
           </label>
 
           <div className="password-rules" aria-live="polite">
-            <span className={passwordRules.minLength ? 'valid' : ''}>
-              <Check size={13} />
-              6자리 이상
-            </span>
-            <span className={passwordRules.hasLetterAndNumber ? 'valid' : ''}>
-              <Check size={13} />
-              영문, 숫자 조합
-            </span>
+            <span className={passwordRules.minLength ? 'valid' : ''}><Check size={13} />6자리 이상</span>
+            <span className={passwordRules.hasLetterAndNumber ? 'valid' : ''}><Check size={13} />영문, 숫자 조합</span>
           </div>
-
           {message && <p className="auth-message error">{message}</p>}
 
           <button className="auth-primary-button" type="submit">
