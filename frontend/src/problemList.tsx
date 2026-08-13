@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Braces, CheckCircle2, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
+const PROBLEMS_PER_PAGE = 10
 
 export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) => void }) {
   const [problems, setProblems] = useState<ProblemSummary[]>([])
   const [source, setSource] = useState<ProblemListSource>('local')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ProblemFilter>('all')
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -31,8 +34,22 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
     return matchesFilter && matchesQuery
   }), [filter, problems, query])
 
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PROBLEMS_PER_PAGE))
+  const visibleProblems = useMemo(() => {
+    const start = (page - 1) * PROBLEMS_PER_PAGE
+    return filtered.slice(start, start + PROBLEMS_PER_PAGE)
+  }, [filtered, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter, query])
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount)
+  }, [page, pageCount])
+
   const recommendations = useMemo(() => {
-    const unfinished = problems.filter((problem) => !localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`))
+    const unfinished = problems.filter((problem) => getLearningProgress(problem.problem_id)?.status !== 'COMPLETED')
     const pool = unfinished.length >= 3 ? unfinished : problems
     const beginnerFirst = [...pool].sort((a, b) => Number(!a.problem_id.startsWith('func_')) - Number(!b.problem_id.startsWith('func_')))
     return beginnerFirst.slice(0, 3)
@@ -68,15 +85,30 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
           </div>
         </div>
 
-        <div className="problem-list-meta"><span>{filtered.length}개 표시 중</span></div>
+        <div className="problem-list-meta"><span>전체 {filtered.length}개 · {page}/{pageCount} 페이지</span></div>
 
         {loading ? <div className="problem-list-state"><LoaderCircle className="spin" /> 문제를 불러오고 있어요</div>
           : error ? <div className="problem-list-state error">{error}</div>
           : filtered.length === 0 ? <div className="problem-list-state">검색 결과가 없습니다.</div>
-          : <div className="problem-rows">{filtered.map((problem, index) => <ProblemRow key={problem.problem_id} problem={problem} number={problems.indexOf(problem) + 1 || index + 1} onClick={() => onSelect(problem)} />)}</div>}
+          : <>
+            <div className="problem-rows">{visibleProblems.map((problem, index) => <ProblemRow key={problem.problem_id} problem={problem} number={problems.indexOf(problem) + 1 || (page - 1) * PROBLEMS_PER_PAGE + index + 1} onClick={() => onSelect(problem)} />)}</div>
+            {pageCount > 1 && <Pagination page={page} pageCount={pageCount} onChange={setPage} />}
+          </>}
         </section>
       </div>
     </main>
+  )
+}
+
+function Pagination({ page, pageCount, onChange }: { page: number; pageCount: number; onChange: (page: number) => void }) {
+  return (
+    <nav className="problem-pagination" aria-label="문제 목록 페이지">
+      <button type="button" aria-label="이전 페이지" disabled={page === 1} onClick={() => onChange(page - 1)}><ChevronLeft size={16} /></button>
+      {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
+        <button key={pageNumber} type="button" className={pageNumber === page ? 'active' : ''} aria-current={pageNumber === page ? 'page' : undefined} onClick={() => onChange(pageNumber)}>{pageNumber}</button>
+      ))}
+      <button type="button" aria-label="다음 페이지" disabled={page === pageCount} onClick={() => onChange(page + 1)}><ChevronRight size={16} /></button>
+    </nav>
   )
 }
 
@@ -99,7 +131,7 @@ function RecommendedProblem({ problem, rank, onClick }: { problem: ProblemSummar
 
 function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; number: number; onClick: () => void }) {
   const functionType = problem.problem_id.startsWith('func_')
-  const checkpointed = Boolean(localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`))
+  const progress = getLearningProgress(problem.problem_id)
   return (
     <button className="problem-row" onClick={onClick}>
       <span className="problem-row-number">{String(number).padStart(2, '0')}</span>
@@ -107,7 +139,7 @@ function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; num
         <strong>{problem.title}</strong>
         <small>{functionType ? '함수형' : '입출력형'} · {problem.concept.length ? problem.concept.join(' · ') : 'Python 기초'}</small>
       </span>
-      {checkpointed && <span className="checkpoint-state"><CheckCircle2 size={14} /> 학습 중</span>}
+      {progress && <span className={`checkpoint-state ${progress.status === 'COMPLETED' ? 'completed' : ''}`}><CheckCircle2 size={14} /> {progress.status === 'COMPLETED' ? '학습 완료' : '학습 중'}</span>}
       <ChevronRight className="problem-arrow" size={17} />
     </button>
   )

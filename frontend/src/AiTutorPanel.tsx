@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MessageCircle, Send, Sparkles } from 'lucide-react'
 import AcornIcon from './AcornIcon'
-import squirrelTutor from './assets/squirrel-tutor.png'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 import { decideTutorHelp, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
 
 type AiTutorPanelProps = {
@@ -97,21 +97,16 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     <aside className="tutor-panel panel">
       <div className="panel-header tutor-header">
         <div className="file-tab"><span className="tutor-status-dot" /><span>다람쥐 AI 튜터</span></div>
-        <button className="sos-button" type="button" onClick={requestSos}>
-          <Sparkles size={14} />
-          SOS
-        </button>
+        <div className="tutor-header-actions">
+          <span className="tutor-acorn-balance" aria-label={`보유 도토리 ${acorns}개`}><AcornIcon size={15} />{acorns}</span>
+          <button className="sos-button" type="button" onClick={requestSos}>
+            <Sparkles size={14} />
+            SOS
+          </button>
+        </div>
       </div>
 
       <div className="tutor-chat">
-        <div className="tutor-profile">
-          <img src={squirrelTutor} alt="다람쥐 튜터" />
-          <div>
-            <strong>다람쥐 튜터</strong>
-            <span><AcornIcon size={13} /> 보유 도토리 {acorns}개</span>
-          </div>
-        </div>
-
         {offerState === 'asking' && (
           <div className="tutor-help-offer">
             <img src={squirrelTutor} alt="" />

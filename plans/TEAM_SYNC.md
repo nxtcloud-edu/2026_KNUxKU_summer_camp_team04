@@ -31,7 +31,7 @@
 | [8] | AgentContext ↔ agent 어댑터 | **미실행.** 어댑터가 없어 `AGENT_BACKEND=llm`이 `WaitAgent`로 폴백 |
 | [9] | LLM 호출 예산 / 타임아웃 | 5회 → 4회로 줄었으나 `agent.decide()`에 여전히 타임아웃 없음 |
 | [10] | Activity 생성 주체 | **미실행.** `TRACE_CODE` 하드코딩, 생성기 없음 |
-| [12] | `INTERNAL_ERROR` | **미실행.** judge가 인프라 장애를 `RUNTIME_ERROR`로 보고. 프론트 `JudgeStatus` 유니온에도 빠져 있다 |
+| ~~[12]~~ | ~~`INTERNAL_ERROR`~~ | **해결됨.** judge가 인프라 장애 4곳을 `INTERNAL_ERROR`로 반환하고, backend가 `SYSTEM_STATUSES`로 분리해 오류 횟수에서 제외한다(+ monitor R1s 게이트). 프론트 유니온·라벨은 PR #13에서 이미 들어갔다 |
 | [15] | hidden 테스트 공개 노출 | 미결정 (공개 레포에 185개) |
 | — | 교육기관 UI | 백엔드 9개 엔드포인트 완성, 화면 0줄 |
 | [16] | 문제 JSON 스키마 문서 | **미실행.** `judge/README.md`가 `CLAUDE.md`를 가리키는데 그 파일은 `.gitignore` 대상이라 팀원이 볼 수 없다 |
@@ -367,6 +367,19 @@ backend가 기대하는 계약은 `decide(ctx: AgentContext) -> AgentDecision` �
 **결정자: agent 담당 + backend 담당.** 지금 `evaluation_agent`는 방금 만든 `ActionPlan`이 적절했는지를 **학생이 아직 아무 반응도 하기 전에, 같은 요청 안에서** LLM에게 묻는다. `agent_plan.md §3.4`는 정반대로 학생이 Activity에 낸 답을 채점해 `result/understanding/next_step`을 내라고 하고, **TRACE/PREDICT는 LLM 없이 결정론적으로, DEBUG는 Judge 실행으로** 검증하라고 명시한다. backend에는 `ACTIVITY_OPENED`/`ACTIVITY_RESPONSE` 이벤트 타입과 `payload.result=='CORRECT'`를 진전 anchor로 인정하는 규약이 이미 있지만, 이를 받아 평가할 함수도 `POST /activities/{id}/answers`도 없다. **필요한 평가는 주인이 없고, 필요 없는 자기평가에 개입당 LLM 1회를 쓰고 있다.** `effectiveness_score`가 발표 지표로 필요하면 요청 경로 밖 오프라인 로깅으로 옮긴다.
 
 ### [12] `INTERNAL_ERROR` — judge가 인프라 장애를 학생 에러로 보고한다
+
+> **해결됨.** ①②는 구현 완료, ③은 PR #13에서 이미 들어갔다(`problemService.ts`의
+> `normalizeJudgeStatus`가 화이트리스트 체크까지 한다). 추가로 monitor에 R1s 게이트를
+> 넣었다 — ①②만으로는 `consecutive_error_count`는 막히지만 R7(90초 무진전 + 실행 2회)이
+> 채점기 장애 중에도 발화한다. 회귀 테스트는 `backend/tests/test_internal_error.py`(14개),
+> `judge/tests/test_internal_error.py`(10개).
+>
+> 발견한 부수 사실: 로컬 `judge-sandbox` 이미지가 capture 하네스 2개가 추가되기 전
+> 버전이면 컨테이너가 "No such file"을 뱉는데, **그게 정확히 이 버그로 `RUNTIME_ERROR`로
+> 보고되고 있었다.** 이미지를 다시 빌드하면 해결된다(`docker build -t judge-sandbox .`).
+> 이제 같은 상황이 `INTERNAL_ERROR`로 나와 원인을 바로 알 수 있다.
+
+아래는 최초 감사 시점의 원문이다.
 **담당: judge(BE1) 4줄 + backend 1곳 + frontend 2곳.** `judge_service.py`가 Docker 데몬 연결 실패(`:140`), 컨테이너 실행 실패(`:177`), 무출력(`:199`), 로그 JSON 파싱 실패(`:204`)를 **전부 `RUNTIME_ERROR`로 반환한다.** backend `ERROR_STATUSES`가 이를 학생 에러로 분류해 `consecutive_error_count`를 올리고, 임계값 3을 넘으면 `REPEATED_FAILURE` 트리거가 발화한다. → **도커가 죽어 있으면 학생이 3번 실행하는 것만으로 '반복 실패' 판정이 나고 agent가 개입한다.** `INTERNAL_ERROR`가 enum에 존재하는 이유가 정확히 이 케이스인데 judge가 한 번도 쓰지 않는다.
 할 일: ① judge는 인프라 실패 4곳을 `INTERNAL_ERROR`로(학생 코드가 던진 예외만 `RUNTIME_ERROR`로 남긴다), ② backend는 `INTERNAL_ERROR`를 `ERROR_STATUSES`에서 빼고 `SYSTEM_STATUSES`로 분리해 feature 집계에서 제외, ③ 프론트는 `JudgeStatus` 유니온에 `'INTERNAL_ERROR'` 추가 + `JUDGE_LABELS`에 `'채점 서버에 문제가 생겼어요 (코드 문제가 아니에요)'` 추가. `problemService.ts:103`의 `payload as JudgeResult` 무검증 캐스트를 화이트리스트 체크로 바꾸면 다음 enum 추가 때 또 안 터진다.
 **(`FRONTEND_INTEGRATION.md` §5는 이미 `INTERNAL_ERROR`를 프론트가 보내야 할 정식 status 6종에 포함시켜뒀다. 오늘은 `JUDGE_BACKEND=none`이라 이 경로가 실제로 열려 있지 않다.)**
