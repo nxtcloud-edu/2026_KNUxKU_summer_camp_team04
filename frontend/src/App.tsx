@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
   BookOpen,
-  Archive,
   Check,
   ChevronDown,
   CircleAlert,
   Code2,
   LoaderCircle,
+  LogIn,
   LogOut,
   Monitor,
   Moon,
@@ -17,6 +17,7 @@ import {
   Send,
   Sun,
   Terminal,
+  UserRound,
   Waypoints,
 } from 'lucide-react'
 import AiTutorPanel from './AiTutorPanel'
@@ -25,7 +26,14 @@ import MyPage from './MyPage'
 import { preparePython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import {
+  getProblemDetail,
+  isJudgeApiConfigured,
+  type JudgeResult,
+  type ProblemDetail,
+  type ProblemSummary,
+  type PublicTestCase,
+} from './problemService'
 import { runJudge } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
@@ -34,14 +42,19 @@ type RunMode = 'run' | 'submit'
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 type ThemeMode = 'system' | 'light' | 'dark'
 type AuthView = 'login' | 'signup' | 'workspace'
+type Activity = 'problem' | 'trace' | 'list' | 'mypage'
 
 function App() {
-  const [authView, setAuthView] = useState<AuthView>('login')
+  const [authView, setAuthView] = useState<AuthView>('workspace')
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   if (authView === 'login') {
     return (
       <LoginPage
-        onLogin={() => setAuthView('workspace')}
+        onLogin={() => {
+          setIsAuthenticated(true)
+          setAuthView('workspace')
+        }}
         onSignupClick={() => setAuthView('signup')}
       />
     )
@@ -50,16 +63,36 @@ function App() {
   if (authView === 'signup') {
     return (
       <SignupPage
-        onSignup={() => setAuthView('workspace')}
+        onSignup={() => {
+          setIsAuthenticated(true)
+          setAuthView('workspace')
+        }}
         onLoginClick={() => setAuthView('login')}
       />
     )
   }
 
-  return <LearningWorkspace onLogout={() => setAuthView('login')} />
+  return (
+    <LearningWorkspace
+      isAuthenticated={isAuthenticated}
+      onLoginClick={() => setAuthView('login')}
+      onLogout={() => {
+        setIsAuthenticated(false)
+        setAuthView('workspace')
+      }}
+    />
+  )
 }
 
-function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
+function LearningWorkspace({
+  isAuthenticated,
+  onLoginClick,
+  onLogout,
+}: {
+  isAuthenticated: boolean
+  onLoginClick: () => void
+  onLogout: () => void
+}) {
   const [selectedProblemId, setSelectedProblemId] = useState('func_sum_list')
   const [problem, setProblem] = useState<ProblemDetail | null>(null)
   const [problemLoading, setProblemLoading] = useState(true)
@@ -74,7 +107,15 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
-  const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('list')
+  const [activity, setActivity] = useState<Activity>('list')
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [profileAvatar, setProfileAvatar] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('tutory:profile') ?? '{}').avatar as string || ''
+    } catch {
+      return ''
+    }
+  })
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -96,7 +137,9 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
         setJudgeError('')
       })
       .catch((caught) => {
-        if (!(caught instanceof DOMException && caught.name === 'AbortError')) setProblemError(caught instanceof Error ? caught.message : String(caught))
+        if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
+          setProblemError(caught instanceof Error ? caught.message : String(caught))
+        }
       })
       .finally(() => setProblemLoading(false))
     return () => controller.abort()
@@ -136,6 +179,17 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
     }
   }, [menuOpen])
 
+  const requireLogin = () => {
+    if (isAuthenticated) return true
+    setAuthModalOpen(true)
+    return false
+  }
+
+  const openActivity = (nextActivity: Activity) => {
+    if (nextActivity !== 'list' && !requireLogin()) return
+    setActivity(nextActivity)
+  }
+
   // 코드 편집의 유일한 관측점. 여기서만 학생의 타이핑을 볼 수 있다 --
   // useEffect([code]) 로는 안 된다. 문제 전환 시의 setCode 와 구분이 안 되기 때문.
   const handleCodeChange = (value: string | undefined) => {
@@ -145,7 +199,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   }
 
   const execute = async (nextMode: RunMode) => {
-    if (isRunning || !problem) return
+    if (!requireLogin() || isRunning || !problem) return
     setMode(nextMode)
     setIsRunning(true)
     setResult(null)
@@ -167,7 +221,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   }
 
   const resetCode = () => {
-    if (!problem) return
+    if (!requireLogin() || !problem) return
     if (code === problem.code_template || window.confirm('작성한 코드를 기본 코드로 되돌릴까요?')) {
       setCode(problem.code_template)
       setResult(null)
@@ -178,12 +232,12 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   }
 
   const saveCheckpoint = () => {
-    if (!problem) return
+    if (!requireLogin() || !problem) return
     localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
   }
 
   const restoreCheckpoint = () => {
-    if (!problem) return
+    if (!requireLogin() || !problem) return
     const checkpoint = localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`)
     if (checkpoint !== null) {
       setCode(checkpoint)
@@ -195,6 +249,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   }
 
   const selectProblem = (selected: ProblemSummary) => {
+    if (!requireLogin()) return
     setSelectedProblemId(selected.problem_id)
     setActivity('problem')
   }
@@ -204,6 +259,12 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
     editor.focus()
   }
 
+  const handleLogout = () => {
+    setMenuOpen(false)
+    setActivity('list')
+    onLogout()
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -211,6 +272,12 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
           <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
             <img src="/TUTORY_logo.svg" alt="" />
           </button>
+          {!isAuthenticated && (
+            <button className="login-top-button" type="button" onClick={onLoginClick}>
+              <LogIn size={15} />
+              로그인하기
+            </button>
+          )}
         </div>
         <div className="topbar-actions">
           <div className={`runtime-pill ${runtimeStatus}`}>
@@ -219,6 +286,9 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
             {runtimeStatus === 'ready' && 'Python 준비됨'}
             {runtimeStatus === 'error' && '실행 환경 오류'}
           </div>
+          <button className="profile-trigger" type="button" aria-label="마이페이지 열기" onClick={() => openActivity('mypage')}>
+            {isAuthenticated && profileAvatar ? <img src={profileAvatar} alt="내 프로필" /> : <UserRound size={18} />}
+          </button>
           <div className="settings" ref={menuRef}>
             <button
               className={`menu-trigger ${menuOpen ? 'active' : ''}`}
@@ -240,13 +310,15 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
                 <button className="menu-row" role="menuitem" onClick={() => { resetCode(); setMenuOpen(false) }}>
                   <span>코드 초기화</span><RotateCcw size={16} />
                 </button>
-                <div className="menu-divider" />
-                <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); setActivity('mypage') }}>
-                  <span>도토리창고</span><Archive size={16} />
-                </button>
-                <button className="menu-row logout" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>
-                  <span>로그아웃</span><LogOut size={16} />
-                </button>
+                {isAuthenticated ? (
+                  <button className="menu-row logout" role="menuitem" onClick={handleLogout}>
+                    <span>로그아웃하기</span><LogOut size={16} />
+                  </button>
+                ) : (
+                  <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); onLoginClick() }}>
+                    <span>로그인하기</span><LogIn size={16} />
+                  </button>
+                )}
                 <div className="menu-divider" />
                 <div className="menu-runtime">
                   <span className={`status-dot ${runtimeStatus}`} />
@@ -258,112 +330,158 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
         </div>
       </header>
 
-      {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
-        : activity === 'mypage' ? <MyPage />
-        : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
+      {activity === 'trace' ? (
+        <TraceActivity onExit={() => setActivity('problem')} />
+      ) : activity === 'mypage' ? (
+        <MyPage onAvatarChange={setProfileAvatar} />
+      ) : activity === 'list' ? (
+        <ProblemList onSelect={selectProblem} />
+      ) : (
+        <main className="workspace">
+          <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
+            <button className="mobile-panel-toggle" onClick={() => setProblemOpen(!problemOpen)}>
+              <span><BookOpen size={17} /> 문제</span>
+              <ChevronDown size={17} />
+            </button>
+            {problemLoading ? (
+              <div className="problem-load-state"><LoaderCircle className="spin" /> 문제를 불러오는 중...</div>
+            ) : problemError || !problem ? (
+              <div className="problem-load-state error"><CircleAlert /> {problemError || '문제를 불러오지 못했습니다.'}</div>
+            ) : (
+              <div className="problem-content">
+                <div className="problem-meta" aria-label="문제 정보">
+                  <span>Python</span><i />
+                  <span>{problem.check_type === 'function_call' ? '함수형' : '입출력형'}</span><i />
+                  <span>{problem.problem_id}</span>
+                </div>
+                <h1>{problem.title}</h1>
+                <ProblemDescription description={problem.description} />
+                {problem.function_name && <div className="callout"><span>함수</span><code>{problem.function_name}(...)</code></div>}
+                <h2>공개 테스트</h2>
+                <div className="public-tests">
+                  {problem.public_test_cases.map((test, index) => (
+                    <div key={index}><span>테스트 {index + 1}</span><code>{formatPublicTest(test)}</code></div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
 
-      <main className="workspace">
-        <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
-          <button className="mobile-panel-toggle" onClick={() => setProblemOpen(!problemOpen)}>
-            <span><BookOpen size={17} /> 문제</span>
-            <ChevronDown size={17} />
-          </button>
-          {problemLoading ? <div className="problem-load-state"><LoaderCircle className="spin" /> 문제를 불러오는 중...</div>
-          : problemError || !problem ? <div className="problem-load-state error"><CircleAlert /> {problemError || '문제를 불러오지 못했습니다.'}</div>
-          : <div className="problem-content">
-            <div className="problem-meta" aria-label="문제 정보">
-              <span>Python</span><i />
-              <span>{problem.check_type === 'function_call' ? '함수형' : '입출력형'}</span><i />
-              <span>{problem.problem_id}</span>
+          <div className="center-workbench">
+            <section className="editor-panel panel">
+              <div className="panel-header">
+                <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
+                <div className="editor-tools">
+                  <button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button>
+                  <button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button>
+                  <button className="icon-text-button" onClick={resetCode} title="기본 코드로 되돌리기"><RotateCcw size={15} /> 초기화</button>
+                </div>
+              </div>
+              <div className="editor-wrap">
+                <Editor
+                  height="100%"
+                  defaultLanguage="python"
+                  value={code}
+                  onChange={handleCodeChange}
+                  onMount={handleEditorMount}
+                  theme={isDark ? 'vs-dark' : 'vs-light'}
+                  loading={<EditorLoading />}
+                  options={{
+                    fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
+                    fontSize: 14,
+                    lineHeight: 23,
+                    minimap: { enabled: false },
+                    padding: { top: 20 },
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    tabSize: 4,
+                    insertSpaces: true,
+                    wordWrap: 'on',
+                    lineNumbersMinChars: 3,
+                    renderLineHighlight: 'line',
+                    overviewRulerBorder: false,
+                    hideCursorInOverviewRuler: true,
+                  }}
+                />
+              </div>
+              <div className="editor-footer">
+                <span>Python 3.12</span>
+                <span>{code.split('\n').length} lines</span>
+              </div>
+            </section>
+
+            <section className="result-panel panel">
+              <div className="panel-header result-header">
+                <div className="file-tab"><Terminal size={16} /><span>실행 결과</span></div>
+                <span className={`api-badge ${isJudgeApiConfigured ? 'connected' : ''}`}>{isJudgeApiConfigured ? 'Judge API' : 'API 미연결'}</span>
+              </div>
+
+              <div className="result-content">
+                {isRunning ? (
+                  <div className="empty-state"><LoaderCircle className="spin" /><strong>코드를 실행하고 있어요</strong><p>잠시만 기다려 주세요.</p></div>
+                ) : judgeError ? (
+                  <JudgeErrorView message={judgeError} />
+                ) : !result ? (
+                  <div className="empty-state"><Play /><strong>준비가 되었어요</strong><p>코드를 작성하고 실행해 보세요.</p></div>
+                ) : (
+                  <JudgeResultView result={result} mode={mode} />
+                )}
+              </div>
+
+              <div className="action-bar">
+                <button className="trace-button" onClick={() => { trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' }); openActivity('trace') }} disabled={isRunning || runtimeStatus !== 'ready'}>
+                  <Waypoints size={17} /> TRACE 학습
+                </button>
+                <button
+                  className="run-button"
+                  onClick={() => execute('run')}
+                  disabled={isRunning || !problem}
+                >
+                  {isRunning && mode === 'run' ? <LoaderCircle className="spin" size={17} /> : <Play size={17} fill="currentColor" />}
+                  실행
+                </button>
+                <button
+                  className="submit-button"
+                  onClick={() => execute('submit')}
+                  disabled={isRunning || !problem}
+                >
+                  {isRunning && mode === 'submit' ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
+                  제출하기
+                </button>
+                <p>실행은 공개 테스트만 확인해요. TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
+              </div>
+            </section>
+          </div>
+
+          <AiTutorPanel problem={problem} result={result} judgeError={judgeError} />
+        </main>
+      )}
+
+      {authModalOpen && (
+        <div className="auth-modal-backdrop" role="presentation">
+          <div className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-required-title">
+            <div className="auth-modal-icon"><LogIn size={22} /></div>
+            <div>
+              <strong id="auth-required-title">로그인이 필요한 서비스입니다.</strong>
+              <p>문제 풀이, 마이페이지, 저장, 실행 기능은 로그인 후 사용할 수 있어요.</p>
             </div>
-            <h1>{problem.title}</h1>
-            <ProblemDescription description={problem.description} />
-            {problem.function_name && <div className="callout"><span>함수</span><code>{problem.function_name}(...)</code></div>}
-            <h2>공개 테스트</h2>
-            <div className="public-tests">{problem.public_test_cases.map((test, index) => <div key={index}><span>테스트 {index + 1}</span><code>{formatPublicTest(test)}</code></div>)}</div>
-          </div>}
-        </section>
-
-        <div className="center-workbench">
-        <section className="editor-panel panel">
-          <div className="panel-header">
-            <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button><button className="icon-text-button" onClick={resetCode} title="기본 코드로 되돌리기"><RotateCcw size={15} /> 초기화</button></div>
+            <div className="auth-modal-actions">
+              <button className="modal-secondary-button" type="button" onClick={() => setAuthModalOpen(false)}>
+                닫기
+              </button>
+              <button
+                className="modal-primary-button"
+                type="button"
+                onClick={() => {
+                  setAuthModalOpen(false)
+                  onLoginClick()
+                }}
+              >
+                로그인하기
+              </button>
+            </div>
           </div>
-          <div className="editor-wrap">
-            <Editor
-              height="100%"
-              defaultLanguage="python"
-              value={code}
-              onChange={handleCodeChange}
-              onMount={handleEditorMount}
-              theme={isDark ? 'vs-dark' : 'vs-light'}
-              loading={<EditorLoading />}
-              options={{
-                fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
-                fontSize: 14,
-                lineHeight: 23,
-                minimap: { enabled: false },
-                padding: { top: 20 },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 4,
-                insertSpaces: true,
-                wordWrap: 'on',
-                lineNumbersMinChars: 3,
-                renderLineHighlight: 'line',
-                overviewRulerBorder: false,
-                hideCursorInOverviewRuler: true,
-              }}
-            />
-          </div>
-          <div className="editor-footer">
-            <span>Python 3.12</span>
-            <span>{code.split('\n').length} lines</span>
-          </div>
-        </section>
-
-        <section className="result-panel panel">
-          <div className="panel-header result-header">
-            <div className="file-tab"><Terminal size={16} /><span>실행 결과</span></div>
-            <span className={`api-badge ${isJudgeApiConfigured ? 'connected' : ''}`}>{isJudgeApiConfigured ? 'Judge API' : 'API 미연결'}</span>
-          </div>
-
-          <div className="result-content">
-            {isRunning ? (
-              <div className="empty-state"><LoaderCircle className="spin" /><strong>코드를 실행하고 있어요</strong><p>잠시만 기다려 주세요.</p></div>
-            ) : judgeError ? <JudgeErrorView message={judgeError} /> : !result ? (
-              <div className="empty-state"><Play /><strong>준비가 되었어요</strong><p>코드를 작성하고 실행해 보세요.</p></div>
-            ) : <JudgeResultView result={result} mode={mode} />}
-          </div>
-
-          <div className="action-bar">
-            <button className="trace-button" onClick={() => { trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' }); setActivity('trace') }} disabled={isRunning || runtimeStatus !== 'ready'}>
-              <Waypoints size={17} /> TRACE 학습
-            </button>
-            <button
-              className="run-button"
-              onClick={() => execute('run')}
-              disabled={isRunning || !problem}
-            >
-              {isRunning && mode === 'run' ? <LoaderCircle className="spin" size={17} /> : <Play size={17} fill="currentColor" />}
-              실행
-            </button>
-            <button
-              className="submit-button"
-              onClick={() => execute('submit')}
-              disabled={isRunning || !problem}
-            >
-              {isRunning && mode === 'submit' ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-              제출하기
-            </button>
-            <p>실행은 공개 테스트만 확인해요. · TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
-          </div>
-        </section>
         </div>
-
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} />
-      </main>
       )}
     </div>
   )
@@ -387,29 +505,41 @@ function ProblemDescription({ description }: { description: string }) {
     <div className="problem-description">
       {sections.map((section, index) => {
         const [heading, ...body] = section.trim().split('\n')
-        return <section key={`${heading}-${index}`}><h2>{heading}</h2>{body.join('\n').split('\n\n').filter(Boolean).map((paragraph, paragraphIndex) => <p key={paragraphIndex}>{renderInlineCode(paragraph)}</p>)}</section>
+        return (
+          <section key={`${heading}-${index}`}>
+            <h2>{heading}</h2>
+            {body.join('\n').split('\n\n').filter(Boolean).map((paragraph, paragraphIndex) => (
+              <p key={paragraphIndex}>{renderInlineCode(paragraph)}</p>
+            ))}
+          </section>
+        )
       })}
     </div>
   )
 }
 
 function renderInlineCode(text: string) {
-  return text.split(/(`[^`]+`)/g).map((part, index) => part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : part)
+  return text.split(/(`[^`]+`)/g).map((part, index) => (
+    part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : part
+  ))
 }
 
 function formatPublicTest(test: PublicTestCase) {
-  // `!= null` 이어야 한다 (`!== undefined` 아님). 서버가 stdin 을 null 로 보내면
-  // `!== undefined` 가 true 라서 이 분기를 타고 null.trim() 에서 렌더가 죽는다.
-  if (test.stdin != null) return `입력 ${JSON.stringify(test.stdin.trim())} → 출력 ${JSON.stringify(test.expected_stdout?.trim() ?? '')}`
+  if (test.stdin !== undefined) return `입력 ${JSON.stringify(test.stdin.trim())} → 출력 ${JSON.stringify(test.expected_stdout?.trim())}`
   return `입력 ${JSON.stringify(test.input)} → 결과 ${JSON.stringify(test.expected)}`
 }
 
 function JudgeErrorView({ message }: { message: string }) {
-  return <div className="error-view"><div className="error-title"><CircleAlert size={19} /><strong>채점 서버에 연결할 수 없어요</strong></div><p>{message}</p></div>
+  return (
+    <div className="error-view">
+      <div className="error-title"><CircleAlert size={19} /><strong>채점 서버에 연결할 수 없어요</strong></div>
+      <p>{message}</p>
+    </div>
+  )
 }
 
 const JUDGE_LABELS: Record<JudgeResult['status'], string> = {
-  ACCEPTED: '모든 테스트를 통과했어요!',
+  ACCEPTED: '모든 테스트를 통과했어요',
   WRONG_ANSWER: '일부 테스트가 틀렸어요',
   RUNTIME_ERROR: '실행 중 오류가 발생했어요',
   SYNTAX_ERROR: '문법을 다시 확인해 주세요',
@@ -430,7 +560,12 @@ function JudgeResultView({ result, mode }: { result: JudgeResult; mode: RunMode 
       </div>
       <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
       {result.message && <div className="judge-message"><strong>{result.status}</strong><pre>{result.message}</pre></div>}
-      {result.failed_categories?.length ? <div className="failed-categories"><strong>다시 살펴볼 유형</strong><div>{result.failed_categories.map((category) => <span key={category}>{category}</span>)}</div></div> : null}
+      {result.failed_categories?.length ? (
+        <div className="failed-categories">
+          <strong>다시 해볼 유형</strong>
+          <div>{result.failed_categories.map((category) => <span key={category}>{category}</span>)}</div>
+        </div>
+      ) : null}
     </div>
   )
 }

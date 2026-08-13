@@ -1,5 +1,5 @@
 import { Check, Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 type SignupPageProps = {
   onSignup: () => void
@@ -7,10 +7,23 @@ type SignupPageProps = {
 }
 
 function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const passwordRules = useMemo(() => ({
+    minLength: password.length >= 6,
+    hasLetterAndNumber: /[A-Za-z]/.test(password) && /\d/.test(password),
+  }), [password])
+  const isPasswordValid = passwordRules.minLength && passwordRules.hasLetterAndNumber
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!isPasswordValid) {
+      setMessage('비밀번호 조건을 모두 만족해야 회원가입할 수 있어요.')
+      return
+    }
+    setMessage('')
     onSignup()
   }
 
@@ -23,8 +36,8 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
 
         <div className="auth-heading">
           <span className="section-kicker">새 학습자 등록</span>
-          <h1>튜토리와 함께 시작해요</h1>
-          <p>간단한 정보만 입력하면 바로 Python 문제 풀이 화면으로 이동합니다.</p>
+          <h1>튜토리를 함께 시작해요</h1>
+          <p>간단한 정보를 입력하면 바로 Python 문제 학습 화면으로 이동합니다.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -50,8 +63,9 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
               <LockKeyhole size={17} />
               <input
                 type={showPassword ? 'text' : 'password'}
-                placeholder="8자 이상 입력하세요"
-                minLength={8}
+                placeholder="영문과 숫자를 포함해 입력하세요"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 required
               />
               <button
@@ -64,6 +78,19 @@ function SignupPage({ onSignup, onLoginClick }: SignupPageProps) {
               </button>
             </div>
           </label>
+
+          <div className="password-rules" aria-live="polite">
+            <span className={passwordRules.minLength ? 'valid' : ''}>
+              <Check size={13} />
+              6자리 이상
+            </span>
+            <span className={passwordRules.hasLetterAndNumber ? 'valid' : ''}>
+              <Check size={13} />
+              영문, 숫자 조합
+            </span>
+          </div>
+
+          {message && <p className="auth-message error">{message}</p>}
 
           <button className="auth-primary-button" type="submit">
             <Check size={17} />

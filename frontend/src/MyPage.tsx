@@ -1,21 +1,39 @@
 import { useMemo, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import {
   Award,
   BadgeCheck,
-  Camera,
+  CalendarDays,
   Check,
-  Coins,
   ImageUp,
+  Lightbulb,
   Pencil,
-  Trophy,
   UserRound,
 } from 'lucide-react'
+import AcornIcon from './AcornIcon'
+import badgeSeed from './assets/badges/badge-seed.png'
+import badgeSprout from './assets/badges/badge-sprout.png'
+import badgeSapling from './assets/badges/badge-sapling.png'
+import badgeOak from './assets/badges/badge-oak.png'
+import badgeGuardian from './assets/badges/badge-guardian.png'
+import badgeLegend from './assets/badges/badge-legend.png'
 
 type Profile = {
   nickname: string
   avatar: string
   acorns: number
   totalAcorns: number
+}
+
+type Badge = {
+  name: string
+  minAcorns: number
+  description: string
+  image: string
+}
+
+type MyPageProps = {
+  onAvatarChange?: (avatar: string) => void
 }
 
 const PROFILE_KEY = 'tutory:profile'
@@ -36,16 +54,27 @@ const SOLVED_PROBLEMS = [
   { id: 'count_vowels', title: '모음 개수 세기', date: '2026.08.10', acorns: 8 },
 ]
 
-const BADGES = [
-  { name: '씨앗 뱃지', minAcorns: 0, description: '첫 문제 풀이를 시작한 학습자' },
-  { name: '새싹 뱃지', minAcorns: 50, description: '꾸준히 기초 문제를 풀고 있어요' },
-  { name: '묘목 뱃지', minAcorns: 150, description: '함수와 조건문에 익숙해졌어요' },
-  { name: '참나무 뱃지', minAcorns: 300, description: '문제 해결 루틴이 단단해졌어요' },
-  { name: '숲지기 뱃지', minAcorns: 600, description: '고난도 문제에도 침착한 학습자' },
-  { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자' },
+const BADGES: Badge[] = [
+  { name: '씨앗 뱃지', minAcorns: 0, description: '첫 문제 풀이를 시작한 학습자', image: badgeSeed },
+  { name: '새싹 뱃지', minAcorns: 50, description: '꾸준히 기초 문제를 풀고 있어요', image: badgeSprout },
+  { name: '묘목 뱃지', minAcorns: 150, description: '함수와 조건문에 익숙해졌어요', image: badgeSapling },
+  { name: '참나무 뱃지', minAcorns: 300, description: '문제 해결 루틴이 단단해졌어요', image: badgeOak },
+  { name: '숲지기 뱃지', minAcorns: 600, description: '고난도 문제에도 침착한 학습자', image: badgeGuardian },
+  { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자', image: badgeLegend },
 ]
 
-function MyPage() {
+const LEARNING_STREAK = {
+  days: 4,
+  bestDays: 9,
+  message: '이번 주도 꾸준히 문제를 풀고 있어요.',
+}
+
+const RECENT_WRONG_HINT = {
+  problemTitle: '짝수의 합 구하기',
+  hint: '반복문에서 더하기 전에 짝수인지 먼저 확인해보세요.',
+}
+
+function MyPage({ onAvatarChange }: MyPageProps) {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
@@ -63,6 +92,7 @@ function MyPage() {
   const updateProfile = (nextProfile: Profile) => {
     setProfile(nextProfile)
     localStorage.setItem(PROFILE_KEY, JSON.stringify(nextProfile))
+    onAvatarChange?.(nextProfile.avatar)
   }
 
   const canSpendAcorns = (cost: number) => {
@@ -86,7 +116,7 @@ function MyPage() {
     setMessage(`닉네임이 변경됐어요. 도토리 ${NICKNAME_COST}개를 사용했습니다.`)
   }
 
-  const uploadAvatar = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadAvatar = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
     if (!canSpendAcorns(AVATAR_COST)) {
@@ -108,77 +138,101 @@ function MyPage() {
       <div className="mypage-container">
         <section className="mypage-hero">
           <div className="profile-main">
-            <div className="profile-avatar">
-              {profile.avatar ? <img src={profile.avatar} alt="프로필" /> : <UserRound size={48} />}
+            <div className="profile-avatar-frame">
+              <div className="profile-avatar">
+                {profile.avatar ? <img src={profile.avatar} alt="프로필" /> : <UserRound size={48} />}
+              </div>
+              <div className="profile-badge-chip" title={currentBadge.name} aria-label={`현재 뱃지: ${currentBadge.name}`}>
+                <img src={currentBadge.image} alt="" />
+              </div>
             </div>
-            <div>
+            <div className="profile-copy">
               <span className="section-kicker">MY TUTORY</span>
-              <h1>{profile.nickname}</h1>
+              <div className="profile-name-row">
+                <h1>{profile.nickname}</h1>
+                <button className="profile-mini-button" type="button" onClick={saveNickname}>
+                  <Pencil size={13} />
+                  수정
+                </button>
+                <button className="profile-mini-button" type="button" onClick={() => fileInputRef.current?.click()}>
+                  <ImageUp size={13} />
+                  업로드
+                </button>
+              </div>
+              <div className="profile-inline-edit">
+                <input value={draftNickname} onChange={(event) => setDraftNickname(event.target.value)} aria-label="닉네임" />
+                <span>변경 비용: 닉네임 도토리 {NICKNAME_COST}개 · 사진 도토리 {AVATAR_COST}개</span>
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={uploadAvatar} />
+              </div>
               <p>도토리를 모아 뱃지를 성장시키고, 푼 문제 기록을 확인해보세요.</p>
+              {message && <p className="profile-message">{message}</p>}
             </div>
           </div>
           <div className="acorn-wallet">
-            <Coins size={22} />
+            <AcornIcon size={24} />
             <span>보유 도토리</span>
             <strong>{profile.acorns}</strong>
           </div>
         </section>
 
-        <section className="mypage-grid">
-          <div className="mypage-panel profile-editor">
-            <div className="mypage-panel-title">
-              <Pencil size={17} />
-              <strong>프로필 수정</strong>
-            </div>
-            <label className="mypage-field">
-              <span>닉네임</span>
-              <div>
-                <input value={draftNickname} onChange={(event) => setDraftNickname(event.target.value)} />
-                <button type="button" onClick={saveNickname}>수정</button>
-              </div>
-              <small>닉네임 변경 시 도토리 {NICKNAME_COST}개가 필요합니다.</small>
-            </label>
-
-            <div className="profile-upload-row">
-              <button type="button" onClick={() => fileInputRef.current?.click()}>
-                <ImageUp size={16} />
-                프로필 사진 업로드
-              </button>
-              <span>등록 및 변경 시 도토리 {AVATAR_COST}개</span>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={uploadAvatar} />
-            </div>
-
-            {message && <p className="profile-message">{message}</p>}
+        <section className="mypage-panel badge-panel">
+          <div className="mypage-panel-title">
+            <Award size={17} />
+            <strong>현재 뱃지 상태</strong>
           </div>
-
-          <div className="mypage-panel badge-panel">
-            <div className="mypage-panel-title">
-              <Award size={17} />
-              <strong>현재 뱃지 상태</strong>
+          <div className="current-badge">
+            <div className="badge-mark">
+              <img src={currentBadge.image} alt="" />
             </div>
-            <div className="current-badge">
-              <div className="badge-mark"><Trophy size={30} /></div>
-              <div>
-                <span>{currentBadge.name}</span>
-                <p>{currentBadge.description}</p>
-              </div>
+            <div>
+              <span>{currentBadge.name}</span>
+              <p>{currentBadge.description}</p>
             </div>
-            <div className="badge-progress">
-              <div>
-                <span>누적 도토리</span>
-                <strong>{profile.totalAcorns}</strong>
-              </div>
-              {nextBadge ? <small>다음: {nextBadge.name} ({nextBadge.minAcorns}개)</small> : <small>최고 뱃지 달성</small>}
-              <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+          <div className="badge-progress">
+            <div>
+              <span>누적 도토리</span>
+              <strong>{profile.totalAcorns}</strong>
             </div>
-            <div className="badge-list">
-              {BADGES.map((badge) => (
-                <div className={profile.totalAcorns >= badge.minAcorns ? 'earned' : ''} key={badge.name}>
-                  <BadgeCheck size={15} />
+            {nextBadge ? <small>다음: {nextBadge.name} ({nextBadge.minAcorns}개)</small> : <small>최고 뱃지 달성</small>}
+            <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+          <div className="badge-list">
+            {BADGES.map((badge) => {
+              const earned = profile.totalAcorns >= badge.minAcorns
+              return (
+                <div className={earned ? 'earned' : ''} key={badge.name}>
+                  <img src={badge.image} alt="" />
                   <span>{badge.name}</span>
                   <small>{badge.minAcorns}개</small>
+                  {earned && <BadgeCheck size={15} />}
                 </div>
-              ))}
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="mypage-grid learning-grid">
+          <div className="mypage-panel learning-card">
+            <div className="mypage-panel-title">
+              <CalendarDays size={17} />
+              <strong>연속 학습일</strong>
+            </div>
+            <div className="learning-streak">
+              <strong>{LEARNING_STREAK.days}일</strong>
+              <span>최고 기록 {LEARNING_STREAK.bestDays}일</span>
+              <p>{LEARNING_STREAK.message}</p>
+            </div>
+          </div>
+
+          <div className="mypage-panel learning-card">
+            <div className="mypage-panel-title">
+              <Lightbulb size={17} />
+              <strong>최근 오답 힌트</strong>
+            </div>
+            <div className="wrong-hint">
+              <span>{RECENT_WRONG_HINT.problemTitle}</span>
+              <p>{RECENT_WRONG_HINT.hint}</p>
             </div>
           </div>
         </section>
@@ -198,19 +252,6 @@ function MyPage() {
                 <small>+{problem.acorns} 도토리</small>
               </div>
             ))}
-          </div>
-        </section>
-
-        <section className="mypage-panel recommendation-panel">
-          <div className="mypage-panel-title">
-            <Camera size={17} />
-            <strong>추가하면 좋은 기능</strong>
-          </div>
-          <div className="recommendation-list">
-            <span>연속 학습일</span>
-            <span>최근 오답 노트</span>
-            <span>선호 문제 유형</span>
-            <span>다음 추천 문제</span>
           </div>
         </section>
       </div>
