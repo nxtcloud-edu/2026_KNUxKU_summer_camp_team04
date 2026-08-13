@@ -26,7 +26,14 @@ from sqlmodel import Session as DbSession
 
 from app.clock import seconds_between, utcnow
 from app.config import DEFAULT_MONITOR_CONFIG, MonitorConfig
-from app.enums import ERROR_STATUSES, SCORED_STATUSES, EventType, JudgeStatus, RegionTag
+from app.enums import (
+    ERROR_STATUSES,
+    SCORED_STATUSES,
+    SYSTEM_STATUSES,
+    EventType,
+    JudgeStatus,
+    RegionTag,
+)
 from app.errors import SessionNotFound
 from app.models import CodeSnapshot, Event, Session
 from app.sessions import store
@@ -206,6 +213,14 @@ def extract_features(
 
     scored = [r for r in results if r.status in SCORED_STATUSES]
     errored = [r for r in results if r.status in ERROR_STATUSES]
+    # 채점기 고장(INTERNAL_ERROR)은 학생에 대한 관측이 **아니다.** 연속 에러
+    # streak 계산에서 통째로 빼서 세지도 않고 끊지도 않는다.
+    #
+    # 세면: 도커가 죽어 있을 때 Run 세 번으로 REPEATED_FAILURE가 발화한다.
+    # 끊으면: 학생의 진짜 3연속 런타임 에러 중간에 채점기가 한 번 딸꾹질하면
+    #         streak이 리셋되어 정작 필요한 개입을 놓친다.
+    # 둘 다 틀렸으므로 투명하게 만든다.
+    observed = [r for r in results if r.status not in SYSTEM_STATUSES]
 
     run_count = sum(1 for r in results if r.mode == "run")
     submit_count = sum(1 for r in results if r.mode == "submit")
@@ -302,11 +317,12 @@ def extract_features(
         hint_count=hint_count,
         large_change_detected=large_change_detected,
         recent_error_types=[r.status.value for r in errored[-5:]],
-        # 필터링 안 한 전체 리스트 기준: 에러 사이에 정상 결과가 끼면 연속이 끊긴다.
+        # 정상 결과(ACCEPTED/WRONG_ANSWER)가 끼면 연속이 끊긴다. 그래서 errored가
+        # 아니라 observed(= 시스템 오류만 제외한 전체) 기준으로 센다.
         consecutive_error_count=_trailing_run(
-            results, lambda r: r.status in ERROR_STATUSES
+            observed, lambda r: r.status in ERROR_STATUSES
         )
-        if results and results[-1].status in ERROR_STATUSES
+        if observed and observed[-1].status in ERROR_STATUSES
         else 0,
         snapshot_count=len(snapshots),
         last_result=results[-1] if results else None,
