@@ -1,26 +1,44 @@
 # 팀 조율 문서 — 통합 전 결정해야 할 것들
 
-> 작성: 2026-08-13 · 기준 커밋 `origin/main@4e0599e`, `origin/backend@886bd03`,
-> `origin/frontend@c47a042`, `origin/judge@c146b8b`
->
-> 이후 브랜치가 움직이면 줄 번호와 충돌 목록이 달라질 수 있다.
-> 아래 "이미 반영된 것"은 `origin/backend`에 커밋되어 있다.
+> **갱신: 2026-08-13 · 모든 브랜치가 `main`에 머지된 뒤 기준.**
+> 아래 본문은 최초 감사(브랜치 4개가 갈라져 있던 시점) 그대로 두었다.
+> 각 항목의 근거와 실패 모드가 여전히 읽을 값이 있어서다.
+> **무엇이 해결됐고 무엇이 남았는지는 이 표를 본다.**
 
-## 이미 반영된 것 (재논의 불필요)
+## 해결됨 (재논의 불필요)
 
-- `get_agent()`가 `AGENT_BACKEND=llm`에서 `NotImplementedError`를 던지던 문제 → `WaitAgent` 폴백.
-  FastAPI `Depends`라 라우터의 `try/except` 바깥이어서 `POST /results`가 500이 되고
-  채점 결과까지 유실됐다. (`886bd03`)
-- `PROBLEMS_DIR=../judge/problems`가 기동 중 크래시를 낸다는 경고를
-  `backend/README.md` 병합 체크리스트와 `parse_problem` 독스트링에 추가. (`886bd03`)
+| # | 항목 | 어떻게 |
+|---|---|---|
+| [0] | 브랜치 머지 | 6개 브랜치 전부 `main`에 머지 |
+| [2] | 파서를 stdout_match까지 확장 | judge 26문제가 전부 파싱된다 (실측 OK 26 / FAIL 0) |
+| [3] | `concept` vs `concepts` | **단수 `concept`으로 확정.** 응답 스키마 수정 완료 |
+| [5] | 프론트 진입점 계약 | `POST /sessions/{id}/run\|submit` 으로 이전. `POST /results` 제거 |
+| [6] | `get_agent()`가 500을 내던 문제 | `WaitAgent` 폴백 + 경고 |
+| [7] | 개입 판단 소유권 | `entry_agent.py` 삭제, `state_agent`의 규칙 게이트로 통합 |
+| [13] | 에러 봉투 모양 통일 | `traceClient.errorMessage()`가 3형태를 전부 처리 |
+| — | `description_summary`가 `"## 문제"`를 뽑던 문제 | `_first_prose_line()` |
+| — | 인증 부재 | JWT + bcrypt + 역할 3종 구현 |
+| — | 도토리 조작 경로 | `POST /results` 제거. 서버 judge 결과만 인정 |
+| — | `/agent/decide` 소유권 검사 없음 | `require_session(user_id=...)` 추가 |
+
+## 남은 것
+
+| # | 항목 | 상태 |
+|---|---|---|
+| **[신규]** | **프론트가 `Authorization` 헤더를 안 보낸다** | **가장 시급.** 로그인 화면이 API를 안 부른다 → 붙이면 전부 401 |
+| [1] | 문제 정본 = `judge/problems` 26개 | **미실행.** 파서는 준비됐다(`PROBLEMS_DIR` 한 줄). 다만 23개에 `concept`/`difficulty`가 비어 있다 |
+| [4] | 8000 포트 = backend 단독 | **미실행.** `judge/main.py`가 아직 8000에 `/problems`·`/judge`를 노출한다 |
+| [8] | AgentContext ↔ agent 어댑터 | **미실행.** 어댑터가 없어 `AGENT_BACKEND=llm`이 `WaitAgent`로 폴백 |
+| [9] | LLM 호출 예산 / 타임아웃 | 5회 → 4회로 줄었으나 `agent.decide()`에 여전히 타임아웃 없음 |
+| [10] | Activity 생성 주체 | **미실행.** `TRACE_CODE` 하드코딩, 생성기 없음 |
+| [12] | `INTERNAL_ERROR` | **미실행.** judge가 인프라 장애를 `RUNTIME_ERROR`로 보고. 프론트 `JudgeStatus` 유니온에도 빠져 있다 |
+| [15] | hidden 테스트 공개 노출 | 미결정 (공개 레포에 185개) |
+| — | 교육기관 UI | 백엔드 9개 엔드포인트 완성, 화면 0줄 |
+| [16] | 문제 JSON 스키마 문서 | **미실행.** `judge/README.md`가 `CLAUDE.md`를 가리키는데 그 파일은 `.gitignore` 대상이라 팀원이 볼 수 없다 |
+| — | 마이그레이션 감지 | 스키마가 바뀌어도 조용히 옛 DB로 돈다 |
 
 ---
 
-아래는 5개 차원(API 계약 / 스키마 / 소유권 / 문제 데이터 / 머지 메커닉)에서 발견되고 검증된 충돌을 **해결 순서**로 정리한 것이다. 중복 항목은 하나로 합쳤다. 심각도순이 아니라, **어떤 것을 먼저 정해야 나머지가 자동으로 풀리는지**를 기준으로 배열했다.
-
-읽기 전에 알아둘 것 하나: 대부분의 항목은 **"지금 앱이 깨져 있다"가 아니라 "브랜치를 합치거나 설정을 켜는 순간 깨진다"**다. 기본 설정(`JUDGE_BACKEND=none`, `AGENT_BACKEND=none`, `PROBLEMS_DIR=app/problems/data`)에서는 backend가 정상 기동한다. 아래에서 "오늘 깨져 있음"과 "연결 시 깨짐"을 명시적으로 구분했다.
-
----
 
 ## 한눈에 보기 — 의존 관계
 
@@ -369,7 +387,7 @@ backend가 기대하는 계약은 `decide(ctx: AgentContext) -> AgentDecision` �
 
 ### [16] 스키마 문서와 생성 스크립트
 **담당: judge(BE1) 주도 + backend 리뷰.**
-- `judge/README.md:22`가 "JSON 스키마와 API 응답 스펙은 [CLAUDE.md](CLAUDE.md) 참고"라고 안내하는데 **`.gitignore` 1행이 `CLAUDE.md`를 제외해 어느 브랜치에도 트래킹되어 있지 않다. 깨진 링크다.** 4개 서브시스템이 공유해야 할 문제 데이터 스키마의 명세가 각자 로컬에만 있고, 팀원은 JSON 파일을 역공학해서 필수 필드를 추론해야 한다. **[2], [3]의 어긋남이 전부 "스키마 문서가 없어서" 생긴 종류다.** → `docs/problem-schema.md`(또는 `judge/SCHEMA.md`)를 트래킹 파일로 만들어 필수/선택 필드, `check_type`별 테스트케이스 키, `concept` 어휘, `difficulty` 허용값을 한 페이지로 고정. 가능하면 JSON Schema 파일 하나를 두고 양쪽 테스트에서 26개를 검증하면 drift가 CI에서 잡힌다.
+- `judge/README.md:22`가 "JSON 스키마와 API 응답 스펙은 `CLAUDE.md` 참고"라고 안내하는데 **`.gitignore` 1행이 `CLAUDE.md`를 제외해 어느 브랜치에도 트래킹되어 있지 않다. 깨진 링크다.** 4개 서브시스템이 공유해야 할 문제 데이터 스키마의 명세가 각자 로컬에만 있고, 팀원은 JSON 파일을 역공학해서 필수 필드를 추론해야 한다. **[2], [3]의 어긋남이 전부 "스키마 문서가 없어서" 생긴 종류다.** → `docs/problem-schema.md`(또는 `judge/SCHEMA.md`)를 트래킹 파일로 만들어 필수/선택 필드, `check_type`별 테스트케이스 키, `concept` 어휘, `difficulty` 허용값을 한 페이지로 고정. 가능하면 JSON Schema 파일 하나를 두고 양쪽 테스트에서 26개를 검증하면 drift가 CI에서 잡힌다.
 - `judge/scripts/build_index.py`(가칭)를 추가해 `problems/*.json`에서 index/detail을 생성하고, CI에서 "재생성 결과 == 커밋된 파일"을 검사. 두 파일 상단에 생성물임을 주석으로 명시.
 - 프론트의 크로스 디렉터리 import(`'../../judge/*.json'`)는 생성물을 `frontend/src/data/`로 복사하는 npm 스크립트로 대체하면 Vite 루트 밖 의존이 사라진다([0]의 `fs.allow` 우회도 불필요해진다).
 - `concept` 통제 어휘를 한 곳에 문서화(`docs/concepts.md` 또는 `Concept` enum). 지금 `condition` vs `conditional` 같은 어휘 분기가 있고 taxonomy를 정의한 문서나 enum이 어디에도 없다.

@@ -18,7 +18,8 @@ cd backend && uvicorn app.main:app --reload --port 8000 --workers 1
 ### 토큰 얻기
 
 ```http
-POST /auth/signup   { "name": "홍길동", "email": "a@b.com", "password": "password123" }
+POST /auth/signup   { "name": "홍길동", "email": "a@b.com", "password": "password123",
+                      "role": "STUDENT", "invite_code": null }
 POST /auth/login    { "email": "a@b.com", "password": "password123" }
 ```
 
@@ -29,6 +30,8 @@ POST /auth/login    { "email": "a@b.com", "password": "password123" }
   "user": {
     "id": "user_...", "name": "홍길동", "nickname": "홍길동",
     "email": "a@b.com", "avatar_url": null,
+    "role": "STUDENT",              // STUDENT | EDUCATOR | ADMIN
+    "organization_id": null,
     "acorn_balance": 0, "total_acorns_earned": 0
   },
   "access_token": "eyJhbGciOi...",
@@ -51,6 +54,20 @@ POST /auth/logout  → 204. 서버는 상태를 안 지우므로 토큰 삭제�
 ```
 
 `/auth/refresh`는 **아직 없다.** access token 하나만 쓰고 만료되면 다시 로그인한다.
+
+### 역할 (`role`)
+
+| 값 | 가입 방법 |
+|---|---|
+| `STUDENT` | 기본값. 그냥 가입 |
+| `EDUCATOR` | **기관 초대 코드(`invite_code`)가 필수.** 없으면 422 |
+| `ADMIN` | 가입으로 만들 수 없다 (DB에서 직접 승격) |
+
+역할은 요청 body로 받되 **가입 게이트를 통과해야 한다.** 게이트가 없으면
+누구나 `role="EDUCATOR"`로 가입해 교육자 API를 두드릴 수 있다.
+
+로그인 후에는 **서버가 토큰의 주인에서 역할을 읽는다.** 프런트가 보낸 역할을
+신뢰하지 않으므로, 화면에서 버튼을 숨기는 것만으로는 보안이 되지 않는다.
 
 ### 인증이 필요 없는 것
 
@@ -285,7 +302,11 @@ async function handleRun(mode: "run" | "submit") {
 }
 ```
 
-**프론트는 더 이상 채점하지 않는다.** `pythonRunner.runPython`은 죽은 코드다 (Pyodide는 TRACE 학습 화면의 `runTrace`에만 쓰인다). 서버가 Docker judge를 돌리고 결과를 돌려준다.
+**프론트는 더 이상 채점하지 않는다.** `pythonRunner.runPython`은 죽은 코드다 (Pyodide는 TRACE 학습 화면의 `runTrace`에만 쓰인다).
+
+⚠️ **`JUDGE_BACKEND` 기본값이 `none`이라 설정 없이는 503 `JUDGE_UNAVAILABLE`이 난다.**
+백엔드에서 `JUDGE_BACKEND=docker` + `judge-sandbox` 이미지 빌드가 되어 있어야
+실제 채점이 돈다. 503이 오면 백엔드 설정 문제이지 프런트 잘못이 아니다.
 
 ### `status`로 올 수 있는 값
 
@@ -498,6 +519,12 @@ FastAPI의 검증 실패(422)만 네이티브 배열 형태를 유지한다:
 | `NICKNAME_TAKEN` | 409 | 닉네임 중복 |
 | `INVALID_NICKNAME` | 422 | 길이·문자·금지어 위반 |
 | `INSUFFICIENT_ACORNS` | 402 | 도토리 부족. `context.required` / `context.balance`가 함께 온다 |
+| `FORBIDDEN` | 403 | 역할이 모자람 (학생이 교육자 API 호출 등) |
+| `INVALID_INVITE_CODE` | 422 | 기관 초대 코드가 틀림. 교수자 가입 실패 |
+| `COURSE_NOT_FOUND` | 404 | 없거나 **남의 강의** |
+| `STUDENT_NOT_IN_COURSE` | 404 | 그 강의에 등록되지 않은 학생 |
+| `ALREADY_ENROLLED` | 409 | 이미 등록됨 |
+| `USER_NOT_FOUND` | 404 | 이메일로 학생을 찾지 못함 |
 
 **Agent 호출이 실패해도 채점 결과는 반드시 돌아온다.** `POST /run|submit`이 내부에서 삼킨다 — "실행했는데 아무 반응이 없는" 상황은 만들지 않는다. `agent_decision: null`을 정상 케이스로 다뤄라.
 
@@ -558,11 +585,15 @@ GET /users/me/acorns/transactions?limit=&offset=
 
 지급/차감은 **전부 서버가 한다.** 프론트가 "도토리 주세요"를 호출하는 API는 없다.
 
-| 사건 | 변동 |
-|---|---|
-| 문제 **최초** 정답 | +10 (난이도별 10/15/20, 현재 데이터엔 난이도가 없어 전부 10) |
-| 같은 문제 재통과 | **0** |
-| 닉네임 변경 | −5 |
+| 사건 | `type` | 변동 |
+|---|---|---|
+| 문제 **최초** 정답 | `PROBLEM_SOLVED` | +10 (난이도별 10/15/20, 현재 데이터엔 난이도가 없어 전부 10) |
+| 같은 문제 재통과 | — | **0** |
+| TRACE 최초 완료 | `TRACE_COMPLETED` | +3 — **아직 지급 경로가 연결되지 않았다** |
+| 닉네임 변경 | `NICKNAME_CHANGED` | −5 |
+| 프로필 사진 변경 | `AVATAR_CHANGED` | −10 — 업로드 API 미구현 |
+
+`FIRST_ACCEPTED` / `DAILY_STREAK` / `ADMIN_ADJUSTMENT` 타입도 enum에 있으나 아직 안 쓴다.
 
 ### 진행 상태 · Checkpoint
 
@@ -608,7 +639,157 @@ GET /users/me/solved-problems
 
 ---
 
-## 10. 구현 체크리스트
+## 10. 교육자 API
+
+`EDUCATOR`(또는 `ADMIN`) 역할만 접근할 수 있다. 학생 토큰으로 부르면 **403 `FORBIDDEN`**.
+
+**두 겹으로 막힌다** — 역할 검사 + 강의 소유권. 담당하지 않는 강의는 **404**다
+(403이면 "그 강의는 존재한다"를 알려주는 셈이라 id를 훑어 타 기관 강의를 추정할 수 있다).
+
+### 강의
+
+```http
+GET    /educator/courses
+POST   /educator/courses          { title, term, code_visibility?, problem_ids? }
+GET    /educator/courses/{id}
+POST   /educator/courses/{id}/students          { email }
+DELETE /educator/courses/{id}/students/{sid}    → 204
+```
+
+```jsonc
+// CourseRead
+{
+  "id": "course_...", "organization_id": "org_...",
+  "title": "Python 기초 01", "term": "2026 여름학기",
+  "educator_id": "user_...", "educator_name": "김튜토리",
+  "invite_code": "Sc4v0PfDXnoQ",
+  "code_visibility": "SUBMITTED_ONLY",   // SUBMITTED_ONLY | LATEST_SNAPSHOT
+  "student_count": 2, "assigned_problem_count": 3,
+  "start_at": null, "end_at": null, "is_active": true
+}
+```
+
+`code_visibility`는 **교수자가 강의별로 정한다.** 학생 코드를 어디까지 보여줄지:
+
+| 값 | 보이는 것 |
+|---|---|
+| `SUBMITTED_ONLY` (기본) | submit으로 채점된 코드만 |
+| `LATEST_SNAPSHOT` | 작성 중인 코드까지 |
+
+### 대시보드
+
+```http
+GET /educator/courses/{id}/dashboard
+```
+
+```jsonc
+{
+  "course": { "id": "...", "title": "...", "term": "...", "educator_name": "김튜토리" },
+  "metrics": {
+    "student_count": 28,
+    "student_count_delta": 0,      // 과거 스냅샷이 없어 항상 0. 뱃지를 감춰라
+    "average_progress": 64,        // 학생별 진도율의 평균
+    "weekly_progress_delta": 0,    // 항상 0
+    "completion_rate": 71,         // (학생 × 배정문제) 중 해결한 칸의 비율
+    "total_attempts": 728,         // run + submit 합
+    "needs_attention_count": 2     // NEEDS_HELP 또는 INACTIVE
+  }
+}
+```
+
+### 학생 목록
+
+```http
+GET /educator/courses/{id}/students?q=민서&status=NEEDS_HELP&sort=risk_desc&page=1&size=30
+```
+
+`sort`: `risk_desc`(기본) · `progress_asc` · `progress_desc` · `name_asc`
+
+```jsonc
+{
+  "items": [{
+    "student_id": "user_...", "name": "김민서", "email": "...", "avatar_url": null,
+    "progress": 82, "solved_count": 21, "attempt_count": 31,
+    "last_active_at": "2026-08-13T14:48:00Z",
+    "learning_status": "ON_TRACK",
+    "weak_concepts": ["loop"]
+  }],
+  "total": 28, "page": 1, "size": 30
+}
+```
+
+`learning_status` 4종 — 화면 문구 매핑:
+
+| 서버 값 | 화면 |
+|---|---|
+| `ON_TRACK` | 순조로움 |
+| `WATCH` | 관찰 필요 |
+| `NEEDS_HELP` | 도움 필요 |
+| `INACTIVE` | 장기 미접속 |
+
+### 지금 확인할 학생
+
+```http
+GET /educator/courses/{id}/attention?limit=10
+```
+
+```jsonc
+{
+  "items": [{
+    "student_id": "user_...", "name": "박지훈",
+    "status": "NEEDS_HELP", "progress": 46, "risk_score": 75,
+    "weak_concept": "conditional",
+    "reasons": ["진도율 0%", "5회 시도 중 0문제 해결", "같은 문제를 5회 시도 중"]
+  }]
+}
+```
+
+**`reasons`는 서버가 한국어로 만들어 준다.** 그대로 렌더하면 된다.
+`risk_score`는 0~100이고 40 미만 `ON_TRACK`, 70 미만 `WATCH`, 그 이상 `NEEDS_HELP`.
+
+### 학생 상세
+
+```http
+GET /educator/courses/{id}/students/{student_id}
+```
+
+```jsonc
+{
+  "student": { "id": "...", "name": "박지훈", "email": "...", "avatar_url": null },
+  "summary": { "progress": 46, "solved_count": 12, "attempt_count": 38,
+               "last_active_at": "...", "risk_score": 75, "learning_status": "NEEDS_HELP" },
+  "weak_concepts": [{ "concept": "conditional", "score": 42, "failed_attempts": 8 }],
+  "recent_activity": [{
+    "problem_id": "func_sum_list", "title": "리스트 합 구하기",
+    "status": "IN_PROGRESS", "best_passed": 3, "total_tests": 5,
+    "attempt_count": 5, "last_judge_status": "WRONG_ANSWER",
+    "last_attempted_at": "...",
+    "code": null,              // ← 정책에 따라 null 일 수 있다
+    "code_kind": null          // "SUBMITTED" | "LATEST_SNAPSHOT"
+  }],
+  "recommendations": ["conditional 개념 기초 문제 재배정", "'리스트 합 구하기' 개별 힌트 전송"],
+  "code_visibility": "SUBMITTED_ONLY"
+}
+```
+
+`code`가 `null`이면 정책상 비공개다. `code_visibility`를 함께 내려주므로
+"이 강의는 제출한 코드만 볼 수 있습니다" 같은 안내를 띄우면 된다.
+
+### 기관 · 교수자 계정 만들기
+
+기관 생성 API가 **아직 없다.** 백엔드에서 스크립트를 돌려야 한다:
+
+```bash
+cd backend && python -m scripts.seed_org
+```
+
+출력된 기관 초대 코드로 교수자가 가입하거나, 함께 만들어진 데모 계정
+(`educator@example.com` / `password123`)으로 바로 로그인할 수 있다.
+
+---
+
+
+## 11. 구현 체크리스트
 
 **먼저 해야 하는 것 (이게 없으면 나머지가 전부 401)**
 
@@ -645,7 +826,7 @@ CORS는 `http://localhost:5173`, `http://127.0.0.1:5173`이 열려 있다. 포�
 
 ---
 
-## 11. 이름이 정리된 항목
+## 12. 이름이 정리된 항목
 
 구현하면서 확정한 이름들. 아래 왼쪽 열은 초기 논의에서 쓰이던 표현이라 아직 코드나 메모에
 남아 있을 수 있는데, 그대로 보내면 **422가 난다.**
@@ -664,7 +845,7 @@ CORS는 `http://localhost:5173`, `http://127.0.0.1:5173`이 열려 있다. 포�
 
 ---
 
-## 12. 막히면
+## 13. 막히면
 
 - <http://localhost:8000/docs> — 모든 스키마를 실제로 눌러볼 수 있다
 - `python -m scripts.seed_demo` — 4개 데모 세션(PROGRESSING / STUCK / UNDERSTANDING_UNCERTAIN / RECOVERED)을 만들어준다. 프론트 붙이기 전에 응답 모양을 보려면 이게 제일 빠르다

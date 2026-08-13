@@ -42,18 +42,44 @@ Backend는 다음의 source of truth다.
 | Lightweight Monitor | 구현 완료 (규칙 11단) |
 | Timeline / Snapshot 조회 API | 구현 완료 |
 | Agent Context Builder | 구현 완료 (LLM 없이 payload 생성) |
-| Python Judge (Docker) | **seam** — `POST /run`이 503, 어댑터는 작성됨 |
+| **회원 인증** (JWT + bcrypt, 역할 3종) | 구현 완료 |
+| **도토리 원장** (멱등성 키) | 구현 완료 |
+| **사용자별 진행 상태 / Checkpoint** | 구현 완료 |
+| **교육기관 서비스** (기관·강의·수강·대시보드) | 구현 완료 |
+| Python Judge (Docker) | 어댑터 완료. **기본값이 `none`이라 `/run`은 503** — `JUDGE_BACKEND=docker`로 켠다 |
 | Agent LLM 호출 | **seam** — `POST /agent/decide`가 항상 `WAIT` |
 | Learning Activity | 미구현 |
 | Learner State | 미구현 |
-| Analytics endpoint | 미구현 |
+| Analytics endpoint | 미구현 (timeline `summary`가 일부 대체) |
 
-테스트 146개 통과. 필수 시나리오 3개(§22)는 로컬 서버에서 검증됨.
+**테스트 217개 통과.** 필수 시나리오 3개(§22)는 로컬 서버에서 검증됨.
 
-오늘의 채점 경로는 **브라우저 Pyodide → `POST /sessions/{id}/results`** 다.
-서버 judge가 붙으면 `POST /run`이 같은 내부 함수를 호출하므로 하류 모듈은 바뀌지 않는다.
+채점 경로는 **`POST /sessions/{id}/run|submit`** 하나다. 이 호출이
+스냅샷 생성 → Docker judge 실행 → `TEST_RESULT` 기록 → monitor 판정 →
+진행 상태 갱신 → 도토리 지급 → 교육자 통계 재계산까지 전부 한다.
+
+> 클라이언트가 채점 결과를 보고하던 `POST /sessions/{id}/results`는 **제거됐다.**
+> 도토리가 정답 기준으로 지급되는 이상 그 입구가 열려 있으면
+> `{"status":"ACCEPTED"}` 한 줄로 무한 획득이 가능하다.
 
 프론트엔드 연동 규약은 [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)에 있다.
+브랜치 통합 시 남은 조율 항목은 [TEAM_SYNC.md](TEAM_SYNC.md)에 있다.
+
+### 실행에 필요한 것
+
+```bash
+cd backend && pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000 --workers 1
+
+# 교육자 기능을 쓰려면 기관·교수자·강의를 먼저 만든다.
+# Organization 생성 API가 아직 없어서 이 스크립트가 그 자리를 메운다.
+python -m scripts.seed_org
+
+# Docker judge를 켜려면
+pip install "docker>=7.0"
+cd ../judge && docker build -t judge-sandbox .
+# .env: JUDGE_BACKEND=docker, JUDGE_PATH=../judge
+```
 
 ---
 
@@ -110,14 +136,25 @@ Backend는 다음의 source of truth다.
 ```text
 backend/
 ├── app/
-│   ├── main.py            # FastAPI 앱, CORS, 에러 핸들러
+│   ├── main.py            # FastAPI 앱, CORS, 에러 핸들러, 라우터 8개 등록
 │   ├── config.py          # Settings + MonitorConfig(임계값)
 │   ├── db.py              # 엔진, 세션, create_all
 │   ├── clock.py           # utcnow / seconds_between / to_naive_utc
 │   ├── enums.py           # 모든 enum (순환 import 방지로 한 파일)
-│   ├── models.py          # SQLModel 테이블 3개
+│   ├── models.py          # SQLModel 테이블 12개 (§17)
 │   ├── errors.py          # AppError 계층 + 에러 코드
 │   ├── schemas_common.py  # UtcDatetime (출력 시 Z 강제)
+│   │
+│   ├── auth/              # 회원가입·로그인·토큰·역할 게이트
+│   │   ├── router.py  deps.py  schemas.py  security.py  service.py
+│   ├── users/             # 프로필·도토리·진행 상태·풀이 목록
+│   │   ├── router.py  schemas.py
+│   ├── acorns/            # 도토리 원장 (잔액을 직접 증감하는 곳은 여기뿐)
+│   │   └── service.py
+│   ├── progress/          # 사용자별 문제 진행 + 정답 보상
+│   │   └── service.py
+│   ├── educator/          # 기관·강의·수강·대시보드·주의 학생
+│   │   ├── router.py  schemas.py  service.py
 │   │
 │   ├── problems/
 │   │   ├── router.py
@@ -132,7 +169,7 @@ backend/
 │   │   └── schemas.py
 │   │
 │   ├── judge/
-│   │   ├── router.py       # POST /run, /submit -> 503
+│   │   ├── router.py       # POST /run, /submit -- 채점+기록+판정+보상의 진입점
 │   │   ├── interface.py    # JudgeProtocol
 │   │   ├── stub.py         # JudgeUnavailable
 │   │   └── docker_judge.py # BE1 judge 어댑터 (JUDGE_BACKEND=docker)
@@ -152,8 +189,9 @@ backend/
 │       ├── context.py     # Context Builder (동작함)
 │       └── stub.py        # 항상 WAIT
 ├── scripts/
-│   └── seed_demo.py       # 데모 세션 4개 생성
-└── tests/                 # 146개
+│   ├── seed_demo.py       # 데모 세션 4개 생성
+│   └── seed_org.py        # 기관·교수자·강의 (EDUCATOR 가입에 필요)
+└── tests/                 # 217개
 ```
 
 `activities/`와 `analytics/`는 아직 없다. `judge/`와 `agent/`는 실제 구현 대신
@@ -223,7 +261,7 @@ GET /problems/{problem_id}
 ```json
 {
   "session_id": "sess_699b671f0ece44199bfd220977ff12f8",
-  "user_id": "demo-user",
+  "user_id": "user_faf17a7c42f44628a7202989839976f1",   // 토큰의 주인
   "problem_id": "func_sum_list",
   "status": "SOLVING",
   "started_at": "2026-08-13T12:00:00Z",
@@ -254,14 +292,19 @@ POST /sessions/{session_id}/finish
 플래그와 함께 수락한다 — 현실적 원인은 `/finish` 직후 큐 flush뿐인데 409는 데모 화면에
 빨간 배너를 띄운다.
 
-로그인은 MVP에서 제외하고 `demo-user`를 사용한다.
+**세 엔드포인트 전부 로그인이 필요하다.** `POST /sessions`는 `user_id`를 body로
+받지 않는다 -- 받으면 아무나 남의 이름으로 세션을 만들 수 있고 그 채점 결과가
+그 사람의 도토리가 된다. 소유자는 토큰이 정한다.
+
+남의 세션에 접근하면 **403이 아니라 404**다. 403은 "그 세션은 존재한다"를
+알려주므로 id를 훑어 타인의 활동을 탐지할 수 있다.
 
 ---
 
 ## 7. Python Judge
 
-**상태: seam.** 오늘은 브라우저 Pyodide가 채점하고 결과만 서버로 보낸다.
-`POST /run`·`/submit`은 `503 JUDGE_UNAVAILABLE`을 반환하되 **최종 스키마로 OpenAPI에 이미 올라가 있다.**
+**상태: 어댑터 완료, 기본값이 꺼져 있다.** `JUDGE_BACKEND` 기본값이 `none`이라
+`POST /run`·`/submit`이 `503 JUDGE_UNAVAILABLE`을 반환한다. 아래 절차로 켠다.
 
 BE1의 Docker judge를 붙이는 절차:
 
@@ -356,74 +399,66 @@ assert result == 6
 
 ---
 
-## 8. 채점 결과 수집 API
+## 8. 채점 API
 
-**파이프라인의 척추다.** 오늘의 경로:
+**파이프라인의 척추다.** 경로는 하나뿐이다.
 
 ```http
-POST /sessions/{session_id}/results
+POST /sessions/{session_id}/run       # public 테스트만
+POST /sessions/{session_id}/submit    # public + hidden 전체
 ```
 
-요청 (브라우저 Pyodide가 채점한 결과):
+요청 (`RunRequest`) — 셋 중 하나를 준다:
 
 ```json
-{
-  "mode": "run",
-  "status": "WRONG_ANSWER",
-  "passed": 3,
-  "total": 5,
-  "runtime_ms": 21,
-  "failed_categories": [],
-  "code_version": 4,
-  "client_event_id": "8f14e45f-ceea-467a-9f6b-2c1e3d4a5b6c"
-}
+{ "code": "def sum_list(arr): ..." }        // 가장 흔한 형태. 스냅샷을 새로 만든다
+{ "code_version": 4 }                        // 이미 올린 스냅샷을 채점
+{}                                           // 최신 스냅샷을 채점
 ```
 
-처리 순서:
+처리 순서 (`backend/app/judge/router.py` `_execute`):
 
 ```text
-1. TEST_RESULT event 저장          record_judge_result()
-2. Process feature 재계산           extract_features()   -- 전체 스캔
-3. Monitor 판정                     evaluate_and_record()
-4. trigger 있으면 AGENT_TRIGGER 저장
-5. trigger 있으면 Context Builder + Agent 호출
-6. 결과 반환
+1. 세션 조회 + **소유권 검사**      require_session(user_id=...)
+2. 스냅샷 생성 (code 를 준 경우)     create_snapshot()
+3. 채점                              judge.judge()  <- Docker
+4. TEST_RESULT 기록                  record_judge_result()
+5. 진행 상태 갱신 + 도토리 지급       progress.record_judge_result()
+6. 교육자 통계 재계산                 educator.recalculate_for_student()
+7. Monitor 판정                      monitor.evaluate_and_record()
+8. trigger 있으면 Agent 호출
 ```
 
-응답 (`201`):
+응답 (`201 ResultIngestResponse`):
 
 ```json
 {
   "event": {
-    "event_id": "evt_...",
-    "seq": 7,
-    "type": "TEST_RESULT",
-    "source": "CLIENT_JUDGE",
-    "code_version": 4,
-    "payload": { "mode": "run", "status": "WRONG_ANSWER", "passed": 3, "total": 5 }
+    "event_id": "evt_...", "seq": 7, "type": "TEST_RESULT",
+    "source": "SERVER", "code_version": 4,
+    "payload": { "mode": "run", "status": "WRONG_ANSWER",
+                 "passed": 3, "total": 5, "judge": "docker" }
   },
-  "process_state": {
-    "status": "STUCK",
-    "trigger": "REPEATED_FAILURE",
-    "triggered": true,
-    "reason": "같은 코드 영역을 반복 수정했지만 테스트 결과가 동일합니다.",
-    "evidence": ["동일 결과 3/5 ×3", "반복문 영역 ×2 반복 수정"],
-    "cooldown_active": false,
-    "cooldown_remaining_seconds": 0,
-    "features": { "same_result_count": 3, "progress_delta": 0 },
-    "evaluated_at": "2026-08-13T12:04:11Z"
-  },
+  "process_state": { "status": "STUCK", "trigger": "REPEATED_FAILURE",
+                     "evidence": ["동일 결과 3/5 ×3", "반복문 영역 ×2 반복 수정"] },
   "agent_decision": null
 }
 ```
 
-`POST /run`·`/submit`(서버 judge)은 채점만 대신하고 2~6단계는 **같은 내부 함수**를 호출한다.
-응답 타입도 동일한 `ResultIngestResponse`다. 전환은 프론트엔드만의 변경이 된다.
+**`JUDGE_BACKEND` 기본값이 `none`이라 설정 없이는 503 `JUDGE_UNAVAILABLE`이 난다.**
+`JUDGE_BACKEND=docker` + `judge-sandbox` 이미지 빌드가 필요하다 (§1.1).
 
-Agent 호출 실패는 `try/except`로 삼킨다. **Judge 결과는 Agent 실패와 무관하게 반드시 반환한다.**
-Run과 Agent 판단은 동기 처리한다. 응답이 느려지면 Agent만 별도 polling으로 분리할 수 있다.
+### 제거된 것: `POST /sessions/{id}/results`
 
----
+클라이언트가 채점 결과를 보고하던 입구였다. 두 가지가 바뀌어 제거했다.
+
+1. 프런트가 더 이상 브라우저에서 채점하지 않는다
+2. 도토리가 정답 기준으로 지급된다 -- 클라이언트가 `status`를 정할 수 있으면
+   `curl` 한 줄로 무한 획득이 가능하다
+
+"서버의 ACCEPTED 결과를 기준으로 지급한다"는 요구는 **이 입구가 없어야** 성립한다.
+
+Agent 호출이 실패해도 채점 결과는 반드시 반환된다 (`try/except`로 삼킨다).
 
 ## 9. Trace Event Service
 
@@ -628,7 +663,7 @@ Raw event를 Agent 입력에 적합한 feature로 압축한다. 20종.
 
 ### 계산 시점
 
-`POST /results` 처리 중, 그리고 `GET /process-state` 요청 시 **매번 전체 스캔**한다.
+`POST /run|submit` 처리 중, 그리고 `GET /process-state` 요청 시 **매번 전체 스캔**한다.
 세션당 O(10²) 행이라 싸고, 증분 캐시의 무효화 버그가 계산 비용보다 훨씬 비싸다.
 `now`는 주입 가능하다 — 이 파라미터 하나가 0.2초 테스트 스위트와 flaky 스위트를 가른다.
 
@@ -690,7 +725,7 @@ cooldown 게이트(R1)는 **status는 그대로 분류하되 trigger만 죽인�
 
 ```text
 GET  /sessions/{id}/process-state  ->  evaluate()             아무것도 쓰지 않는다
-POST /sessions/{id}/results        ->  evaluate_and_record()  AGENT_TRIGGER를 쓴다
+POST /sessions/{id}/run|submit     ->  evaluate_and_record()  AGENT_TRIGGER를 쓴다
 ```
 
 cooldown 상태가 이벤트에 살기 때문이다. 데모 패널은 `/process-state`를 몇 초마다 폴링하는데,
@@ -884,36 +919,84 @@ MVP는 session-level evidence state만 저장한다.
 
 ## 17. 데이터 모델
 
-현재 테이블은 **3개뿐이다.**
+현재 테이블은 **12개**다.
+
+### Trace 파이프라인 (3개)
 
 #### `sessions`
-
-- `id` (PK, `sess_` 접두)
-- `user_id`, `problem_id`, `status`
+- `id` (PK, `sess_` 접두), `user_id` (**FK → users.id**), `problem_id`, `status`
 - `started_at`, `finished_at`
-- `last_code_version` — 원자 할당 카운터
-- `last_event_seq` — 원자 할당 카운터
+- `last_code_version`, `last_event_seq` — 원자 할당 카운터
 
 #### `code_snapshots`
-
-- `id` (PK, `snap_` 접두), `session_id`, `version`, `code`, `created_at`
-- `parent_version`
-- `added_line_count`, `deleted_line_count`, `change_size`, `change_ratio`
-- `seconds_since_parent`
-- `changed_lines`, `region_tags`, `primary_region`, `summary`
-- `UNIQUE(session_id, version)` — 할당이 틀리면 조용한 뒤섞임이 아니라 IntegrityError
+- `id` (`snap_`), `session_id`, `version`, `code`, `created_at`, `parent_version`
+- diff 결과를 denormalize: `added/deleted_line_count`, `change_size`, `change_ratio`,
+  `seconds_since_parent`, `changed_lines`, `region_tags`, `primary_region`, `summary`
+- `UNIQUE(session_id, version)`
 
 #### `events`
-
-- `id` (PK, `evt_` 접두), `session_id`, `seq`, `type`, `source`
-- `code_version`, `payload` (JSON)
+- `id` (`evt_`), `session_id`, `seq`, `type`, `source`, `code_version`, `payload`(JSON)
 - `server_timestamp`, `client_timestamp`, `client_event_id`
 - `UNIQUE(session_id, seq)`, `UNIQUE(session_id, client_event_id)`
-- 인덱스: `(session_id, seq)`, `(session_id, type, seq)`
+
+### 회원 · 도토리 (4개)
+
+#### `users`
+- `id` (`user_`), `email`(UNIQUE, 소문자 정규화), `password_hash`(bcrypt)
+- `name`, `nickname`(UNIQUE), `avatar_url`
+- `role` — STUDENT / EDUCATOR / ADMIN. **권한의 유일한 근거**
+- `organization_id` (FK, nullable)
+- `acorn_balance`, `total_acorns_earned` — 원장의 캐시
+- `created_at`, `updated_at`, `last_login_at`, `is_active`
+
+#### `acorn_transactions`
+- `id` (`acorn_tx_`), `user_id`, `amount`(±), `balance_after`, `transaction_type`
+- `reference_type`, `reference_id`, `description`
+- `idempotency_key` **UNIQUE** — 중복 지급을 DB 제약이 막는다
+
+#### `user_problem_progress`
+- `user_id`, `problem_id`, **`course_id`** (빈 문자열 = 개인 학습)
+- `status`, `current_code`, `last_submitted_code`, `best_passed`, `total_tests`
+- `attempt_count`, `last_judge_status`, `first_started_at`, `last_attempted_at`, `solved_at`
+- `UNIQUE(user_id, course_id, problem_id)`
+
+> `course_id`가 **NULL이 아니라 빈 문자열**인 이유: SQL은 UNIQUE에서 NULL을 서로
+> 다른 값으로 취급한다. nullable로 두면 개인 학습 행이 같은 (user, problem)에
+> 대해 몇 개든 생겨 제약이 무력해진다.
+
+#### `password_reset_tokens`
+- `user_id`, `token_hash`(원문 아님), `expires_at`, `used_at`
+- 스키마만 있고 재설정 API는 미구현
+
+### 교육기관 (5개)
+
+#### `organizations`
+- `name`, `domain`(허용 이메일 도메인), `invite_code`(UNIQUE) — **교수자 가입 게이트**
+- 생성 API가 없다. `scripts/seed_org.py`가 만든다
+
+#### `courses`
+- `organization_id`, `title`, `term`, `educator_id`, `invite_code`(UNIQUE)
+- `code_visibility` — SUBMITTED_ONLY(기본) / LATEST_SNAPSHOT. **교수자가 강의별로 정한다**
+- `start_at`, `end_at`, `is_active`
+
+#### `course_problems`
+- `course_id`, `problem_id`, `order` — 진도율의 **분모**
+- 비어 있으면 저장소 전체를 배정한 것으로 본다
+
+#### `enrollments`
+- `course_id`, `student_id`, `status`(ACTIVE/COMPLETED/DROPPED)
+- `UNIQUE(course_id, student_id)`
+
+#### `student_course_stats`
+- 대시보드가 읽는 요약. 채점 때마다 해당 학생 행만 갱신
+- `progress_rate`, `solved_count`, `assigned_count`, `attempt_count`, `last_active_at`
+- `learning_status`, `primary_weak_concept`, `risk_score`, `reasons`(JSON)
+- **파생 데이터다.** 진실은 언제나 `user_problem_progress`와 `events`
 
 **`problems` / `test_cases` 테이블은 없다.** 문제는 JSON 파일이 진실이다 (§5).
-`agent_decisions` / `activities` / `activity_answers`는 해당 기능이 붙을 때 만든다.
-현재 Agent 판정 근거는 `AGENT_TRIGGER` 이벤트의 payload에 feature 스냅샷째로 들어간다.
+`agent_decisions` / `activities`도 없다 — Agent 판정 근거는 `AGENT_TRIGGER`
+이벤트 payload에 feature 스냅샷째로 들어간다.
+
 
 ### 마이그레이션
 
@@ -1000,33 +1083,79 @@ GET /sessions/{session_id}/analytics
 
 ## 20. API 계약 요약
 
-**JSON은 전부 `snake_case`다.**
+**JSON은 전부 `snake_case`다.** 라우트 34개.
+
+### 인증 불필요
 
 ```text
-GET  /health                                    seam 상태 확인
+GET  /health                                    seam 상태
+GET  /problems                                  목록 (테스트 데이터 없음)
+GET  /problems/{id}                             public 케이스 + hidden 개수/카테고리
+POST /auth/signup                               role, invite_code 선택
+POST /auth/login
+```
 
-GET  /problems
-GET  /problems/{id}
+**그 외 전부 로그인이 필요하다.**
 
-POST /sessions
+### 인증 (로그인한 사용자)
+
+```text
+POST /auth/logout                               204. 토큰 삭제는 클라이언트 몫
+GET  /auth/me                                   새로고침 후 상태 복구
+```
+
+### 학생 — 세션 · Trace
+
+```text
+POST /sessions                                  user_id 를 body 로 받지 않는다
 GET  /sessions/{id}
-POST /sessions/{id}/finish
-
-POST /sessions/{id}/events                      배치 전용
+POST /sessions/{id}/finish                      멱등
+POST /sessions/{id}/events                      배치 전용 (1~50개)
 GET  /sessions/{id}/events?since_seq=&limit=
-POST /sessions/{id}/results                     ★ 파이프라인의 척추
-GET  /sessions/{id}/process-state               ★ 읽기 전용, 폴링 안전
+POST /sessions/{id}/run                         ★ 채점 (§8)
+POST /sessions/{id}/submit                      ★ 채점 (§8)
+GET  /sessions/{id}/process-state               읽기 전용, 폴링 안전
 GET  /sessions/{id}/timeline?collapse=true
 GET  /sessions/{id}/snapshots
 GET  /sessions/{id}/snapshots/{version}
 GET  /sessions/{id}/snapshots/{version}/diff?from=
-
-POST /sessions/{id}/run                         seam -> 503 JUDGE_UNAVAILABLE
-POST /sessions/{id}/submit                      seam -> 503 JUDGE_UNAVAILABLE
 POST /agent/decide                              seam -> action=WAIT
 ```
 
-아직 없는 것: `/activities/*`, `/sessions/{id}/analytics`.
+세션 라우트는 전부 **소유권을 검사한다.** 남의 세션은 403이 아니라 404.
+
+### 학생 — 프로필 · 도토리 · 진행 상태
+
+```text
+GET   /users/me/profile                         뱃지를 서버가 계산해 준다
+PATCH /users/me/nickname                        도토리 -5. 검증·차감·변경이 한 트랜잭션
+GET   /users/me/acorns                          { balance, total_earned }
+GET   /users/me/acorns/transactions?limit=&offset=
+GET   /users/me/progress                        홈 목록용 (코드 본문 제외)
+GET   /users/me/progress/{problem_id}           current_code 포함
+PUT   /users/me/progress/{problem_id}/checkpoint
+GET   /users/me/solved-problems
+```
+
+### 교육자 (EDUCATOR 또는 ADMIN)
+
+```text
+GET    /educator/courses
+POST   /educator/courses
+GET    /educator/courses/{id}
+POST   /educator/courses/{id}/students          이메일로 등록
+DELETE /educator/courses/{id}/students/{sid}    DROPPED 로 표시 (행 삭제 아님)
+GET    /educator/courses/{id}/dashboard         상단 지표 4종
+GET    /educator/courses/{id}/students          q / status / sort / page / size
+GET    /educator/courses/{id}/students/{sid}    code_visibility 정책에 따라 코드 노출
+GET    /educator/courses/{id}/attention         risk_score 높은 순
+```
+
+두 겹으로 막힌다 — 역할(`require_educator`) + 강의 소유권(`require_course`).
+소유하지 않은 강의는 **404**다.
+
+아직 없는 것: `/activities/*`, `/auth/refresh`, `/auth/password-reset/*`,
+`/sessions/{id}/analytics`, 기관 생성 API(→ `scripts/seed_org.py`).
 
 ### 에러 봉투
 
@@ -1036,11 +1165,21 @@ POST /agent/decide                              seam -> action=WAIT
 
 FastAPI의 검증 실패(422)만 네이티브 배열 형태를 유지한다. 둘 다 `detail` 아래다.
 
-코드: `SESSION_NOT_FOUND` · `PROBLEM_NOT_FOUND` · `SNAPSHOT_NOT_FOUND` ·
-`SERVER_ONLY_EVENT` · `MISSING_SNAPSHOT_CODE` · `INVALID_CODE_VERSION` ·
-`JUDGE_UNAVAILABLE` · `AGENT_UNAVAILABLE`
+| 코드 | HTTP | 언제 |
+|---|---|---|
+| `NOT_AUTHENTICATED` | 401 | 토큰 없음/만료 |
+| `INVALID_CREDENTIALS` | 401 | 로그인 실패. 이메일/비밀번호를 구분하지 않는다 |
+| `FORBIDDEN` | 403 | 역할 부족 |
+| `SESSION_NOT_FOUND` | 404 | 없거나 **남의 것** |
+| `COURSE_NOT_FOUND` | 404 | 없거나 **남의 강의** |
+| `STUDENT_NOT_IN_COURSE` | 404 | |
+| `PROBLEM_NOT_FOUND` `SNAPSHOT_NOT_FOUND` `USER_NOT_FOUND` | 404 | |
+| `INSUFFICIENT_ACORNS` | 402 | `context.required` / `context.balance` 동봉 |
+| `EMAIL_ALREADY_REGISTERED` `NICKNAME_TAKEN` `ALREADY_ENROLLED` | 409 | |
+| `INVALID_NICKNAME` `INVALID_INVITE_CODE` | 422 | |
+| `SERVER_ONLY_EVENT` `MISSING_SNAPSHOT_CODE` `INVALID_CODE_VERSION` | 422 | |
+| `JUDGE_UNAVAILABLE` `AGENT_UNAVAILABLE` | 503 | seam 미연결 |
 
----
 
 ## 21. 핵심 Schema
 
@@ -1061,7 +1200,7 @@ FastAPI의 검증 실패(422)만 네이티브 배열 형태를 유지한다. 둘
 }
 ```
 
-응답에 `current_code_version`이 담겨 오고, 그 값을 다음 `POST /results`에 실어 보낸다.
+응답에 `current_code_version`이 담겨 온다. 프론트는 이 값을 보관해 쓴다.
 
 ### JudgeResult (요청)
 
@@ -1119,7 +1258,7 @@ Frontend와 Backend는 이 타입을 OpenAPI(`/docs`)에서 생성한다.
 
 ## 22. 테스트 계획
 
-**현재 146개 통과.** `pytest -q`로 실행한다.
+**현재 217개 통과.** `pytest -q`로 실행한다.
 
 ### Unit Test
 
@@ -1289,7 +1428,7 @@ Run → Judge → Event 저장 → 반복 실패 Trigger → Agent → TRACE
 
 Backend MVP는 다음 조건을 만족해야 한다.
 
-- [ ] Python 함수형 문제를 안전한 별도 실행 환경에서 채점 가능 — 오늘은 브라우저 Pyodide, 서버 judge는 seam
+- [x] Python 함수형 문제를 안전한 별도 실행 환경에서 채점 가능 — Docker judge 어댑터 완료 (`JUDGE_BACKEND=docker`로 켠다)
 - [x] 문제/세션/코드 snapshot/Event를 저장 가능
 - [x] Run 결과가 Trace에 자동 연결됨
 - [x] 최근 실행의 진전 여부와 반복 실패를 계산 가능
@@ -1301,9 +1440,15 @@ Backend MVP는 다음 조건을 만족해야 한다.
 
 ### 알려진 제약
 
-**인증이 없다.** 악의적 클라이언트가 `/results`에 조작된 `5/5`를 보낼 수 있다.
-MVP 범위 밖이고, `POST /run`(서버 judge)이 유일한 결과 경로가 되면 닫힌다.
-값싼 방어(`0 ≤ passed ≤ total ≤ 100`, `status ∈ JudgeStatus`)는 이미 들어 있다.
+**인증이 구현됐고**(JWT + bcrypt, 역할 3종) 클라이언트가 결과를 보고하던
+`POST /results`도 제거됐다. 채점은 서버가 실행한 judge 결과만 인정한다.
+
+남은 제약:
+
+- **`/auth/refresh`가 없다.** access token 하나만 쓰고 만료되면 다시 로그인한다.
+- **비밀번호 재설정 API가 없다.** 테이블(`password_reset_tokens`)만 있다.
+- **기관 생성 API가 없다.** `scripts/seed_org.py`가 그 자리를 메운다.
+- **감사 로그가 없다.** 교육자가 학생 코드를 열람한 기록이 남지 않는다.
 
 Backend가 증명해야 할 핵심 메시지는 다음과 같다.
 
