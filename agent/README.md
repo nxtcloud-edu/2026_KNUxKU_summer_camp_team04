@@ -17,7 +17,7 @@
 
 ## 아키텍처
 
-원본 스케치:
+### (참고용, 지금은 다름) 원래 설계 스케치
 
 ```
 진입시점 결정 에이전트
@@ -30,8 +30,8 @@
 질문("지금 뭔가 해야 하나?")을 LLM 호출 2번으로 나눠 묻는 구조였고, EntryAgent의
 판단 기준("마지막 개입 이후 충분한 시간이 지났는가", "세션이 끝났는가")을 계산할
 필드 자체가 `SessionContext`에 없어 실제로는 판단이 불가능했습니다. 그래서
-진입시점 판단을 별도 에이전트/모듈로 두지 않고 **`agents/state_agent.py` 안에
-규칙 기반 게이트(LLM 없음, 공짜)로 흡수**했습니다: 게이트를 통과한 경우에만
+**지금은 진입시점 판단을 별도 에이전트/모듈로 두지 않고 `agents/state_agent.py`
+안에 규칙 기반 게이트(LLM 없음, 공짜)로 흡수**했습니다: 게이트를 통과한 경우에만
 `state_agent.assess()`가 LLM을 호출합니다. 체크 주기마다 대부분 "아직 개입
 아님"으로 끝나기 때문에 LLM 호출 절감 효과가 큽니다.
 
@@ -39,8 +39,10 @@
 복사했을 수도 있음), 힌트 분기가 아닌 **"이해도 확인" 분기**로 별도 처리합니다.
 게이트가 이를 감지하면 `state_agent.assess()`는 LLM을 호출하지 않고 곧장
 `entry_branch="paste"`인 `StudentState`를 만들어 GuidanceAgent로 넘기고,
-GuidanceAgent가 "이 코드가 왜 이렇게 동작하는지 설명해볼래요?" 같은 질문을
+GuidanceAgent가 "이 코드가 왜 이렇게 동작하는지 생각해볼래요?" 같은 질문을
 만들게 합니다.
+
+### 지금 구조 (커밋 기준)
 
 ```mermaid
 flowchart TD
@@ -48,9 +50,9 @@ flowchart TD
     B -->|"세션 종료 / 쿨다운 / 신호 부족<br/>(LLM 미호출)"| STOP1((종료))
     B -->|"paste_detected<br/>(LLM 미호출)"| C
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=False"| STOP2((종료: 관찰만))
-    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C[지도 방법 결정 에이전트\nGuidanceAgent]
-    C --> D[행동 결정 에이전트\nActionAgent]
-    D --> E[평가 에이전트\nEvaluationAgent]
+    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 결정 에이전트<br/>GuidanceAgent"]
+    C --> D["행동 결정 에이전트<br/>ActionAgent"]
+    D --> E["평가 에이전트<br/>EvaluationAgent"]
     E -.피드백.-> B
 ```
 
