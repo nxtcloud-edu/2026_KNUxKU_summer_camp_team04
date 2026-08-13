@@ -1,0 +1,18 @@
+{
+  "problem_id": "func_sum_list",
+  "title": "리스트 합 구하기",
+  "description": "정수 리스트를 인자로 받아 모든 값을 더한 결과를 반환하는 함수 sum_list(arr)를 작성하세요.\n\n예: sum_list([1, 2, 3]) -> 6\n\n빈 리스트가 들어올 수도 있습니다.",
+  "difficulty": "BEGINNER",
+  "concept": ["loop", "accumulator", "function"],
+  "check_type": "function_call",
+  "function_name": "sum_list",
+  "code_template": "def sum_list(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[1, 2, 3]], "expected": 6, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-1, -2, 3]], "expected": 0, "category": "negative_numbers" },
+    { "input": [[100]], "expected": 100, "category": "boundary_case" },
+    { "input": [[]], "expected": 0, "category": "empty_list" }
+  ]
+}

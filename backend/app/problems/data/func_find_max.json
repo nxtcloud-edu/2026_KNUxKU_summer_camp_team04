@@ -1,0 +1,17 @@
+{
+  "problem_id": "func_find_max",
+  "title": "최댓값 찾기",
+  "description": "정수 리스트를 인자로 받아 가장 큰 값을 반환하는 함수 find_max(arr)를 작성하세요.\n\n예: find_max([3, 1, 4, 1, 5]) -> 5\n\n리스트에는 항상 하나 이상의 값이 들어 있습니다. 음수만 들어올 수도 있습니다.",
+  "difficulty": "BEGINNER",
+  "concept": ["loop", "condition", "comparison", "function"],
+  "check_type": "function_call",
+  "function_name": "find_max",
+  "code_template": "def find_max(arr):\n    # 여기에 코드를 작성하세요\n    pass",
+  "public_test_cases": [
+    { "input": [[3, 1, 4, 1, 5]], "expected": 5, "category": "basic" }
+  ],
+  "hidden_test_cases": [
+    { "input": [[-5, -1, -10]], "expected": -1, "category": "all_negative" },
+    { "input": [[7]], "expected": 7, "category": "single_element" }
+  ]
+}
