@@ -1,6 +1,6 @@
 import localProblems from '../../judge/problems-index.json'
 import localProblemDetails from '../../judge/problems-detail.json'
-import { API_BASE_URL, apiRequest, getApiErrorMessage } from './api'
+import { API_BASE_URL, apiRequest } from './api'
 
 export type ProblemSummary = {
   problem_id: string
@@ -31,6 +31,8 @@ export type ProblemDetail = ProblemSummary & {
   public_test_cases: PublicTestCase[]
   time_limit_sec?: number
   memory_limit_mb?: number
+  hidden_test_case_count?: number
+  hidden_test_categories?: string[]
 }
 
 export type JudgeStatus = 'ACCEPTED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'SYNTAX_ERROR' | 'TIME_LIMIT' | 'INTERNAL_ERROR'
@@ -65,17 +67,32 @@ export type JudgeResult = {
   agent_decision?: AgentDecision | null
 }
 
+export type LocalJudgePayload = {
+  mode: 'run' | 'submit'
+  status: JudgeStatus
+  passed: number
+  total: number
+  runtime_ms?: number | null
+  message?: string
+  failed_categories?: string[]
+}
+
+export type ClientEventType = 'CODE_SNAPSHOT' | 'RUN' | 'SUBMIT' | 'UNDO' | 'RESET' | 'HINT_REQUEST' | 'ACTIVITY_OPENED' | 'ACTIVITY_RESPONSE' | 'SESSION_END'
+
+export type EventIngestResponse = {
+  accepted: unknown[]
+  duplicate_client_event_ids: string[]
+  current_code_version: number
+  last_event_seq: number
+  session_finished: boolean
+}
+
 export const isJudgeApiConfigured = Boolean(API_BASE_URL)
 
 export async function getProblems(signal?: AbortSignal): Promise<ProblemListResult> {
   if (API_BASE_URL) {
     try {
-      const response = await fetch(`${API_BASE_URL}/problems`, {
-        signal,
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) throw new Error(`Problem API returned ${response.status}`)
-      const problems = normalizeProblemList(await response.json())
+      const problems = normalizeProblemList(await apiRequest<unknown>('/problems', { signal, auth: false }))
       return { problems, source: 'api' }
     } catch (error) {
       if (isAbortError(error)) throw error
@@ -89,12 +106,7 @@ export async function getProblems(signal?: AbortSignal): Promise<ProblemListResu
 export async function getProblemDetail(problemId: string, signal?: AbortSignal): Promise<ProblemDetail> {
   if (API_BASE_URL) {
     try {
-      const response = await fetch(`${API_BASE_URL}/problems/${encodeURIComponent(problemId)}`, {
-        signal,
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) throw new Error(`Problem detail API returned ${response.status}`)
-      return normalizeProblemDetail(await response.json())
+      return normalizeProblemDetail(await apiRequest<unknown>(`/problems/${encodeURIComponent(problemId)}`, { signal, auth: false }))
     } catch (error) {
       if (isAbortError(error)) throw error
       console.warn('Problem detail API unavailable. Using local details.', error)
@@ -115,25 +127,56 @@ export async function createSession(problemId: string, signal?: AbortSignal): Pr
   })
 }
 
-export async function judgeCode(
-  studentCode: string,
-  problemId: string,
-  mode: 'run' | 'submit',
-  sessionId?: string,
-): Promise<JudgeResult> {
-  if (!API_BASE_URL) throw new Error('Judge API가 연결되지 않았습니다. VITE_API_BASE_URL을 설정해 주세요.')
-  const session = sessionId ?? (await createSession(problemId))?.session_id
-  if (!session) throw new Error('학습 세션을 만들 수 없습니다.')
-
-  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(session)}/${mode}`, {
+export async function postSessionEvent(
+  sessionId: string,
+  type: ClientEventType,
+  payload: Record<string, unknown> = {},
+): Promise<EventIngestResponse | null> {
+  if (!API_BASE_URL || !sessionId) return null
+  return apiRequest<EventIngestResponse>(`/sessions/${encodeURIComponent(sessionId)}/events`, {
     method: 'POST',
-    body: JSON.stringify({ code: studentCode }),
+    body: JSON.stringify({
+      events: [{
+        type,
+        client_event_id: createClientEventId(),
+        client_timestamp: new Date().toISOString(),
+        payload,
+      }],
+    }),
+  })
+}
+
+export async function postCodeSnapshot(sessionId: string, code: string): Promise<EventIngestResponse | null> {
+  return postSessionEvent(sessionId, 'CODE_SNAPSHOT', { code })
+}
+
+export async function postJudgeResult(
+  sessionId: string,
+  result: LocalJudgePayload,
+  codeVersion?: number | null,
+): Promise<JudgeResult> {
+  if (!API_BASE_URL || !sessionId) return result
+  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/results`, {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: result.mode,
+      status: result.status,
+      passed: result.passed,
+      total: result.total,
+      runtime_ms: result.runtime_ms ?? null,
+      message: result.message ?? null,
+      failed_categories: result.failed_categories ?? [],
+      code_version: codeVersion ?? null,
+      client_event_id: createClientEventId(),
+      client_timestamp: new Date().toISOString(),
+    }),
   })
   return normalizeJudgeResponse(payload)
 }
 
 export async function decideTutorHelp(sessionId: string): Promise<AgentDecision | null> {
   if (!API_BASE_URL || !sessionId) return null
+  await postSessionEvent(sessionId, 'HINT_REQUEST')
   return normalizeAgentDecision(await apiRequest<unknown>('/agent/decide', {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId, trigger: 'HELP_REQUESTED' }),
@@ -165,6 +208,7 @@ function normalizeProblemDetail(payload: unknown): ProblemDetail {
     || (payload.check_type !== 'function_call' && payload.check_type !== 'stdout_match')) {
     throw new Error('Invalid problem detail response')
   }
+
   return {
     problem_id: payload.problem_id,
     title: payload.title,
@@ -176,6 +220,10 @@ function normalizeProblemDetail(payload: unknown): ProblemDetail {
     public_test_cases: Array.isArray(payload.public_test_cases) ? payload.public_test_cases as PublicTestCase[] : [],
     time_limit_sec: typeof payload.time_limit_sec === 'number' ? payload.time_limit_sec : undefined,
     memory_limit_mb: typeof payload.memory_limit_mb === 'number' ? payload.memory_limit_mb : undefined,
+    hidden_test_case_count: typeof payload.hidden_test_case_count === 'number' ? payload.hidden_test_case_count : undefined,
+    hidden_test_categories: Array.isArray(payload.hidden_test_categories)
+      ? payload.hidden_test_categories.filter((value): value is string => typeof value === 'string')
+      : undefined,
   }
 }
 
@@ -219,6 +267,10 @@ function normalizeAgentDecision(payload: unknown): AgentDecision | null {
 function normalizeJudgeStatus(status: string): JudgeStatus {
   const knownStatuses: JudgeStatus[] = ['ACCEPTED', 'WRONG_ANSWER', 'RUNTIME_ERROR', 'SYNTAX_ERROR', 'TIME_LIMIT', 'INTERNAL_ERROR']
   return knownStatuses.includes(status as JudgeStatus) ? status as JudgeStatus : 'INTERNAL_ERROR'
+}
+
+function createClientEventId() {
+  return crypto.randomUUID()
 }
 
 function isAbortError(error: unknown) {

@@ -25,10 +25,10 @@ import AiTutorPanel from './AiTutorPanel'
 import EducatorPage from './EducatorPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
-import { preparePython } from './pythonRunner'
+import { preparePython, runPython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { createSession, getProblemDetail, isJudgeApiConfigured, judgeCode, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { createSession, getProblemDetail, isJudgeApiConfigured, postCodeSnapshot, postJudgeResult, postSessionEvent, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
 import SignupPage from './SignupPage'
 import { getCurrentUser, logoutUser, type UserRole } from './auth'
 
@@ -86,6 +86,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [result, setResult] = useState<JudgeResult | null>(null)
   const [judgeError, setJudgeError] = useState('')
   const [sessionId, setSessionId] = useState('')
+  const [codeVersion, setCodeVersion] = useState<number | null>(null)
   const [mode, setMode] = useState<RunMode>('run')
   const [isRunning, setIsRunning] = useState(false)
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>('loading')
@@ -117,11 +118,13 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         setResult(null)
         setJudgeError('')
         setSessionId('')
+        setCodeVersion(null)
         if (userRole) {
           try {
             const session = await createSession(detail.problem_id, controller.signal)
             if (session) {
               setSessionId(session.session_id)
+              setCodeVersion(session.current_code_version)
               if (!checkpoint && session.current_code) setCode(session.current_code)
             }
           } catch (error) {
@@ -183,7 +186,16 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setResult(null)
     setJudgeError('')
     try {
-      setResult(await judgeCode(code, problem.problem_id, nextMode, sessionId || undefined))
+      let latestCodeVersion = codeVersion
+      if (sessionId) {
+        const snapshot = await postCodeSnapshot(sessionId, code)
+        latestCodeVersion = snapshot?.current_code_version ?? latestCodeVersion
+        setCodeVersion(latestCodeVersion)
+        await postSessionEvent(sessionId, nextMode === 'run' ? 'RUN' : 'SUBMIT')
+      }
+
+      const localResult = toJudgePayload(await runPython(code, problem), nextMode)
+      setResult(sessionId ? await postJudgeResult(sessionId, localResult, latestCodeVersion) : localResult)
     } catch (caught) {
       setJudgeError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -396,6 +408,43 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
     </div>
   )
+}
+
+function toJudgePayload(execution: Awaited<ReturnType<typeof runPython>>, mode: RunMode): LocalJudgePayload {
+  if (execution.error) {
+    return {
+      mode,
+      status: execution.error.type === 'syntax' ? 'SYNTAX_ERROR' : 'RUNTIME_ERROR',
+      passed: 0,
+      total: execution.tests.length,
+      runtime_ms: Math.round(execution.duration),
+      message: execution.error.message,
+      failed_categories: [],
+    }
+  }
+
+  const passed = execution.tests.filter((test) => test.passed).length
+  const total = execution.tests.length
+  const failedCategories = execution.tests
+    .filter((test) => !test.passed && test.category)
+    .map((test) => String(test.category))
+
+  return {
+    mode,
+    status: passed === total ? 'ACCEPTED' : 'WRONG_ANSWER',
+    passed,
+    total,
+    runtime_ms: Math.round(execution.duration),
+    message: buildJudgeMessage(execution) ?? undefined,
+    failed_categories: failedCategories,
+  }
+}
+
+function buildJudgeMessage(execution: Awaited<ReturnType<typeof runPython>>) {
+  const failed = execution.tests.find((test) => !test.passed)
+  if (!failed) return execution.stdout || null
+  if (failed.error) return failed.error
+  return `expected ${JSON.stringify(failed.expected ?? failed.expected_stdout)}, got ${JSON.stringify(failed.actual)}`
 }
 
 function LoginRequiredModal({ service, onClose, onLogin, onSignup }: { service: string; onClose: () => void; onLogin: () => void; onSignup: () => void }) {
