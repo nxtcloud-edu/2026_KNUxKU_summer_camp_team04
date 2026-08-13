@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlmodel import select
 
-from app.enums import EventType, JudgeStatus
+from app.agent import get_agent
+from app.agent.interface import AgentDecision
+from app.agent.stub import FakeAgent
+from app.enums import AgentAction, EventType, JudgeStatus, TriggerType
 from app.judge import get_judge
 from app.judge.interface import JudgeResult
 from app.judge.stub import FakeJudge
@@ -10,8 +15,8 @@ from app.main import app
 from app.models import Event
 from app.trace.features import extract_features
 from app.sessions import store
-from tests.factories import TraceBuilder
-from tests.fixtures_code import LOOP_V2
+from tests.factories import T0, TraceBuilder
+from tests.fixtures_code import LOOP_V2, LOOP_V3, LOOP_V4
 
 
 def create(client) -> str:
@@ -112,6 +117,75 @@ def test_client_and_server_paths_produce_identical_row_shape(db):
     assert fa.recent_scores == fb.recent_scores
     assert fa.run_count == fb.run_count == 1
     assert fa.same_result_count == fb.same_result_count
+
+
+def _two_prior_failures(db, user) -> TraceBuilder:
+    """REPEATED_FAILURE의 처음 2/3 (test_monitor.py 시나리오 2와 동일 레시피).
+    3번째 3/5는 각 테스트가 실제 /submit 호출로 만든다 -- 그래야 그 응답/기록
+    경로 자체를 검증하는 셈이 된다."""
+    return (
+        TraceBuilder.start(db, user_id=user.id, at=T0)
+        .tick(30).edit(LOOP_V2).tick(10).run(3)
+        .tick(25).edit(LOOP_V3).tick(10).run(3)
+    )
+
+
+def test_submit_records_agent_intervention_when_agent_actually_intervenes(client, db, user, frozen_now):
+    """/run|/submit 경로도 하트비트와 동일하게 WAIT가 아닌 결정을 AGENT_INTERVENTION으로
+    남겨야 한다 -- 그래야 build_context()의 previous_interventions가 다음 판단에
+    이걸 참고할 수 있고, 프론트가 GET /events 폴링으로 이 힌트를 놓치지 않는다."""
+    b = _two_prior_failures(db, user)
+    frozen_now["t"] = b.t + timedelta(seconds=25)
+    fake_agent = FakeAgent(
+        AgentDecision(
+            state="STUCK", concept="loop", action=AgentAction.HINT,
+            reason="같은 오류 반복", activity={"message": "확인해보세요"},
+        )
+    )
+    app.dependency_overrides[get_agent] = lambda: fake_agent
+    # 3번째 3/5 -- 이걸로 same_result_count가 3이 되어 REPEATED_FAILURE가 뜬다.
+    app.dependency_overrides[get_judge] = lambda: FakeJudge(
+        [JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=3, total=5)]
+    )
+    try:
+        r = client.post(f"/sessions/{b.session_id}/submit", json={"code": LOOP_V4})
+        assert r.status_code == 201
+        assert r.json()["process_state"]["trigger"] == TriggerType.REPEATED_FAILURE.value
+        assert r.json()["agent_decision"]["action"] == "HINT"  # 응답에는 그대로 실린다 (동기 경로)
+
+        rows = db.exec(
+            select(Event).where(Event.session_id == b.session_id).where(Event.type == EventType.AGENT_INTERVENTION)
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].payload["action"] == "HINT"
+        assert rows[0].payload["activity"]["message"] == "확인해보세요"
+    finally:
+        app.dependency_overrides.pop(get_agent, None)
+        app.dependency_overrides.pop(get_judge, None)
+
+
+def test_submit_records_nothing_when_agent_waits(client, db, user, frozen_now):
+    b = _two_prior_failures(db, user)
+    frozen_now["t"] = b.t + timedelta(seconds=25)
+    app.dependency_overrides[get_agent] = lambda: FakeAgent(
+        AgentDecision(state="STUCK", concept=None, action=AgentAction.WAIT, reason="대기")
+    )
+    app.dependency_overrides[get_judge] = lambda: FakeJudge(
+        [JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=3, total=5)]
+    )
+    try:
+        r = client.post(f"/sessions/{b.session_id}/submit", json={"code": LOOP_V4})
+        assert r.status_code == 201
+        assert r.json()["process_state"]["trigger"] == TriggerType.REPEATED_FAILURE.value
+        assert r.json()["agent_decision"]["action"] == "WAIT"
+
+        rows = db.exec(
+            select(Event).where(Event.session_id == b.session_id).where(Event.type == EventType.AGENT_INTERVENTION)
+        ).all()
+        assert rows == []
+    finally:
+        app.dependency_overrides.pop(get_agent, None)
+        app.dependency_overrides.pop(get_judge, None)
 
 
 def test_agent_decide_returns_wait_today(client):
