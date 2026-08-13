@@ -5,9 +5,18 @@ Docker가 실행 중이어야 하고, 샌드박스 이미지가 미리 빌드돼
 """
 import pytest
 
-from judge_service import run_judge
+from judge_service import get_problem_detail, run_judge
 
 PROBLEM_ID = "func_sum_list"
+
+
+def test_get_problem_detail_excludes_hidden_test_cases():
+    """프론트에 노출되는 상세 정보에 hidden_test_cases(정답)가 절대 섞이면 안 됨."""
+    detail = get_problem_detail(PROBLEM_ID)
+    assert "hidden_test_cases" not in detail
+    assert "public_test_cases" in detail
+    assert "description" in detail
+    assert detail["problem_id"] == PROBLEM_ID
 
 
 def test_accepted():

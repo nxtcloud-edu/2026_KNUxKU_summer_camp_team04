@@ -1,6 +1,7 @@
 {
   "problem_id": "stdout_perfectnumber",
   "title": "완전수 판별",
+  "description": "## 문제\n자연수 `N`이 주어진다.  \n`N`의 **자기 자신을 제외한 양의 약수들의 합**이 정확히 `N`과 같으면 `PERFECT`, 아니면 `NOT PERFECT`를 출력하시오.\n\n예를 들어 `6`의 자기 자신을 제외한 양의 약수는 `1, 2, 3`이고,  \n이들의 합은 `1 + 2 + 3 = 6` 이므로 `6`은 완전수이다.\n\n## 입력\n첫째 줄에 자연수 `N`이 주어진다.\n\n## 출력\n`N`이 완전수이면 `PERFECT`, 아니면 `NOT PERFECT`를 출력한다.\n\n## 제한\n- `1 <= N <= 100000`",
   "concept": [],
   "check_type": "stdout_match",
   "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",

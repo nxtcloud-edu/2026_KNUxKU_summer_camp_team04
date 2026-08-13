@@ -1,6 +1,7 @@
 {
   "problem_id": "stdout_odd_detector",
   "title": "홀수 판별기",
+  "description": "## 시간 제한 / 메모리 제한\n- 시간 제한: 1초\n- 메모리 제한: 128 MB\n\n## 문제\n정수 `N`이 주어진다.\n\n`N`이 홀수이면 `1`, 짝수이면 `0`을 출력하시오.\n\n## 입력\n정수 `N`이 한 줄에 주어진다.\n\n## 출력\n홀수이면 `1`, 짝수이면 `0`을 출력한다.\n\n## 제한\n- `-10^9 <= N <= 10^9`",
   "concept": [],
   "check_type": "stdout_match",
   "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",

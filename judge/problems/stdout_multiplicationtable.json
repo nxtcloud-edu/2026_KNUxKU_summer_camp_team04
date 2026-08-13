@@ -1,6 +1,7 @@
 {
   "problem_id": "stdout_multiplicationtable",
   "title": "구구단 한 단 출력",
+  "description": "## 문제\n정수 `D`가 주어진다.  \n`D × 1`부터 `D × 9`까지를 아래 형식에 맞추어 출력하시오.\n\n각 줄의 형식은 다음과 같다.\n\n`D x i = 결과`\n\n여기서 `i`는 `1`부터 `9`까지 증가한다.\n\n## 입력\n첫째 줄에 정수 `D`가 주어진다.\n\n## 출력\n총 9개의 줄에 걸쳐, 다음 형식으로 출력한다.\n\n- 첫째 줄: `D x 1 = D`\n- 둘째 줄: `D x 2 = 2D`\n- ...\n- 아홉째 줄: `D x 9 = 9D`\n\n## 제한\n- `-100 <= D <= 100`",
   "concept": [],
   "check_type": "stdout_match",
   "code_template": "# 여기에 코드를 작성하세요\n# 입력은 input()으로 받고, 출력은 print()로 출력하세요\n",
