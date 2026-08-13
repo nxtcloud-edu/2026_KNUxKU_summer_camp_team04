@@ -9,6 +9,8 @@ from app.judge.stub import FakeJudge
 from app.main import app
 from app.models import Event
 from app.trace.features import extract_features
+from app.sessions import store
+from tests.factories import TraceBuilder
 from tests.fixtures_code import LOOP_V2
 
 
@@ -58,44 +60,45 @@ def test_run_with_injected_judge_writes_server_sourced_result(client, db):
         app.dependency_overrides.pop(get_judge, None)
 
 
-def test_client_and_server_paths_produce_identical_row_shape(client, db):
+def test_client_and_server_paths_produce_identical_row_shape(db):
     """seam이 실제로 작동하는지에 대한 값싼 보장.
 
-    두 경로가 바이트 동일한 TEST_RESULT payload 키 집합을 쓰고 동일한 feature를 낳으면,
-    client judge -> server judge 전환은 프론트엔드만의 변경이 된다.
-    """
-    # --- 클라이언트 경로 ---
-    a = create(client)
-    client.post(
-        f"/sessions/{a}/events",
-        json={"events": [{"type": "CODE_SNAPSHOT", "payload": {"code": LOOP_V2}}]},
-    )
-    client.post(
-        f"/sessions/{a}/results",
-        json={
-            "mode": "run",
-            "status": "WRONG_ANSWER",
-            "passed": 3,
-            "total": 5,
-            "runtime_ms": 12,
-        },
-    )
+    두 경로가 바이트 동일한 TEST_RESULT payload 키 집합을 쓰고 동일한 feature를
+    낳으면, 채점 주체를 바꿔도 하류(features/monitor)는 손대지 않아도 된다.
 
-    # --- 서버 경로 ---
-    app.dependency_overrides[get_judge] = lambda: FakeJudge(
-        [JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=3, total=5, runtime_ms=12)]
-    )
-    try:
-        b = create(client)
-        client.post(f"/sessions/{b}/run", json={"code": LOOP_V2})
-    finally:
-        app.dependency_overrides.pop(get_judge, None)
+    **HTTP가 아니라 서비스 계층에서 검증한다.** 클라이언트가 결과를 보고하던
+    POST /results 는 제거됐다(도토리 조작 경로였다). 그래도 seam 자체는
+    record_judge_result() 라는 단일 작성자에 그대로 살아 있으므로,
+    produced_by 만 바꿔 호출해 같은 성질을 확인한다.
+    """
+    from app.enums import EventSource
+    from app.trace import service as trace_service
+
+    def write(produced_by: EventSource, judge_name: str) -> str:
+        b = TraceBuilder.start(db)
+        session = store.require_session(db, b.session_id)
+        trace_service.create_snapshot(db, session_id=b.session_id, code=LOOP_V2)
+        db.commit()
+        db.refresh(session)
+        trace_service.record_judge_result(
+            db,
+            session,
+            mode="run",
+            status="WRONG_ANSWER",
+            passed=3,
+            total=5,
+            runtime_ms=12,
+            produced_by=produced_by,
+            judge_name=judge_name,
+        )
+        return b.session_id
+
+    a = write(EventSource.CLIENT_JUDGE, "pyodide")
+    b = write(EventSource.SERVER, "docker")
 
     def payload_of(sid: str) -> dict:
         rows = db.exec(select(Event).where(Event.session_id == sid)).all()
-        return next(
-            e.payload for e in rows if EventType(e.type) is EventType.TEST_RESULT
-        )
+        return next(e.payload for e in rows if EventType(e.type) is EventType.TEST_RESULT)
 
     pa, pb = payload_of(a), payload_of(b)
     assert pa.keys() == pb.keys()
@@ -127,15 +130,14 @@ def test_agent_context_is_actually_buildable(client, db):
     from app.agent.context import build_context
     from app.problems.service import get_problem_repository
 
-    sid = create(client)
-    client.post(
-        f"/sessions/{sid}/events",
-        json={"events": [{"type": "CODE_SNAPSHOT", "payload": {"code": LOOP_V2}}]},
+    app.dependency_overrides[get_judge] = lambda: FakeJudge(
+        [JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=3, total=5)]
     )
-    client.post(
-        f"/sessions/{sid}/results",
-        json={"mode": "run", "status": "WRONG_ANSWER", "passed": 3, "total": 5},
-    )
+    try:
+        sid = create(client)
+        client.post(f"/sessions/{sid}/run", json={"code": LOOP_V2})
+    finally:
+        app.dependency_overrides.pop(get_judge, None)
 
     ctx = build_context(db, sid, get_problem_repository())
     assert ctx.problem["title"] == "리스트 합 구하기"

@@ -4,6 +4,11 @@ sqlmodel==0.0.22
 pydantic==2.10.4
 pydantic-settings==2.7.0
 
+# 인증
+bcrypt==5.0.0
+PyJWT==2.13.0
+email-validator==2.3.0   # pydantic 의 EmailStr 이 요구한다
+
 # dev/test
 pytest==8.3.4
 httpx==0.28.1

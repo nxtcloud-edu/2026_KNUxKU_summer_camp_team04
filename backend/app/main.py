@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.router import router as agent_router
+from app.auth.router import router as auth_router
 from app.config import get_settings
 from app.db import init_db
 from app.errors import register_error_handlers
@@ -14,6 +15,7 @@ from app.judge.router import router as judge_router
 from app.problems.router import router as problems_router
 from app.sessions.router import router as sessions_router
 from app.trace.router import router as trace_router
+from app.users.router import router as users_router
 
 
 @asynccontextmanager
@@ -47,6 +49,8 @@ def create_app() -> FastAPI:
 
     register_error_handlers(app)
 
+    app.include_router(auth_router)
+    app.include_router(users_router)
     app.include_router(problems_router)
     app.include_router(sessions_router)
     app.include_router(trace_router)
