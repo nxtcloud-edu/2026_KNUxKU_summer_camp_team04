@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Eye, EyeOff, GraduationCap, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { ArrowLeft, Check, Eye, EyeOff, GraduationCap, KeyRound, LockKeyhole, Mail, UserRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { signupUser, type UserRole } from './auth'
 
@@ -8,22 +8,40 @@ type SignupPageProps = {
   onBack: () => void
 }
 
+/**
+ * 비밀번호 최소 길이. **백엔드와 같은 값이어야 한다.**
+ *
+ * 백엔드는 `SignupRequest.password = Field(min_length=8)`(app/auth/schemas.py)
+ * 이다. 여기가 6이었을 때는 6~7자를 입력하면 화면상 모든 조건이 초록색인데
+ * 서버가 422 를 돌려줬다 -- 학생 입장에서는 이유를 알 수 없는 실패였다.
+ */
+const PASSWORD_MIN_LENGTH = 8
+
 function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [role, setRole] = useState<UserRole>('student')
+  const [inviteCode, setInviteCode] = useState('')
   const [message, setMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const passwordRules = useMemo(() => ({
-    minLength: password.length >= 6,
+    minLength: password.length >= PASSWORD_MIN_LENGTH,
     hasLetterAndNumber: /[A-Za-z]/.test(password) && /\d/.test(password),
   }), [password])
   const isPasswordValid = passwordRules.minLength && passwordRules.hasLetterAndNumber
+  // 교수자는 기관 초대 코드가 필수다 (백엔드 auth/service.resolve_organization).
+  // 학생은 선택 -- 코드가 없으면 이메일 도메인으로 자동 연결된다.
+  const isInviteCodeRequired = role === 'educator'
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!isPasswordValid) {
       setMessage('비밀번호 조건을 모두 만족해야 회원가입할 수 있어요.')
+      return
+    }
+    // 서버도 막지만(422), 여기서 먼저 걸러 학생에게 이유를 정확히 알려준다.
+    if (isInviteCodeRequired && !inviteCode.trim()) {
+      setMessage('교수자 가입에는 기관 초대 코드가 필요해요. 소속 기관 담당자에게 코드를 받아주세요.')
       return
     }
 
@@ -36,6 +54,7 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
         String(form.get('email') ?? ''),
         password,
         role,
+        inviteCode,
       )
       onSignup(user.role)
     } catch (error) {
@@ -91,12 +110,33 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
           </label>
 
           <label className="auth-field">
+            <span>{isInviteCodeRequired ? '기관 초대 코드' : '기관 초대 코드 (선택)'}</span>
+            <div>
+              <KeyRound size={17} />
+              <input
+                type="text"
+                name="invite_code"
+                placeholder={isInviteCodeRequired ? '소속 기관에서 받은 코드' : '없으면 비워두세요'}
+                value={inviteCode}
+                onChange={(event) => setInviteCode(event.target.value)}
+                autoComplete="off"
+                required={isInviteCodeRequired}
+              />
+            </div>
+          </label>
+          <p className="auth-hint">
+            {isInviteCodeRequired
+              ? '교수자 계정은 기관 확인이 필요해요. 코드는 소속 기관 담당자에게 받을 수 있습니다.'
+              : '기관 코드가 있으면 입력해 주세요. 없어도 학생으로 가입할 수 있어요.'}
+          </p>
+
+          <label className="auth-field">
             <span>비밀번호</span>
             <div>
               <LockKeyhole size={17} />
               <input
                 type={showPassword ? 'text' : 'password'}
-                placeholder="영문과 숫자를 포함해 입력하세요"
+                placeholder={`${PASSWORD_MIN_LENGTH}자 이상, 영문과 숫자를 포함해 입력하세요`}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -113,7 +153,7 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
           </label>
 
           <div className="password-rules" aria-live="polite">
-            <span className={passwordRules.minLength ? 'valid' : ''}><Check size={13} />6자리 이상</span>
+            <span className={passwordRules.minLength ? 'valid' : ''}><Check size={13} />{PASSWORD_MIN_LENGTH}자리 이상</span>
             <span className={passwordRules.hasLetterAndNumber ? 'valid' : ''}><Check size={13} />영문, 숫자 조합</span>
           </div>
           {message && <p className="auth-message error">{message}</p>}

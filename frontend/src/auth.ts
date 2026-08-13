@@ -30,12 +30,39 @@ export async function loginUser(email: string, password: string, role: UserRole)
   return normalizeUser(response.user, email, role)
 }
 
-export async function signupUser(name: string, email: string, password: string, role: UserRole): Promise<AuthUser> {
+/**
+ * 회원가입.
+ *
+ * `inviteCode` 는 **교수자 가입에 필수다.** 백엔드
+ * `auth/service.resolve_organization` 이 role=EDUCATOR 인데 코드가 없으면
+ * 422(INVALID_INVITE_CODE)를 던진다 -- 역할을 요청 body 로 받는 이상 가입
+ * 자체에 게이트가 없으면 누구나 교수자가 되어 남의 강의 API를 두드릴 수 있다.
+ *
+ * 학생은 선택이다. 코드를 주면 그 기관에 붙고, 없으면 이메일 도메인으로
+ * 자동 연결된다(제휴 기관이 없으면 소속 없이 가입).
+ *
+ * 빈 문자열은 **보내지 않는다.** 백엔드가 `if invite_code:` 로 판정하므로
+ * 결과는 같지만, 요청 본문에 의미 없는 키를 남기지 않는다.
+ */
+export async function signupUser(
+  name: string,
+  email: string,
+  password: string,
+  role: UserRole,
+  inviteCode = '',
+): Promise<AuthUser> {
   if (!isApiConfigured) return demoUser(email, role, name)
+  const trimmedInviteCode = inviteCode.trim()
   const response = await apiRequest<AuthResponse>('/auth/signup', {
     method: 'POST',
     auth: false,
-    body: JSON.stringify({ name, email, password, role: role.toUpperCase() }),
+    body: JSON.stringify({
+      name,
+      email,
+      password,
+      role: role.toUpperCase(),
+      ...(trimmedInviteCode ? { invite_code: trimmedInviteCode } : {}),
+    }),
   })
   persistToken(response)
   return normalizeUser(response.user, email, role, name)
@@ -43,7 +70,14 @@ export async function signupUser(name: string, email: string, password: string, 
 
 export async function logoutUser() {
   if (isApiConfigured) {
-    await apiRequest('/auth/logout', { method: 'POST' }).catch((error) => {
+    // 토큰을 그대로 실어 보낸다 -- 나중에 서버가 토큰 블랙리스트를 붙일 때
+    // 프런트를 고치지 않아도 되게 하려는 것이 이 엔드포인트의 목적이다
+    // (backend/app/auth/router.py 의 logout 독스트링).
+    //
+    // 단 401 은 세션 만료로 처리하지 않는다. 토큰이 이미 만료된 상태에서
+    // 로그아웃을 누르면 "로그인이 만료되었어요" 화면으로 튕겨나가는데,
+    // 사용자는 방금 나가려고 눌렀다.
+    await apiRequest('/auth/logout', { method: 'POST', notifyOnUnauthorized: false }).catch((error) => {
       console.warn('Logout API unavailable. Clearing local auth state.', error)
     })
   }
@@ -57,14 +91,25 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return normalizeUser(response, '', 'student')
 }
 
-export async function requestPasswordReset(email: string) {
-  if (!isApiConfigured) return
-  await apiRequest('/auth/password-reset/request', {
-    method: 'POST',
-    auth: false,
-    body: JSON.stringify({ email }),
-  })
-}
+/**
+ * 비밀번호 재설정은 **아직 서버에 없다.**
+ *
+ * 여기 있던 `POST /auth/password-reset/request` 호출은 제거했다. 백엔드
+ * `app/auth/router.py` 에 그 경로가 없어서 항상 404 였고, 그런데도 화면은
+ * "입력한 이메일로 재설정 안내를 보냈습니다"를 띄우고 있었다 -- 학생은
+ * 오지 않는 메일을 기다리게 된다.
+ *
+ * 켜려면 세 조각이 다 필요하다:
+ *   1. `POST /auth/password-reset/request` -- 계정 열거 방지를 위해 성공/실패
+ *      무관하게 204. `models.PasswordResetToken`(테이블은 이미 있다)에 토큰
+ *      **해시**를 저장.
+ *   2. 메일 발송 경로. 이게 없으면 1번만 만들어도 사용자에게 토큰이 도달하지 않는다.
+ *   3. `POST /auth/password-reset/confirm {token, new_password}` + 새 비밀번호
+ *      입력 화면.
+ *
+ * 1번만 먼저 만들면 "요청은 되는데 재설정은 안 되는" 상태가 되므로, 세 조각을
+ * 한 번에 하기 전까지는 화면에서 기능을 약속하지 않는다(LoginPage 참고).
+ */
 
 function persistToken(response: AuthResponse) {
   setAccessToken(response.access_token ?? response.token ?? '')
