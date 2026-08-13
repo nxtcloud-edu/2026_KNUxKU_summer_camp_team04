@@ -11,9 +11,12 @@ cd backend && uvicorn app.main:app --reload --port 8000 --workers 1
 
 ---
 
-## 0. 인증 — 먼저 붙여야 할 것
+## 0. 인증
 
-지금 프론트의 로그인/회원가입 화면은 입력값을 **아무 데도 보내지 않고** `setAuthView('workspace')`만 호출한다. 이걸 실제 API에 연결하기 전까지는 `POST /sessions`가 **401**을 반환하므로 Coding Trace도 채점도 동작하지 않는다.
+> **연동 완료.** 로그인/회원가입 화면은 `auth.ts`를 통해 실제 API를 부르고,
+> `api.ts`의 `apiRequest`가 모든 요청에 `Authorization: Bearer`를 붙인다.
+> 토큰 만료(401)는 `api.onUnauthorized`가 잡아 토큰을 폐기하고 로그인 화면으로 보낸다.
+> 아래 본문은 계약 원문이라 그대로 둔다.
 
 ### 토큰 얻기
 
@@ -54,6 +57,13 @@ POST /auth/logout  → 204. 서버는 상태를 안 지우므로 토큰 삭제�
 ```
 
 `/auth/refresh`는 **아직 없다.** access token 하나만 쓰고 만료되면 다시 로그인한다.
+
+**비밀번호 재설정 API도 없다.** `POST /auth/password-reset/request` 는 존재하지
+않는다(`models.PasswordResetToken` 테이블만 있다). 프런트가 한때 이 경로를 부르고
+있었는데 항상 404 였고, 그런데도 화면은 "재설정 안내를 보냈습니다"를 띄웠다 —
+학생은 오지 않는 메일을 기다리게 된다. 지금은 화면에서 기능을 약속하지 않는다.
+켜려면 ① request 엔드포인트(계정 열거 방지를 위해 항상 204) ② 메일 발송 경로
+③ `confirm {token, new_password}` + 입력 화면, **세 조각이 다 필요하다.**
 
 ### 역할 (`role`)
 
@@ -310,16 +320,24 @@ async function handleRun(mode: "run" | "submit") {
 
 ### `status`로 올 수 있는 값
 
-| 값 | 언제 | 점수로 세나 |
-|---|---|---|
-| `ACCEPTED` | 전부 통과 | ○ |
-| `WRONG_ANSWER` | 일부/전부 오답 | ○ |
-| `SYNTAX_ERROR` | 파싱 실패 | ✗ 관측 없음으로 처리 |
-| `RUNTIME_ERROR` | 실행 중 예외 | ✗ |
-| `TIME_LIMIT` | 시간 초과 | ✗ |
-| `INTERNAL_ERROR` | 러너 자체 실패 | ✗ |
+| 값 | 언제 | 누구 잘못 | 점수로 세나 | 오류 횟수로 세나 |
+|---|---|---|---|---|
+| `ACCEPTED` | 전부 통과 | — | ○ | — |
+| `WRONG_ANSWER` | 일부/전부 오답 | — | ○ | — |
+| `SYNTAX_ERROR` | 파싱 실패 | 학생 | ✗ 관측 없음 | ○ |
+| `RUNTIME_ERROR` | 학생 코드가 예외를 던졌다 | 학생 | ✗ | ○ |
+| `TIME_LIMIT` | 시간 초과 | 학생 | ✗ | ○ |
+| `INTERNAL_ERROR` | **채점 인프라가 고장났다** | 우리 | ✗ | **✗** |
 
 서버가 에러를 "0점"이 아니라 **"관측 없음"** 으로 취급하기 때문에, 오타 한 번이 `3/5 → 오타 → 3/5`를 "+3점 진전"으로 만들지 않는다.
+
+**`INTERNAL_ERROR`는 학생의 오류 횟수로 세지 않는다.** 도커가 죽어 있는데 학생이 Run을
+세 번 누른 것을 "반복 실패"로 판정하면, 원인이 채점 서버인데 코드에 대한 힌트가 나간다.
+그래서 monitor도 마지막 결과가 `INTERNAL_ERROR`면 trigger를 만들지 않는다
+(`trigger: null` + `reason: "채점 서버에 문제가 생겨..."`).
+
+**화면에서는 학생 코드 문제와 구분해서 보여줘야 한다.** "실행 중 오류가 발생했어요"가
+아니라 "채점 서버에 문제가 생겼어요 (코드 문제가 아니에요)"에 가까운 문구가 맞다.
 
 ### `POST /sessions/{id}/results`는 **제거됐다**
 
@@ -793,26 +811,28 @@ cd backend && python -m scripts.seed_org
 
 **먼저 해야 하는 것 (이게 없으면 나머지가 전부 401)**
 
-- [ ] `LoginPage` / `SignupPage`를 `POST /auth/login` · `/auth/signup`에 연결
-- [ ] `access_token`을 localStorage에 보관하고 모든 요청에 `Authorization: Bearer` 부착
-- [ ] 앱 부팅 시 `GET /auth/me`로 세션 복구, 401이면 토큰 삭제 후 로그인 화면
-- [ ] `traceClient.ts` / `useCodingTrace.ts`의 fetch에 토큰 추가
-- [ ] 401 공통 핸들러 (토큰 만료 시 자동 로그아웃)
+- [x] `LoginPage` / `SignupPage`를 `POST /auth/login` · `/auth/signup`에 연결
+- [x] `access_token`을 localStorage에 보관하고 모든 요청에 `Authorization: Bearer` 부착
+- [x] 앱 부팅 시 `GET /auth/me`로 세션 복구, 401이면 토큰 삭제 후 로그인 화면
+- [x] `traceClient.ts` / `useCodingTrace.ts`의 fetch에 토큰 추가
+- [x] 401 공통 핸들러 (토큰 만료 시 자동 로그아웃) — `api.onUnauthorized`
+- [x] 비밀번호 최소 길이를 서버와 같은 **8자**로 (프런트가 6자였다 → 6~7자 입력 시 원인 불명의 422)
+- [x] 교수자 가입 `invite_code` 입력/전송 (없으면 EDUCATOR 가입 자체가 422라 교육자 화면에 들어갈 계정을 만들 수 없었다)
 
 **그 다음**
 
-- [ ] 모든 요청/응답 필드를 `snake_case`로
-- [ ] 모든 이벤트에 `client_event_id = crypto.randomUUID()`
-- [ ] 전송 실패 → 메모리 큐 보관 → 재시도 (중복은 서버가 거른다)
-- [ ] `CODE_SNAPSHOT` 800ms debounce
-- [ ] **Run/Submit/Reset 직전 `await flushPendingSnapshot()`**
-- [ ] `SESSION_START` / `TEST_RESULT`를 `POST /events`로 보내지 않기
-- [ ] 남의 세션 404를 "없는 세션"과 동일하게 처리
+- [x] 모든 요청/응답 필드를 `snake_case`로
+- [x] 모든 이벤트에 `client_event_id = crypto.randomUUID()`
+- [x] 전송 실패 → 메모리 큐 보관 → 재시도 (중복은 서버가 거른다)
+- [x] `CODE_SNAPSHOT` 800ms debounce
+- [x] **Run/Submit/Reset 직전 `await flushPendingSnapshot()`**
+- [x] `SESSION_START` / `TEST_RESULT`를 `POST /events`로 보내지 않기
+- [x] 남의 세션 404를 "없는 세션"과 동일하게 처리
 - [ ] `process_state.reason` / `evidence`를 가공 없이 렌더
 - [ ] `status` 6종 + `trigger` 4종 + `agent_decision.action` 6종 UI 매핑
-- [ ] `agent_decision: null`을 정상으로 처리
-- [ ] 페이지 이탈 시 `sendBeacon`으로 마지막 flush
-- [ ] `.env`에 `VITE_API_BASE_URL=http://localhost:8000`
+- [x] `agent_decision: null`을 정상으로 처리
+- [x] 페이지 이탈 시 마지막 flush (`sendBeacon` 이 아니라 `fetch(keepalive)` — beacon 은 `Authorization` 헤더를 실을 수 없다)
+- [x] `.env`에 `VITE_API_BASE_URL=http://localhost:8000`
 
 **마이페이지 / 홈 (§9)**
 

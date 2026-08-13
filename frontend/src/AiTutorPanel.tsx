@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, Send, Sparkles } from 'lucide-react'
 import AcornIcon from './AcornIcon'
-import squirrelTutor from './assets/squirrel-tutor.png'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 import { decideTutorHelp, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
 
 type AiTutorPanelProps = {
@@ -38,6 +38,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const [acorns, setAcorns] = useState(() => loadAcorns())
   const [sosConfirmOpen, setSosConfirmOpen] = useState(false)
   const [sosError, setSosError] = useState('')
+  const [sosIntroVisible, setSosIntroVisible] = useState(false)
+  const chatThreadRef = useRef<HTMLDivElement | null>(null)
 
   const shouldOfferHelp = Boolean(judgeError || (result && result.status !== 'ACCEPTED'))
   const tutorHint = useMemo(() => makeTutorHint(problem, result, judgeError), [problem, result, judgeError])
@@ -46,6 +48,12 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     if (shouldOfferHelp && offerState === 'idle') setOfferState('asking')
     if (!shouldOfferHelp && offerState !== 'idle') setOfferState('idle')
   }, [offerState, shouldOfferHelp])
+
+  useEffect(() => {
+    const chatThread = chatThreadRef.current
+    if (!chatThread) return
+    chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
+  }, [messages, offerState, sosIntroVisible])
 
   const addMessage = (sender: ChatMessage['sender'], text: string) => {
     setMessages((current) => [...current, { id: nextMessageId, sender, text }])
@@ -84,6 +92,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const nextAcorns = latestAcorns - SOS_COST
     saveAcorns(nextAcorns)
     setAcorns(nextAcorns)
+    setSosIntroVisible(true)
     addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
     // /agent/decide 보다 **먼저** 큐에 넣는다. Agent 는 이 이벤트까지 본 상태를 읽어야 한다.
     onHintRequest?.()
@@ -97,36 +106,41 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     <aside className="tutor-panel panel">
       <div className="panel-header tutor-header">
         <div className="file-tab"><span className="tutor-status-dot" /><span>다람쥐 AI 튜터</span></div>
-        <button className="sos-button" type="button" onClick={requestSos}>
-          <Sparkles size={14} />
-          SOS
-        </button>
+        <div className="tutor-header-actions">
+          <span className="tutor-acorn-balance" aria-label={`보유 도토리 ${acorns}개`}><AcornIcon size={15} />{acorns}</span>
+          <button className="sos-button" type="button" onClick={requestSos}>
+            <Sparkles size={14} />
+            SOS
+          </button>
+        </div>
       </div>
 
       <div className="tutor-chat">
-        <div className="tutor-profile">
-          <img src={squirrelTutor} alt="다람쥐 튜터" />
-          <div>
-            <strong>다람쥐 튜터</strong>
-            <span><AcornIcon size={13} /> 보유 도토리 {acorns}개</span>
-          </div>
-        </div>
-
-        {offerState === 'asking' && (
-          <div className="tutor-help-offer">
-            <img src={squirrelTutor} alt="" />
-            <div>
-              <p>도움이 필요한가요?</p>
+        <div className="chat-thread" aria-live="polite" ref={chatThreadRef}>
+          {offerState === 'asking' && (
+            <div className="tutor-help-offer">
+              <img src={squirrelTutor} alt="" />
               <div>
-                <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
-                <button type="button" onClick={declineOffer}>아니요</button>
+                <p>도움이 필요한가요?</p>
+                <div>
+                  <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
+                  <button type="button" onClick={declineOffer}>아니요</button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <div className="chat-thread" aria-live="polite">
-          {messages.length === 0 ? (
+          {sosIntroVisible && (
+            <div className="tutor-help-offer sos-intro">
+              <img src={squirrelTutor} alt="" />
+              <div>
+                <p>다람쥐 튜터가 도착했어요!</p>
+                <span>도토리 {SOS_COST}개를 받고 지금 막 도와주러 왔어요.</span>
+              </div>
+            </div>
+          )}
+
+          {messages.length === 0 && offerState !== 'asking' && !sosIntroVisible ? (
             <div className="tutor-empty-chat">
               <MessageCircle size={25} />
               <strong>다람쥐 튜터가 기다리고 있어요</strong>

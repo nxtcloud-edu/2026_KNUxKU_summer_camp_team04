@@ -5,12 +5,15 @@ import {
   BadgeCheck,
   CalendarDays,
   Check,
+  ChevronRight,
+  Clock3,
   ImageUp,
   Lightbulb,
   Pencil,
   UserRound,
 } from 'lucide-react'
 import AcornIcon from './AcornIcon'
+import { getAllLearningProgress, type LearningProgress } from './learningProgress'
 import badgeSeed from './assets/badges/badge-seed.png'
 import badgeSprout from './assets/badges/badge-sprout.png'
 import badgeSapling from './assets/badges/badge-sapling.png'
@@ -34,6 +37,7 @@ type Badge = {
 
 type MyPageProps = {
   onAvatarChange?: (avatar: string) => void
+  onProblemSelect?: (problemId: string) => void
 }
 
 const PROFILE_KEY = 'tutory:profile'
@@ -46,13 +50,6 @@ const DEFAULT_PROFILE: Profile = {
   acorns: 135,
   totalAcorns: 260,
 }
-
-const SOLVED_PROBLEMS = [
-  { id: 'func_sum_list', title: '리스트 합 구하기', date: '2026.08.13', acorns: 15 },
-  { id: 'sum_even', title: '짝수의 합 구하기', date: '2026.08.12', acorns: 12 },
-  { id: 'string_reverse', title: '문자열 뒤집기', date: '2026.08.11', acorns: 10 },
-  { id: 'count_vowels', title: '모음 개수 세기', date: '2026.08.10', acorns: 8 },
-]
 
 const BADGES: Badge[] = [
   { name: '씨앗 뱃지', minAcorns: 0, description: '첫 문제 풀이를 시작한 학습자', image: badgeSeed },
@@ -74,11 +71,14 @@ const RECENT_WRONG_HINT = {
   hint: '반복문에서 더하기 전에 짝수인지 먼저 확인해보세요.',
 }
 
-function MyPage({ onAvatarChange }: MyPageProps) {
+function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const learningProgress = useMemo(() => getAllLearningProgress(), [])
+  const inProgressProblems = learningProgress.filter((item) => item.status === 'IN_PROGRESS')
+  const completedProblems = learningProgress.filter((item) => item.status === 'COMPLETED')
 
   const currentBadge = useMemo(
     () => [...BADGES].reverse().find((badge) => profile.totalAcorns >= badge.minAcorns) ?? BADGES[0],
@@ -237,26 +237,43 @@ function MyPage({ onAvatarChange }: MyPageProps) {
           </div>
         </section>
 
-        <section className="mypage-panel solved-panel">
+        <section className="mypage-grid learning-history-grid">
+          <div className="mypage-panel solved-panel">
+            <div className="mypage-panel-title">
+              <Clock3 size={17} />
+              <strong>학습 중인 문제</strong>
+            </div>
+            <LearningProblemList problems={inProgressProblems} emptyMessage="임시저장한 문제가 아직 없어요." onSelect={onProblemSelect} />
+          </div>
+          <div className="mypage-panel solved-panel">
           <div className="mypage-panel-title">
             <Check size={17} />
-            <strong>내가 푼 문제</strong>
+              <strong>학습 완료한 문제</strong>
           </div>
-          <div className="solved-list">
-            {SOLVED_PROBLEMS.map((problem) => (
-              <div className="solved-row" key={problem.id}>
-                <div>
-                  <strong>{problem.title}</strong>
-                  <span>{problem.id} · {problem.date}</span>
-                </div>
-                <small>+{problem.acorns} 도토리</small>
-              </div>
-            ))}
+            <LearningProblemList problems={completedProblems} emptyMessage="완료한 문제가 아직 없어요." onSelect={onProblemSelect} />
           </div>
         </section>
       </div>
     </main>
   )
+}
+
+function LearningProblemList({ problems, emptyMessage, onSelect }: { problems: LearningProgress[]; emptyMessage: string; onSelect?: (problemId: string) => void }) {
+  if (!problems.length) return <p className="learning-history-empty">{emptyMessage}</p>
+  return (
+    <div className="solved-list">
+      {problems.map((problem) => (
+        <button className="solved-row" type="button" key={problem.problemId} onClick={() => onSelect?.(problem.problemId)}>
+          <div><strong>{problem.title}</strong><span>{problem.problemId} · {formatLearningDate(problem.updatedAt)}</span></div>
+          <small>{problem.status === 'COMPLETED' ? '학습 완료' : '이어 풀기'} <ChevronRight size={14} /></small>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function formatLearningDate(value: string) {
+  return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
 function loadProfile() {
