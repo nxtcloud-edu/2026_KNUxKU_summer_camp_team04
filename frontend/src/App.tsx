@@ -215,7 +215,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
                   <span>코드 초기화</span><RotateCcw size={16} />
                 </button>
                 <div className="menu-divider" />
-                <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); window.alert('도토리창고는 준비 중이에요.') }}>
+                <button className="menu-row" role="menuitem" onClick={() => { setMenuOpen(false); setActivity('mypage') }}>
                   <span>도토리창고</span><Archive size={16} />
                 </button>
                 <button className="menu-row logout" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>
