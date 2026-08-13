@@ -268,6 +268,10 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   }
 
   const selectProblem = (selected: ProblemSummary) => {
+    if (!userRole) {
+      setLoginPrompt('문제 풀이')
+      return
+    }
     setSelectedProblemId(selected.problem_id)
     setActivity('problem')
   }
