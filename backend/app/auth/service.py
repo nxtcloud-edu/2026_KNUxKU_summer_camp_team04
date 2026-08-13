@@ -10,13 +10,15 @@ from sqlmodel import col, func, select
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.clock import utcnow
 from app.config import get_settings
+from app.enums import UserRole
 from app.errors import (
     EmailAlreadyRegistered,
     InvalidCredentials,
+    InvalidInviteCode,
     InvalidNickname,
     NicknameTaken,
 )
-from app.models import User
+from app.models import Organization, User
 
 
 def normalize_email(email: str) -> str:
@@ -80,17 +82,66 @@ def _unique_nickname_from_name(db: DbSession, name: str) -> str:
     return candidate
 
 
-def signup(db: DbSession, *, name: str, email: str, password: str) -> tuple[User, str]:
+def resolve_organization(
+    db: DbSession, *, role: UserRole, invite_code: str | None, email: str
+) -> Organization | None:
+    """가입 시 소속 기관을 정한다.
+
+    **EDUCATOR는 기관 초대 코드가 필수다.** 없으면 누구나 role="EDUCATOR"로
+    가입해서 남의 강의 API를 두드릴 수 있다 -- 역할을 요청 body로 받는 이상
+    가입 자체에 게이트가 있어야 한다.
+
+    학생은 코드가 있으면 쓰고, 없으면 이메일 도메인으로 자동 연결한다.
+    """
+    if invite_code:
+        org = db.exec(
+            select(Organization).where(Organization.invite_code == invite_code.strip())
+        ).first()
+        if org is None or not org.is_active:
+            raise InvalidInviteCode()
+        if org.domain and not normalize_email(email).endswith("@" + org.domain.lower()):
+            raise InvalidInviteCode(f"{org.name} 는 @{org.domain} 이메일만 가입할 수 있습니다.")
+        return org
+
+    if role is UserRole.EDUCATOR:
+        raise InvalidInviteCode("교수자 가입에는 기관 초대 코드가 필요합니다.")
+
+    # 학생: 이메일 도메인이 제휴 기관과 맞으면 자동 연결
+    domain = normalize_email(email).split("@")[-1]
+    return db.exec(
+        select(Organization)
+        .where(Organization.domain == domain)
+        .where(Organization.is_active == True)  # noqa: E712
+    ).first()
+
+
+def signup(
+    db: DbSession,
+    *,
+    name: str,
+    email: str,
+    password: str,
+    role: UserRole = UserRole.STUDENT,
+    invite_code: str | None = None,
+) -> tuple[User, str]:
     """회원가입. 반환값 (user, access_token). commit은 호출자가 한다."""
     normalized = normalize_email(email)
     if get_by_email(db, normalized) is not None:
         raise EmailAlreadyRegistered()
+
+    # ADMIN은 API로 만들 수 없다. 필요하면 DB에서 직접 승격한다.
+    if role is UserRole.ADMIN:
+        raise InvalidInviteCode("관리자 계정은 가입으로 만들 수 없습니다.")
+
+    org = resolve_organization(db, role=role, invite_code=invite_code, email=normalized)
 
     user = User(
         email=normalized,
         password_hash=hash_password(password),
         name=name.strip(),
         nickname=_unique_nickname_from_name(db, name),
+        role=role,
+        organization_id=org.id if org else None,
         last_login_at=utcnow(),
     )
     db.add(user)

@@ -20,6 +20,7 @@ from app.judge import JudgeMode, JudgeProtocol, get_judge
 from app.auth.deps import get_current_user
 from app.db import get_db
 from app.models import User
+from app.educator import service as educator_service
 from app.progress import service as progress_service
 from app.problems.service import ProblemRepository, get_problem_repository
 from app.sessions import store
@@ -94,6 +95,7 @@ def _execute(
     # 진행 상태 갱신 + 최초 정답 시 도토리 지급.
     # **여기가 유일한 지급 지점이다.** 이 경로의 result 는 서버가 실행한 judge 에서
     # 왔으므로 클라이언트가 조작할 수 없다.
+    course_ids = educator_service.course_ids_assigned(db, user.id, problem.problem_id, repo)
     progress_service.record_judge_result(
         db,
         user_id=user.id,
@@ -103,7 +105,10 @@ def _execute(
         total=result.total,
         code=snapshot.code,
         mode=mode,
+        course_ids=course_ids,
     )
+    # 교육자 대시보드가 읽는 요약을 갱신한다. 실패해도 채점은 반환된다.
+    educator_service.recalculate_for_student(db, student=user, problem_id=problem.problem_id, repo=repo)
     db.commit()
 
     state = monitor.evaluate_and_record(db, session, now=now)

@@ -22,11 +22,14 @@ from app.problems.service import ProblemRecord
 log = logging.getLogger(__name__)
 
 
-def get(db: DbSession, user_id: str, problem_id: str) -> UserProblemProgress | None:
+def get(
+    db: DbSession, user_id: str, problem_id: str, course_id: str = ""
+) -> UserProblemProgress | None:
     return db.exec(
         select(UserProblemProgress)
         .where(UserProblemProgress.user_id == user_id)
         .where(UserProblemProgress.problem_id == problem_id)
+        .where(UserProblemProgress.course_id == course_id)
     ).first()
 
 
@@ -51,15 +54,22 @@ def list_solved(db: DbSession, user_id: str) -> list[UserProblemProgress]:
     )
 
 
-def ensure(db: DbSession, user_id: str, problem_id: str) -> UserProblemProgress:
-    """행이 없으면 만든다. 동시 요청은 UNIQUE 제약이 막고 재조회로 수습한다."""
-    found = get(db, user_id, problem_id)
+def ensure(
+    db: DbSession, user_id: str, problem_id: str, course_id: str = ""
+) -> UserProblemProgress:
+    """행이 없으면 만든다. 동시 요청은 UNIQUE 제약이 막고 재조회로 수습한다.
+
+    course_id=""(기본)는 강의와 무관한 개인 학습이다. NULL 이 아니라 빈 문자열인
+    이유는 models.py 의 주석 참조 -- UNIQUE 에서 NULL 은 서로 다른 값이다.
+    """
+    found = get(db, user_id, problem_id, course_id)
     if found is not None:
         return found
 
     row = UserProblemProgress(
         user_id=user_id,
         problem_id=problem_id,
+        course_id=course_id,
         status=ProgressStatus.IN_PROGRESS,
         first_started_at=utcnow(),
         updated_at=utcnow(),
@@ -69,16 +79,18 @@ def ensure(db: DbSession, user_id: str, problem_id: str) -> UserProblemProgress:
         db.flush()
     except IntegrityError:
         db.rollback()
-        existing = get(db, user_id, problem_id)
+        existing = get(db, user_id, problem_id, course_id)
         if existing is None:  # pragma: no cover - 제약 위반인데 행이 없을 수는 없다
             raise
         return existing
     return row
 
 
-def save_checkpoint(db: DbSession, user_id: str, problem_id: str, code: str) -> UserProblemProgress:
+def save_checkpoint(
+    db: DbSession, user_id: str, problem_id: str, code: str, course_id: str = ""
+) -> UserProblemProgress:
     """작성 중인 코드를 계정에 저장한다. 기기가 바뀌어도 이어서 풀 수 있다."""
-    row = ensure(db, user_id, problem_id)
+    row = ensure(db, user_id, problem_id, course_id)
     row.current_code = code
     row.updated_at = utcnow()
     if row.status is ProgressStatus.NOT_STARTED:
@@ -98,6 +110,7 @@ def record_judge_result(
     total: int,
     code: str,
     mode: str,
+    course_ids: list[str] | None = None,
 ) -> tuple[UserProblemProgress, int]:
     """채점 결과를 진행 상태에 반영하고, 조건에 맞으면 도토리를 지급한다.
 
@@ -114,46 +127,64 @@ def record_judge_result(
         판정하므로 run 의 ACCEPTED 는 "공개 테스트 전부 통과"를 뜻한다.
         정책상 submit 만 인정하려면 아래 한 줄을 바꾼다.
     """
-    row = ensure(db, user_id, problem.problem_id)
     now = utcnow()
 
-    row.attempt_count += 1
-    row.last_attempted_at = now
-    row.last_judge_status = status.value
-    row.updated_at = now
-    if code:
-        row.current_code = code
-    if total > 0 and passed > row.best_passed:
-        row.best_passed = passed
-    if total > 0:
-        row.total_tests = total
+    # 개인 학습 행(course_id="")과, 이 문제를 배정한 수강 강의들의 행을 **모두** 갱신한다.
+    # 한 학생이 여러 강의를 들을 수 있고 같은 문제가 여러 강의에 배정될 수 있다.
+    # 도토리는 강의 수와 무관하게 한 번만 나간다 -- 멱등성 키가 user+problem 기준이라서.
+    targets = [""] + [c for c in (course_ids or []) if c]
+
+    primary: UserProblemProgress | None = None
+    first_solve_anywhere = False
+
+    for cid in targets:
+        row = ensure(db, user_id, problem.problem_id, cid)
+        row.attempt_count += 1
+        row.last_attempted_at = now
+        row.last_judge_status = status.value
+        row.updated_at = now
+        if code:
+            row.current_code = code
+            if mode == "submit":
+                # 교수자가 SUBMITTED_ONLY 를 고르면 이쪽만 보인다.
+                row.last_submitted_code = code
+                row.last_submitted_at = now
+        if total > 0 and passed > row.best_passed:
+            row.best_passed = passed
+        if total > 0:
+            row.total_tests = total
+
+        if status is JudgeStatus.ACCEPTED:
+            if row.status is not ProgressStatus.SOLVED:
+                first_solve_anywhere = True
+            row.status = ProgressStatus.SOLVED
+            if row.solved_at is None:
+                row.solved_at = now
+
+        db.add(row)
+        if primary is None:
+            primary = row
 
     awarded = 0
-    if status is JudgeStatus.ACCEPTED:
-        first_solve = row.status is not ProgressStatus.SOLVED
-        row.status = ProgressStatus.SOLVED
-        if row.solved_at is None:
-            row.solved_at = now
+    if status is JudgeStatus.ACCEPTED and first_solve_anywhere:
+        amount = get_settings().acorn_reward_for(problem.difficulty)
+        tx = acorns.post(
+            db,
+            user_id=user_id,
+            amount=amount,
+            transaction_type=AcornTransactionType.PROBLEM_SOLVED,
+            description=f"{problem.title} 최초 해결",
+            reference_type="problem",
+            reference_id=problem.problem_id,
+            # 멱등성 키가 진짜 방어선이다. first_solve 판정이 경합으로
+            # 두 번 True가 되어도 원장은 한 줄만 남는다.
+            idempotency_key=acorns.problem_solved_key(user_id, problem.problem_id),
+        )
+        awarded = tx.amount if tx else 0
 
-        if first_solve:
-            amount = get_settings().acorn_reward_for(problem.difficulty)
-            tx = acorns.post(
-                db,
-                user_id=user_id,
-                amount=amount,
-                transaction_type=AcornTransactionType.PROBLEM_SOLVED,
-                description=f"{problem.title} 최초 해결",
-                reference_type="problem",
-                reference_id=problem.problem_id,
-                # 멱등성 키가 진짜 방어선이다. first_solve 판정이 경합으로
-                # 두 번 True가 되어도 원장은 한 줄만 남는다.
-                idempotency_key=acorns.problem_solved_key(user_id, problem.problem_id),
-            )
-            awarded = tx.amount if tx else 0
-
-    db.add(row)
     db.flush()
-    return row, awarded
+    assert primary is not None  # targets 는 항상 "" 를 포함한다
+    return primary, awarded
 
 
 def award_trace_completion(db: DbSession, *, user_id: str, problem_id: str) -> int:

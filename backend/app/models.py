@@ -25,10 +25,14 @@ from sqlmodel import Field, SQLModel
 from app.clock import utcnow
 from app.enums import (
     AcornTransactionType,
+    CodeVisibility,
+    EnrollmentStatus,
     EventSource,
     EventType,
+    LearningStatus,
     ProgressStatus,
     SessionStatus,
+    UserRole,
 )
 
 
@@ -45,6 +49,23 @@ def _id(prefix: str) -> Callable[[], str]:
     return lambda: f"{prefix}_{uuid4().hex}"
 
 
+class Organization(SQLModel, table=True):
+    """제휴 교육기관. users 보다 먼저 정의해야 FK 등록 순서가 맞는다."""
+
+    __tablename__ = "organizations"
+
+    id: str = Field(default_factory=_id("org"), primary_key=True, max_length=64)
+    name: str = Field(max_length=128, nullable=False)
+    # 허용 이메일 도메인. "univ.ac.kr" 형태. 비어 있으면 도메인 검사를 하지 않는다.
+    domain: str = Field(default="", max_length=128, index=True)
+    # 교수자 가입에 쓰는 코드. 이게 없으면 아무나 EDUCATOR로 가입할 수 있다.
+    invite_code: str = Field(
+        sa_column=Column(String(64), nullable=False, unique=True, index=True)
+    )
+    is_active: bool = Field(default=True, nullable=False)
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+
 class User(SQLModel, table=True):
     __tablename__ = "users"
 
@@ -56,6 +77,14 @@ class User(SQLModel, table=True):
     name: str = Field(max_length=64, nullable=False)
     nickname: str = Field(sa_column=Column(String(32), nullable=False, unique=True, index=True))
     avatar_url: str | None = Field(default=None, max_length=512)
+    # 권한의 유일한 근거. 요청 body의 role을 신뢰하지 않는다.
+    role: UserRole = Field(
+        sa_column=Column(String(16), nullable=False, index=True, default=UserRole.STUDENT.value)
+    )
+    # 교수자는 가입 시 기관 초대 코드를 요구한다. 학생은 비어 있을 수 있다.
+    organization_id: str | None = Field(
+        default=None, foreign_key="organizations.id", index=True, max_length=64
+    )
 
     # 잔액은 acorn_transactions 의 **캐시**다. 원장이 진실이고 이건 빠른 조회용이다.
     # 둘은 같은 트랜잭션 안에서만 함께 움직인다 (acorns/service.py 참조).
@@ -96,6 +125,98 @@ class AcornTransaction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class Course(SQLModel, table=True):
+    __tablename__ = "courses"
+
+    id: str = Field(default_factory=_id("course"), primary_key=True, max_length=64)
+    organization_id: str = Field(foreign_key="organizations.id", index=True, max_length=64)
+    title: str = Field(max_length=128, nullable=False)
+    term: str = Field(default="", max_length=64)
+    educator_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    # 학생이 강의에 스스로 들어올 때 쓰는 코드. 기관 코드와는 별개다.
+    invite_code: str = Field(
+        sa_column=Column(String(64), nullable=False, unique=True, index=True)
+    )
+    # **교수자가 강의별로 정한다.** 학생 코드를 어디까지 보여줄지.
+    code_visibility: CodeVisibility = Field(
+        sa_column=Column(String(24), nullable=False, default=CodeVisibility.SUBMITTED_ONLY.value)
+    )
+    start_at: datetime | None = Field(default=None)
+    end_at: datetime | None = Field(default=None)
+    is_active: bool = Field(default=True, nullable=False)
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+
+class CourseProblem(SQLModel, table=True):
+    """강의에 배정된 문제.
+
+    진도율의 **분모**다. 비어 있으면 저장소의 전체 문제를 기준으로 계산한다
+    (educator/service.py 참조) -- 강의를 막 만들었을 때 진도율이 0/0이 되어
+    ZeroDivisionError 나 NaN 이 화면에 뜨는 것을 막는다.
+    """
+
+    __tablename__ = "course_problems"
+
+    id: str = Field(default_factory=_id("cprob"), primary_key=True, max_length=64)
+    course_id: str = Field(foreign_key="courses.id", index=True, max_length=64)
+    problem_id: str = Field(index=True, max_length=64)
+    order: int = Field(default=0, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "problem_id", name="uq_course_problem"),
+    )
+
+
+class Enrollment(SQLModel, table=True):
+    __tablename__ = "enrollments"
+
+    id: str = Field(default_factory=_id("enroll"), primary_key=True, max_length=64)
+    course_id: str = Field(foreign_key="courses.id", index=True, max_length=64)
+    student_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    status: EnrollmentStatus = Field(
+        sa_column=Column(String(16), nullable=False, index=True)
+    )
+    enrolled_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_enrollment_course_student"),
+    )
+
+
+class StudentCourseStats(SQLModel, table=True):
+    """학생×강의 요약. 대시보드와 학생 목록이 읽는다.
+
+    실시간으로 전부 계산하면 학생 28명 × 문제 26개마다 events 를 훑어야 한다.
+    채점이 끝날 때마다 해당 학생 행 하나만 갱신하는 편이 훨씬 싸다.
+    **파생 데이터이므로 진실은 언제나 user_problem_progress 와 events 다** --
+    어긋나면 여기를 다시 계산한다.
+    """
+
+    __tablename__ = "student_course_stats"
+
+    id: str = Field(default_factory=_id("stats"), primary_key=True, max_length=64)
+    course_id: str = Field(foreign_key="courses.id", index=True, max_length=64)
+    student_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    progress_rate: int = Field(default=0, nullable=False)  # 0~100
+    solved_count: int = Field(default=0, nullable=False)
+    assigned_count: int = Field(default=0, nullable=False)
+    attempt_count: int = Field(default=0, nullable=False)
+    last_active_at: datetime | None = Field(default=None, index=True)
+    learning_status: LearningStatus = Field(
+        sa_column=Column(String(16), nullable=False, index=True)
+    )
+    primary_weak_concept: str | None = Field(default=None, max_length=64)
+    risk_score: int = Field(default=0, nullable=False, index=True)
+    # 왜 이 점수인지. 교육자 화면이 그대로 렌더한다.
+    reasons: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    calculated_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_stats_course_student"),
+        Index("ix_stats_course_risk", "course_id", "risk_score"),
+    )
+
+
 class UserProblemProgress(SQLModel, table=True):
     """사용자별 문제 진행 요약.
 
@@ -109,20 +230,32 @@ class UserProblemProgress(SQLModel, table=True):
     id: str = Field(default_factory=_id("prog"), primary_key=True, max_length=64)
     user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
     problem_id: str = Field(index=True, max_length=64)
+    # 강의 맥락. **NULL이 아니라 빈 문자열이 "개인 학습"이다.**
+    # SQLite(및 표준 SQL)는 UNIQUE에서 NULL을 서로 다른 값으로 취급하므로,
+    # nullable로 두면 course_id=NULL 행이 같은 (user, problem)에 대해
+    # 몇 개든 생긴다 -- 제약이 있으나 마나 해진다.
+    course_id: str = Field(default="", index=True, max_length=64)
     status: ProgressStatus = Field(sa_column=Column(String(16), nullable=False, index=True))
     current_code: str = Field(default="", sa_column=Column(Text, nullable=False))
     best_passed: int = Field(default=0, nullable=False)
     total_tests: int = Field(default=0, nullable=False)
     attempt_count: int = Field(default=0, nullable=False)
     last_judge_status: str | None = Field(default=None, max_length=32)
+    # submit 으로 채점된 마지막 코드. current_code(작성 중)와 별개다 --
+    # 교수자가 SUBMITTED_ONLY 를 고르면 이쪽만 보여준다.
+    last_submitted_code: str = Field(default="", sa_column=Column(Text, nullable=False))
+    last_submitted_at: datetime | None = Field(default=None)
     first_started_at: datetime = Field(default_factory=utcnow, nullable=False)
     last_attempted_at: datetime | None = Field(default=None)
     solved_at: datetime | None = Field(default=None)
     updated_at: datetime = Field(default_factory=utcnow, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("user_id", "problem_id", name="uq_progress_user_problem"),
+        UniqueConstraint(
+            "user_id", "course_id", "problem_id", name="uq_progress_user_course_problem"
+        ),
         Index("ix_progress_user_status", "user_id", "status"),
+        Index("ix_progress_course_student", "course_id", "user_id"),
     )
 
 

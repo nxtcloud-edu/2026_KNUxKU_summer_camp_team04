@@ -31,7 +31,12 @@ def _auth_response(user: User, token: str) -> AuthResponse:
 @router.post("/auth/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def signup(body: SignupRequest, db: DbSession = Depends(get_db)) -> AuthResponse:
     user, token = service.signup(
-        db, name=body.name, email=body.email, password=body.password
+        db,
+        name=body.name,
+        email=body.email,
+        password=body.password,
+        role=body.role,
+        invite_code=body.invite_code,
     )
     db.commit()
     db.refresh(user)

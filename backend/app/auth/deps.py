@@ -11,7 +11,8 @@ from sqlmodel import Session as DbSession
 
 from app.auth.security import decode_access_token
 from app.db import get_db
-from app.errors import NotAuthenticated
+from app.enums import UserRole
+from app.errors import Forbidden, NotAuthenticated
 from app.models import User
 
 
@@ -48,3 +49,26 @@ def get_current_user_optional(
         return get_current_user(request, db)
     except NotAuthenticated:
         return None
+
+
+def require_role(*allowed: UserRole):
+    """역할 게이트. **프런트에서 버튼을 숨기는 것은 보안이 아니다.**
+
+    역할은 요청 body가 아니라 토큰이 가리키는 DB 행에서 읽는다.
+    ADMIN은 어디든 통과한다.
+    """
+
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        role = UserRole(user.role)
+        if role is UserRole.ADMIN or role in allowed:
+            return user
+        raise Forbidden(
+            f"이 기능은 {'/'.join(r.value for r in allowed)} 권한이 필요합니다."
+        )
+
+    return dependency
+
+
+# 교육자 API 전용. 라우터에서 Depends(require_educator) 로 쓴다.
+require_educator = require_role(UserRole.EDUCATOR)
+require_student = require_role(UserRole.STUDENT)
