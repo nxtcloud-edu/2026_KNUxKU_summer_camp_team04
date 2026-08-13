@@ -17,15 +17,17 @@ import {
   Send,
   Sun,
   Terminal,
-  UserRound,
   Waypoints,
 } from 'lucide-react'
+import AiTutorPanel from './AiTutorPanel'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
 import { preparePython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { getProblemDetail, isJudgeApiConfigured, judgeCode, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { runJudge } from './traceClient'
+import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
 
 type RunMode = 'run' | 'submit'
@@ -75,6 +77,11 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage'>('list')
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  // Coding Trace 수집. 세션은 **첫 편집이나 첫 실행 때** 지연 생성된다 --
+  // 아래 문제 로드 useEffect 가 마운트 즉시 1회 돌기 때문에, 여기서 세션을 만들면
+  // 학생이 아직 목록 화면에 있는데도 세션이 생긴다.
+  const trace = useCodingTrace(problem?.problem_id ?? null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -129,6 +136,14 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
     }
   }, [menuOpen])
 
+  // 코드 편집의 유일한 관측점. 여기서만 학생의 타이핑을 볼 수 있다 --
+  // useEffect([code]) 로는 안 된다. 문제 전환 시의 setCode 와 구분이 안 되기 때문.
+  const handleCodeChange = (value: string | undefined) => {
+    const next = value ?? ''
+    setCode(next)
+    trace.recordEdit(next)
+  }
+
   const execute = async (nextMode: RunMode) => {
     if (isRunning || !problem) return
     setMode(nextMode)
@@ -136,7 +151,14 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
     setResult(null)
     setJudgeError('')
     try {
-      setResult(await judgeCode(code, problem.problem_id, nextMode))
+      const sessionId = await trace.ensureSession()
+      // 대기 중인 편집을 결과보다 **먼저** 도착시킨다. 백엔드는 "직전 결과 이후의
+      // 편집"을 code_version 으로 자르므로, 스냅샷이 늦게 오면 그 편집이 다음
+      // 결과의 창으로 밀려 same_region_edit_count 가 한 칸씩 어긋난다.
+      await trace.flush()
+      trace.recordEvent(nextMode === 'run' ? 'RUN' : 'SUBMIT')
+      // 이 한 번의 호출이 스냅샷 생성 → 채점 → TEST_RESULT 기록 → monitor 평가를 전부 한다.
+      setResult(await runJudge(sessionId, code, nextMode))
     } catch (caught) {
       setJudgeError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -149,6 +171,8 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
     if (code === problem.code_template || window.confirm('작성한 코드를 기본 코드로 되돌릴까요?')) {
       setCode(problem.code_template)
       setResult(null)
+      trace.recordEvent('RESET')
+      trace.recordEdit(problem.code_template)
       editorRef.current?.focus()
     }
   }
@@ -161,7 +185,13 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
   const restoreCheckpoint = () => {
     if (!problem) return
     const checkpoint = localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`)
-    if (checkpoint !== null) { setCode(checkpoint); setResult(null) }
+    if (checkpoint !== null) {
+      setCode(checkpoint)
+      setResult(null)
+      // 학생 입장에서 "되돌리기"다. 백엔드의 UNDO 이벤트가 이 의미를 갖는다.
+      trace.recordEvent('UNDO')
+      trace.recordEdit(checkpoint)
+    }
   }
 
   const selectProblem = (selected: ProblemSummary) => {
@@ -180,10 +210,6 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
         <div className="topbar-left">
           <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
             <img src="/TUTORY_logo.svg" alt="" />
-          </button>
-          <button className="mypage-trigger" onClick={() => setActivity('mypage')}>
-            <UserRound size={16} />
-            마이페이지
           </button>
         </div>
         <div className="topbar-actions">
@@ -233,8 +259,8 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
       </header>
 
       {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
-        : activity === 'mypage' ? <MyPage onExit={() => setActivity('problem')} />
-        : activity === 'list' ? <ProblemList onExit={() => setActivity('problem')} onSelect={selectProblem} /> : (
+        : activity === 'mypage' ? <MyPage />
+        : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
 
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
@@ -269,7 +295,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
               height="100%"
               defaultLanguage="python"
               value={code}
-              onChange={(value) => setCode(value ?? '')}
+              onChange={handleCodeChange}
               onMount={handleEditorMount}
               theme={isDark ? 'vs-dark' : 'vs-light'}
               loading={<EditorLoading />}
@@ -312,7 +338,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
           </div>
 
           <div className="action-bar">
-            <button className="trace-button" onClick={() => setActivity('trace')} disabled={isRunning || runtimeStatus !== 'ready'}>
+            <button className="trace-button" onClick={() => { trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' }); setActivity('trace') }} disabled={isRunning || runtimeStatus !== 'ready'}>
               <Waypoints size={17} /> TRACE 학습
             </button>
             <button
@@ -336,21 +362,7 @@ function LearningWorkspace({ onLogout }: { onLogout: () => void }) {
         </section>
         </div>
 
-        <aside className="tutor-panel panel">
-          <div className="panel-header tutor-header">
-            <div className="file-tab"><span className="tutor-status-dot" /><span>다람쥐 튜터</span></div>
-            <span className="coming-soon-badge">준비 중</span>
-          </div>
-          <div className="tutor-empty-state">
-            <div className="squirrel-avatar" aria-hidden="true">🐿️</div>
-            <strong>다람쥐 튜터가 곧 찾아와요</strong>
-            <p>코드를 함께 살펴보고, 막힌 부분에는 작은 힌트를 건네줄 예정이에요.</p>
-            <div className="tutor-preview-message">
-              <span>다람쥐 튜터</span>
-              <p>문제를 풀다가 도움이 필요하면 언제든 불러주세요!</p>
-            </div>
-          </div>
-        </aside>
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} />
       </main>
       )}
     </div>
@@ -386,7 +398,9 @@ function renderInlineCode(text: string) {
 }
 
 function formatPublicTest(test: PublicTestCase) {
-  if (test.stdin !== undefined) return `입력 ${JSON.stringify(test.stdin.trim())} → 출력 ${JSON.stringify(test.expected_stdout?.trim())}`
+  // `!= null` 이어야 한다 (`!== undefined` 아님). 서버가 stdin 을 null 로 보내면
+  // `!== undefined` 가 true 라서 이 분기를 타고 null.trim() 에서 렌더가 죽는다.
+  if (test.stdin != null) return `입력 ${JSON.stringify(test.stdin.trim())} → 출력 ${JSON.stringify(test.expected_stdout?.trim() ?? '')}`
   return `입력 ${JSON.stringify(test.input)} → 결과 ${JSON.stringify(test.expected)}`
 }
 

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ArrowRight, Braces, CheckCircle2, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { ArrowRight, Braces, CheckCircle2, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 
-export function ProblemList({ onExit, onSelect }: { onExit: () => void; onSelect: (problem: ProblemSummary) => void }) {
+export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) => void }) {
   const [problems, setProblems] = useState<ProblemSummary[]>([])
   const [source, setSource] = useState<ProblemListSource>('local')
   const [query, setQuery] = useState('')
@@ -41,7 +41,7 @@ export function ProblemList({ onExit, onSelect }: { onExit: () => void; onSelect
   return (
     <main className="problem-list-page">
       <div className="problem-list-container">
-        <div className="home-utility"><button className="back-button" onClick={onExit}><ArrowLeft size={17} /> 학습 화면으로</button><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
+        <div className="home-utility"><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
         <div className="problem-list-heading home-heading">
           <div><span>GOOD TO SEE YOU</span><h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1><p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p></div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>

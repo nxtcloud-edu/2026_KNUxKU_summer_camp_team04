@@ -10,6 +10,7 @@ hidden test case는 이 dataclass 안에만 존재하고, 응답 스키마(Probl
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -18,12 +19,29 @@ from typing import Any
 from app.config import get_settings
 from app.errors import ProblemNotFound
 
+log = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class TestCase:
-    input: list[Any]
-    expected: Any
+    """check_type에 따라 채워지는 필드가 다르다.
+
+    function_call -> input / expected
+    stdout_match  -> stdin / expected_stdout
+
+    **원본 키를 그대로 보존한다.** 예전에는 stdout 케이스를 input=[stdin]으로
+    뭉갰는데, 프론트가 `test.stdin !== undefined`로 렌더링을 분기하기 때문에
+    (App.tsx의 formatPublicTest) 뭉개면 "입력 ["5\\n"] → 결과 "8\\n""처럼
+    잘못 표시된다. 두 모양을 각자의 필드에 담아 정보 손실을 없앤다.
+    """
+
     category: str = "basic"
+    # function_call 전용
+    input: list[Any] | None = None
+    expected: Any = None
+    # stdout_match 전용
+    stdin: str | None = None
+    expected_stdout: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,10 +52,13 @@ class ProblemRecord:
     difficulty: str
     concepts: list[str]
     check_type: str
-    function_name: str
+    function_name: str | None
     code_template: str
     public_test_cases: list[TestCase] = field(default_factory=list)
     hidden_test_cases: list[TestCase] = field(default_factory=list)
+    # judge 문제 26개 중 23개(stdout_match)에 있다. 문제 화면의 제한 표기에 쓰인다.
+    time_limit_sec: float | None = None
+    memory_limit_mb: int | None = None
 
     @property
     def hidden_test_categories(self) -> list[str]:
@@ -49,16 +70,34 @@ class ProblemRecord:
         return seen
 
 
-def _parse_test_cases(raw: Any) -> list[TestCase]:
+def _parse_test_cases(raw: Any, check_type: str) -> list[TestCase]:
+    """check_type별로 테스트케이스 키가 다르다. 원본 키를 그대로 보존한다.
+
+    function_call: {"input": [...], "expected": ...}
+    stdout_match:  {"stdin": "...", "expected_stdout": "..."}
+
+    키 존재로 판별하지 않고 check_type으로 분기하는 이유: 판별자가 데이터 모양이
+    아니라 선언된 타입이어야 새 check_type이 추가될 때 조용히 오분류되지 않는다.
+    """
     out: list[TestCase] = []
     for tc in raw or []:
-        out.append(
-            TestCase(
-                input=tc["input"],
-                expected=tc["expected"],
-                category=tc.get("category", "basic"),
+        category = tc.get("category", "basic")
+        if check_type == "stdout_match":
+            out.append(
+                TestCase(
+                    category=category,
+                    stdin=tc["stdin"],
+                    expected_stdout=tc["expected_stdout"],
+                )
             )
-        )
+        else:
+            out.append(
+                TestCase(
+                    category=category,
+                    input=tc["input"],
+                    expected=tc["expected"],
+                )
+            )
     return out
 
 
@@ -69,23 +108,27 @@ def parse_problem(data: dict[str, Any]) -> ProblemRecord:
     병합 시 rename이 0이 된다. backend_plan §5의 id/starter_code/concepts도 입력으로 받아준다.
     description/difficulty는 judge 파일에 없으므로 부재를 허용한다.
 
-    **주의: judge/problems 26개 중 3개만 파싱된다.** stdout_match 문제 23개는
-    function_name 키가 없어(stdin/stdout으로 채점하므로 불필요) KeyError가 나고,
-    그걸 고쳐도 테스트케이스 키가 {stdin, expected_stdout}이라 다시 깨진다.
-    PROBLEMS_DIR을 judge 쪽으로 돌리려면 stdout_match 지원을 먼저 넣어야 한다.
+    judge/problems의 stdout_match 문제는 function_name이 없다(stdin/stdout으로
+    채점하므로 불필요) -- None으로 둔다. 테스트케이스 키 모양도 check_type별로
+    달라서 _parse_test_cases가 분기한다. 이제 judge/problems 26개가 전부 파싱된다.
+
+    difficulty는 judge 파일 26개 전부에 없어서 기본값 BEGINNER가 쓰인다.
     """
     concepts = data.get("concepts") or data.get("concept") or []
+    check_type = data.get("check_type", "function_call")
     return ProblemRecord(
         problem_id=data.get("problem_id") or data["id"],
         title=data["title"],
         description=data.get("description", ""),
         difficulty=data.get("difficulty", "BEGINNER"),
         concepts=list(concepts),
-        check_type=data.get("check_type", "function_call"),
-        function_name=data["function_name"],
+        check_type=check_type,
+        function_name=data.get("function_name"),
         code_template=data.get("code_template") or data.get("starter_code", ""),
-        public_test_cases=_parse_test_cases(data.get("public_test_cases")),
-        hidden_test_cases=_parse_test_cases(data.get("hidden_test_cases")),
+        public_test_cases=_parse_test_cases(data.get("public_test_cases"), check_type),
+        hidden_test_cases=_parse_test_cases(data.get("hidden_test_cases"), check_type),
+        time_limit_sec=data.get("time_limit_sec"),
+        memory_limit_mb=data.get("memory_limit_mb"),
     )
 
 
@@ -97,14 +140,27 @@ class ProblemRepository:
         self.reload()
 
     def reload(self) -> None:
+        """디렉터리의 모든 문제 JSON을 읽는다.
+
+        **개별 파일 실패가 저장소 전체를 죽이지 않는다.** 예전에는 한 파일이
+        깨지면 예외가 __init__을 뚫고 나가 get_problem_repository()의 의존성
+        주입이 실패했고, 그러면 /problems뿐 아니라 /sessions와 /run까지 전부
+        500이 됐다. 문제 하나가 잘못된 것과 서비스 전체가 죽는 것은 다른 사건이다.
+        """
         self._by_id.clear()
         self._order.clear()
         if not self._dir.exists():
+            log.warning("문제 디렉터리가 없습니다: %s", self._dir)
             return
         for path in sorted(self._dir.glob("*.json")):
-            record = parse_problem(json.loads(path.read_text(encoding="utf-8")))
+            try:
+                record = parse_problem(json.loads(path.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001 - 파일 하나가 전체를 막으면 안 된다
+                log.exception("문제 파일을 건너뜁니다: %s", path.name)
+                continue
             self._by_id[record.problem_id] = record
             self._order.append(record.problem_id)
+        log.info("문제 %d개 로드 (%s)", len(self._order), self._dir)
 
     def list(self) -> list[ProblemRecord]:
         return [self._by_id[pid] for pid in self._order]
