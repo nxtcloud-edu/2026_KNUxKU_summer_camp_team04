@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./codetrace.db"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
-    problems_dir: str = "app/problems/data"
+    problems_dir: str = "../judge/problems"
 
     # Seam
     judge_backend: str = "none"  # none | docker

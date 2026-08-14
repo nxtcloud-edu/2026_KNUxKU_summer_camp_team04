@@ -28,10 +28,10 @@ import EducatorPage from './EducatorPage'
 import LandingPage from './LandingPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
-import { preparePython, runPython } from './pythonRunner'
+import { preparePython, runPython, runPythonWithStdin } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { getLearningProgress, saveCompleted, saveInProgress } from './learningProgress'
+import { getLearningProgress, saveCompleted, saveInProgress, saveRecentWrongHint } from './learningProgress'
 import { getProblemDetail, getProblems, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
 import { awardLocalProblemReward } from './problemRewards'
 import { isJudgeUnavailable, runJudge } from './traceClient'
@@ -112,6 +112,10 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [problemError, setProblemError] = useState('')
   const [code, setCode] = useState('')
   const [result, setResult] = useState<JudgeResult | null>(null)
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalOutput, setTerminalOutput] = useState('')
+  const [terminalError, setTerminalError] = useState('')
+  const [isTerminalRunning, setIsTerminalRunning] = useState(false)
   const [judgeError, setJudgeError] = useState('')
   const [mode, setMode] = useState<RunMode>('run')
   const [isRunning, setIsRunning] = useState(false)
@@ -161,6 +165,9 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         const savedProgress = getLearningProgress(detail.problem_id)
         setCode(savedProgress?.code ?? localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`) ?? detail.code_template)
         setResult(null)
+        setTerminalInput(detail.public_test_cases.find((test) => typeof test.stdin === 'string')?.stdin ?? '')
+        setTerminalOutput('')
+        setTerminalError('')
         setJudgeError('')
       })
       .catch((caught) => {
@@ -240,6 +247,9 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         setAwardedAcorns(judgeResult.awarded_acorns ?? (locallyJudged ? awardLocalProblemReward(problem.problem_id, problem.acorn_reward) : 0))
         setSubmissionFailure(null)
         setSubmissionComplete(true)
+      } else if (judgeResult.status !== 'ACCEPTED') {
+        saveRecentWrongHint(problem.problem_id, problem.title, judgeResult.status, makeRecentWrongHint(judgeResult))
+        if (nextMode === 'submit') setSubmissionFailure(judgeResult.status)
       } else if (nextMode === 'submit') {
         setSubmissionFailure(judgeResult.status)
       }
@@ -294,6 +304,37 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const saveCheckpoint = () => {
     if (!problem) return
     localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
+  }
+
+  useEffect(() => {
+    const saveWithShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      saveCheckpoint()
+    }
+
+    window.addEventListener('keydown', saveWithShortcut)
+    return () => window.removeEventListener('keydown', saveWithShortcut)
+  }, [problem, code])
+
+  const runInteractiveTerminal = async () => {
+    if (!userRole) {
+      setLoginPrompt('터미널 실행')
+      return
+    }
+    if (!problem || isTerminalRunning) return
+    setIsTerminalRunning(true)
+    setTerminalError('')
+    setTerminalOutput('')
+    try {
+      const execution = await runPythonWithStdin(code, terminalInput)
+      if (execution.error) setTerminalError(execution.error.message)
+      else setTerminalOutput(execution.stdout)
+    } catch (caught) {
+      setTerminalError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setIsTerminalRunning(false)
+    }
   }
 
   const restoreCheckpoint = () => {
@@ -487,6 +528,16 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
             ) : judgeError ? <JudgeErrorView message={judgeError} /> : !result ? (
               <div className="empty-state"><Play /><strong>준비가 되었어요</strong><p>코드를 작성하고 실행해 보세요.</p></div>
             ) : <JudgeResultView result={result} mode={mode} />}
+            {problem && (
+              <InteractiveTerminal
+                input={terminalInput}
+                output={terminalOutput}
+                error={terminalError}
+                running={isTerminalRunning}
+                onInputChange={setTerminalInput}
+                onRun={runInteractiveTerminal}
+              />
+            )}
           </div>
 
           <div className="action-bar">
@@ -511,7 +562,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} intervention={trace.intervention} />
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} intervention={trace.intervention} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
@@ -608,6 +659,16 @@ function buildJudgeMessage(execution: Awaited<ReturnType<typeof runPython>>) {
   return `expected ${JSON.stringify(failed.expected ?? failed.expected_stdout)}, got ${JSON.stringify(failed.actual)}`
 }
 
+function makeRecentWrongHint(result: JudgeResult) {
+  if (result.agent_decision?.reason) return result.agent_decision.reason
+  if (result.message) return result.message
+  if (result.status === 'SYNTAX_ERROR') return '문법 오류가 있어요. 괄호, 콜론(:), 들여쓰기 위치를 먼저 확인해보세요.'
+  if (result.status === 'RUNTIME_ERROR') return '실행 중 오류가 났어요. 변수 이름과 리스트 인덱스 범위를 차근차근 확인해보세요.'
+  if (result.status === 'TIME_LIMIT') return '시간 초과가 났어요. 반복문이 끝나는 조건과 불필요하게 반복되는 부분을 확인해보세요.'
+  if (result.status === 'INTERNAL_ERROR') return '채점 중 문제가 있었어요. 잠시 뒤 다시 실행해보고 같은 문제가 반복되면 코드보다 실행 환경을 확인해보세요.'
+  return '답이 조금 달라요. 예시 입력을 손으로 따라가며 중간값이 어떻게 변하는지 적어보세요.'
+}
+
 function LoginRequiredModal({ service, onClose, onLogin, onSignup }: { service: string; onClose: () => void; onLogin: () => void; onSignup: () => void }) {
   return <div className="login-required-backdrop" onMouseDown={onClose}><div className="login-required-modal" role="dialog" aria-modal="true" aria-labelledby="login-required-title" onMouseDown={(event) => event.stopPropagation()}><span className="login-required-icon"><LockKeyhole size={22} /></span><h2 id="login-required-title">로그인이 필요한 서비스예요</h2><p><strong>{service}</strong> 기능은 학습 기록을 안전하게 저장하기 위해 로그인 후 이용할 수 있습니다.</p><div><button className="modal-secondary-button" onClick={onClose}>계속 둘러보기</button><button className="modal-primary-button" onClick={onLogin}>로그인</button></div><button className="login-required-signup" onClick={onSignup}>처음이신가요? 회원가입</button></div></div>
 }
@@ -673,6 +734,40 @@ function JudgeResultView({ result, mode }: { result: JudgeResult; mode: RunMode 
       <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
       {result.message && <div className="judge-message"><strong>{result.status}</strong><pre>{result.message}</pre></div>}
       {result.failed_categories?.length ? <div className="failed-categories"><strong>다시 살펴볼 유형</strong><div>{result.failed_categories.map((category) => <span key={category}>{category}</span>)}</div></div> : null}
+    </div>
+  )
+}
+
+function InteractiveTerminal({ input, output, error, running, onInputChange, onRun }: {
+  input: string
+  output: string
+  error: string
+  running: boolean
+  onInputChange: (value: string) => void
+  onRun: () => void
+}) {
+  return (
+    <div className="execution-terminal">
+      <div className="terminal-title">
+        <Terminal size={14} />
+        <strong>터미널</strong>
+        <button type="button" onClick={onRun} disabled={running}>
+          {running ? <LoaderCircle className="spin" size={13} /> : <Play size={13} fill="currentColor" />}
+          실행
+        </button>
+      </div>
+      <div className="terminal-case">
+        <label htmlFor="custom-terminal-input">입력</label>
+        <textarea
+          id="custom-terminal-input"
+          value={input}
+          onChange={(event) => onInputChange(event.target.value)}
+          spellCheck={false}
+          placeholder="예: 3 5"
+        />
+        <span>출력</span>
+        <pre>{running ? '실행 중...' : error || output || '아직 실행 결과가 없어요.'}</pre>
+      </div>
     </div>
   )
 }

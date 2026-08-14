@@ -28,13 +28,27 @@ load_dotenv()
 DEFAULT_PROVIDER = "anthropic"
 
 
+def _for_role(name: str, role: str, default: str) -> str:
+    """`{NAME}_{ROLE}` → `{NAME}` → `default` 순으로 환경변수를 읽는다.
+
+    역할별로 모델을 다르게 쓸 수 있게 하는 이유: 파이프라인의 단계는 성격이
+    다르다. 학생 상태 판단은 추론이 필요하지만, 응답 생성(`tutor_message`)은
+    작문이고 압축된 컨텍스트만 받으므로(`prompt_context.py`) 더 작고 빠른
+    모델로 충분한 경우가 많다. 파이프라인에 작문 단계가 추가되어 LLM 호출이
+    3번이 된 만큼, 여기서 지연 시간을 되찾을 여지를 열어 둔다.
+    """
+    return os.getenv(f"{name}_{role.upper()}") or os.getenv(name) or default
+
+
 def get_model(role: str = "default") -> Any | None:
     """역할별(role) 모델 프로바이더를 환경변수에서 읽어 Strands Model을 만들어 반환한다.
 
     Args:
-        role: 에이전트 역할 이름 (예: "entry", "state", "guidance", "action", "evaluation").
-              `MODEL_PROVIDER_{ROLE}`이 있으면 우선 사용하고, 없으면 공통 `MODEL_PROVIDER`,
-              그마저도 없으면 `DEFAULT_PROVIDER`를 따른다.
+        role: 에이전트 역할 이름. 지금 쓰이는 값은 `state`, `guided_action`,
+              `tutor_message`, `evaluation`, `problem_generator`다.
+              `MODEL_PROVIDER_{ROLE}`이 있으면 우선 사용하고, 없으면 공통
+              `MODEL_PROVIDER`, 그마저도 없으면 `DEFAULT_PROVIDER`를 따른다.
+              모델 id도 같은 방식으로 `ANTHROPIC_MODEL_ID_{ROLE}` 등을 먼저 본다.
 
     Returns:
         Strands `Model` 인스턴스. `MODEL_PROVIDER=none`으로 지정한 경우에만 `None`을
@@ -57,8 +71,8 @@ def get_model(role: str = "default") -> Any | None:
         # 이 값 없이 생성하면 요청 조립 단계에서 KeyError('max_tokens')를 낸다.
         return AnthropicModel(
             client_args={"api_key": os.getenv("ANTHROPIC_API_KEY")},
-            model_id=os.getenv("ANTHROPIC_MODEL_ID", "claude-sonnet-4-5"),
-            max_tokens=int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096")),
+            model_id=_for_role("ANTHROPIC_MODEL_ID", role, "claude-sonnet-4-5"),
+            max_tokens=int(_for_role("ANTHROPIC_MAX_TOKENS", role, "4096")),
         )
 
     if provider == "openai":
@@ -66,7 +80,7 @@ def get_model(role: str = "default") -> Any | None:
 
         return OpenAIModel(
             client_args={"api_key": os.getenv("OPENAI_API_KEY")},
-            model_id=os.getenv("OPENAI_MODEL_ID", "gpt-4o"),
+            model_id=_for_role("OPENAI_MODEL_ID", role, "gpt-4o"),
         )
 
     if provider == "litellm":
