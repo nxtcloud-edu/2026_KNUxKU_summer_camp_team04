@@ -84,6 +84,7 @@ import inspect
 import logging
 import os
 import threading
+import time
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any, TypeVar
 
@@ -170,12 +171,41 @@ class _PersistentLoop:
 _LOOP = _PersistentLoop()
 
 
+def _str_attr(obj: Any, name: str) -> str:
+    """진짜 문자열일 때만 돌려준다.
+
+    테스트가 꽂는 `MagicMock`은 어떤 속성 접근에도 또 다른 MagicMock을 내주므로,
+    타입을 확인하지 않으면 로그에 `<MagicMock id=0x...>`가 찍힌다.
+    """
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) else ""
+
+
+def _model_id(agent: Any) -> str:
+    """이 호출이 실제로 어떤 모델을 썼는지.
+
+    `get_config()`는 strands `Model`의 공통 인터페이스라 프로바이더가 무엇이든
+    (anthropic/openai/bedrock/litellm) 같은 방식으로 읽힌다. 역할별 모델 라우팅을
+    쓰고 있으므로(`models.get_model`), 이 값이 로그에 없으면 "이 단계가 정말
+    haiku로 내려갔는지"를 확인할 방법이 없다.
+    """
+    try:
+        config = agent.model.get_config()
+        model_id = config.get("model_id") if hasattr(config, "get") else None
+    except Exception:  # noqa: BLE001 - 로그 한 줄 때문에 LLM 호출을 깨뜨릴 수 없다
+        return ""
+    return model_id if isinstance(model_id, str) else ""
+
+
 def structured_output(agent: Any, output_model: type[T], prompt: str) -> T:
     """`agent.structured_output(output_model, prompt)`의 안전한 대체품.
 
     **에이전트 코드는 `agent.structured_output(...)`을 직접 부르지 말고 반드시
     이 함수를 쓴다.** 직접 부르면 위 docstring의 `Event loop is closed`가
     두 번째 요청부터 재발한다.
+
+    모든 LLM 호출이 이 한 곳을 지나므로, 호출 로그(어떤 에이전트가 어떤 모델로
+    몇 초 걸렸는지)도 여기서 한 번만 남긴다.
 
     Args:
         agent: strands `Agent` (테스트에서는 `MagicMock`).
@@ -185,11 +215,35 @@ def structured_output(agent: Any, output_model: type[T], prompt: str) -> T:
     Returns:
         `output_model` 인스턴스.
     """
-    result = agent.structured_output_async(output_model, prompt)
+    name = _str_attr(agent, "name") or "agent"
+    started = time.monotonic()
 
-    # 테스트가 꽂는 `MagicMock`은 awaitable이 아닌 값을 그대로 돌려준다.
-    # 그 경우 루프를 띄울 이유가 없다 (mock 때문에 스레드를 만들지 않는다).
-    if not inspect.isawaitable(result):
-        return result  # type: ignore[return-value]
+    try:
+        result = agent.structured_output_async(output_model, prompt)
 
-    return _LOOP.run(result, timeout=_call_timeout())
+        # 테스트가 꽂는 `MagicMock`은 awaitable이 아닌 값을 그대로 돌려준다.
+        # 그 경우 루프를 띄울 이유가 없다 (mock 때문에 스레드를 만들지 않는다).
+        if not inspect.isawaitable(result):
+            return result  # type: ignore[return-value]
+
+        value = _LOOP.run(result, timeout=_call_timeout())
+    except Exception as exc:
+        log.warning(
+            "LLM ✗ %-22s %-18s %-28s %5.1fs  %s: %s",
+            name,
+            output_model.__name__,
+            _model_id(agent) or "-",
+            time.monotonic() - started,
+            type(exc).__name__,
+            exc,
+        )
+        raise
+
+    log.info(
+        "LLM ▸ %-22s %-18s %-28s %5.1fs",
+        name,
+        output_model.__name__,
+        _model_id(agent) or "-",
+        time.monotonic() - started,
+    )
+    return value

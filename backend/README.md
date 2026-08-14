@@ -52,6 +52,34 @@ curl localhost:8000/sessions/<id>/process-state | python -m json.tool
 curl localhost:8000/sessions/<id>/timeline      | python -m json.tool
 ```
 
+## 발표 데모 — 실시간 로그 보기
+
+터미널 두 개를 나란히 띄우면 "학생이 막힌다 → Monitor가 감지한다 → 튜터가
+말을 건다"가 통째로 보인다.
+
+```bash
+# 터미널 A — trace 스트림 (codetrace.db를 읽기 전용으로 tail)
+python scripts/watch_trace.py
+
+# 터미널 B — LLM 파이프라인 내부 (agent 서비스를 띄운 그 터미널)
+cd ../agent && uvicorn tutor_agent.service:app --port 8100
+```
+
+`watch_trace.py`는 코드 편집/실행/채점 결과와 함께 `AGENT_TRIGGER`(Monitor가
+왜 지금 불렀는지 — 근거 목록 포함)와 `AGENT_INTERVENTION`(튜터가 실제로 뭐라고
+했는지)을 한 스트림으로 편다. 인증이 필요 없고 **쓰기를 하지 않는다**.
+
+```bash
+python scripts/watch_trace.py --replay 30      # 최근 30건 먼저 보여주고 이어서 추적
+python scripts/watch_trace.py --only AGENT     # agent 이벤트만 (발표용으로 가장 깔끔)
+python scripts/watch_trace.py --session f222   # 세션 id 일부로 필터
+python scripts/watch_trace.py --verbose        # features/payload 원본까지
+```
+
+agent 터미널에는 trace에 **남지 않는** 것이 찍힌다: 개입하지 않기로 한 판단
+(WAIT은 이벤트를 만들지 않는다), 내부 지도 계획(focus/말할 것/피할 것), 그리고
+단계마다 어떤 모델이 몇 초 걸렸는지 (`LLM ▸ ...`).
+
 ## API
 
 ```
