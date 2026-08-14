@@ -437,7 +437,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button></div>
+            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>임시저장</button><button className="icon-text-button" onClick={restoreCheckpoint}>복원</button></div>
           </div>
           <div className="editor-wrap">
             <Editor

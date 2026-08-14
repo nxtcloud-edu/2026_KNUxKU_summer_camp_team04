@@ -32,7 +32,6 @@ type ChatMessage = {
   id: number
   sender: 'tutor' | 'student'
   text: string
-  entrance?: 'auto'
 }
 
 type TutorOffer = 'idle' | 'asking' | 'dismissed'
@@ -47,11 +46,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const [sosConfirmOpen, setSosConfirmOpen] = useState(false)
   const [sosError, setSosError] = useState('')
   const [sosIntroVisible, setSosIntroVisible] = useState(false)
-  const [sosIntroEntrance, setSosIntroEntrance] = useState(false)
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const nextMessageIdRef = useRef(1)
-  const sosIntroAnimatedRef = useRef(false)
-  const autoTutorAnimatedRef = useRef(false)
 
   const shouldOfferHelp = Boolean(judgeError || (result && result.status !== 'ACCEPTED'))
   const tutorHint = useMemo(() => makeTutorHint(problem, result, judgeError), [problem, result, judgeError])
@@ -67,10 +63,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
   }, [messages, offerState, sosIntroVisible])
 
-  const addMessage = (sender: ChatMessage['sender'], text: string, entrance?: ChatMessage['entrance']) => {
+  const addMessage = (sender: ChatMessage['sender'], text: string) => {
     const id = nextMessageIdRef.current
     nextMessageIdRef.current += 1
-    setMessages((current) => [...current, { id, sender, text, entrance }])
+    setMessages((current) => [...current, { id, sender, text }])
   }
 
   // 유휴 하트비트가 받아온 개입을 튜터가 먼저 말 거는 것처럼 채팅에 얹는다.
@@ -81,9 +77,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     if (!intervention) return
     if (shownInterventionSeqRef.current === intervention.seq) return
     shownInterventionSeqRef.current = intervention.seq
-    const entrance = autoTutorAnimatedRef.current ? undefined : 'auto'
-    autoTutorAnimatedRef.current = true
-    addMessage('tutor', formatAgentDecision(intervention), entrance)
+    addMessage('tutor', formatAgentDecision(intervention))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervention])
 
@@ -119,8 +113,6 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const nextAcorns = latestAcorns - SOS_COST
     saveAcorns(nextAcorns)
     setAcorns(nextAcorns)
-    setSosIntroEntrance(!sosIntroAnimatedRef.current)
-    sosIntroAnimatedRef.current = true
     setSosIntroVisible(true)
     addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
     // /agent/decide 보다 **먼저** 큐에 넣는다. Agent 는 이 이벤트까지 본 상태를 읽어야 한다.
@@ -131,8 +123,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     setSosError('')
   }
 
-  const renderTutorOffer = (placement: 'chat' | 'modal' = 'chat') => offerState === 'asking' ? (
-    <div className={`tutor-help-offer${placement === 'modal' ? ' in-modal' : ''}`}>
+  const renderTutorOffer = () => offerState === 'asking' ? (
+    <div className="tutor-help-offer hero-squirrel">
       <img src={squirrelTutor} alt="" />
       <div>
         <p>도움이 필요한가요?</p>
@@ -162,7 +154,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
           {!sosIntroVisible && !sosConfirmOpen && renderTutorOffer()}
 
           {sosIntroVisible && (
-            <div className={`tutor-help-offer sos-intro${sosIntroEntrance ? ' first-entrance' : ''}`}>
+            <div className="tutor-help-offer sos-intro">
               <img src={squirrelTutor} alt="" />
               <div>
                 <p>다람쥐 튜터가 도착했어요!</p>
@@ -179,7 +171,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
             </div>
           ) : (
             messages.map((message) => (
-              <div className={`chat-message ${message.sender}${message.entrance === 'auto' ? ' first-entrance' : ''}`} key={message.id}>
+              <div className={`chat-message ${message.sender}`} key={message.id}>
                 {message.sender === 'tutor' && <img src={squirrelTutor} alt="" />}
                 <p>{message.text}</p>
               </div>
@@ -222,7 +214,6 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
                 </button>
               </div>
             </div>
-            {renderTutorOffer('modal')}
           </div>
         </div>
       )}
