@@ -50,6 +50,8 @@ tutor_message). 개입하지 않기로 하면 1번, `action_type="no_op"`이면 
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -64,6 +66,19 @@ from .schemas import (
     StudentState,
     TutorMessage,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _preview(text: str, limit: int = 160) -> str:
+    """로그 한 줄에 넣을 수 있게 자른다. 줄바꿈은 공백으로 편다.
+
+    튜터 메시지에는 코드 블록이 통째로 들어오는 일이 흔해서, 그대로 찍으면 로그
+    한 건이 화면을 덮는다. **전문은 어차피 trace에 남는다**
+    (`AGENT_INTERVENTION.activity.message` -- `scripts/watch_trace.py`로 본다).
+    """
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
 @dataclass
@@ -115,10 +130,31 @@ class TutorPipeline:
 
     def run(self, ctx: SessionContext, *, skip_gate: bool = False) -> PipelineResult:
         """개입 여부를 판단하고, 개입한다면 학생에게 보낼 메시지까지 만든다."""
+        started = time.monotonic()
+        log.info(
+            "┌ 개입 파이프라인  student=%s problem=%s skip_gate=%s idle=%.0fs",
+            ctx.student_id,
+            ctx.problem_id,
+            skip_gate,
+            ctx.idle_seconds,
+        )
+
         student_state = state_agent.assess(
             ctx, self._agent("state", state_agent.build_agent), skip_gate=skip_gate
         )
+        log.info(
+            "│ 1/3 state          intervene=%s urgency=%s branch=%s signals=[%s]",
+            student_state.should_intervene,
+            student_state.urgency,
+            student_state.entry_branch,
+            ", ".join(student_state.struggle_signals),
+        )
+        log.info("│                   %s", _preview(student_state.state_summary))
+
         if not student_state.should_intervene:
+            # 여기서 끝나는 경우가 **가장 흔하고**, trace에는 아무것도 남지 않는다
+            # (WAIT은 개입이 아니라 이벤트가 없다). 그래서 로그가 유일한 기록이다.
+            log.info("└ 개입하지 않음 (%.1fs)", time.monotonic() - started)
             return PipelineResult(student_state=student_state)
 
         guided = guided_action_agent.plan(
@@ -136,9 +172,25 @@ class TutorPipeline:
         )
         action_plan = ActionPlan(action_type=guided.action_type, payload=guided.payload)
 
+        # 지도 계획은 **내부 지시문이라 어디에도 저장되지 않는다.** 학생 화면에도
+        # trace에도 안 가므로, 튜터가 왜 그런 문장을 썼는지 보려면 여기가 유일한 창이다.
+        log.info(
+            "│ 2/3 guided_action  action=%s hint_level=%s expects_reply=%s approach=%s",
+            guided.action_type,
+            guided.hint_level,
+            guided.expects_student_reply,
+            _preview(guided.approach, 60),
+        )
+        log.info("│                   focus: %s", _preview(guided.focus, 100))
+        for point in guided.talking_points:
+            log.info("│                   말할 것: %s", _preview(point, 120))
+        for item in guided.avoid:
+            log.info("│                   피할 것: %s", _preview(item, 120))
+
         if guided.action_type == "no_op":
             # 아무 말도 하지 않기로 했다 → 작문 LLM 호출을 건너뛴다.
             # (`to_agent_decision()`이 이걸 WAIT으로 바꾼다.)
+            log.info("└ no_op — 작문 단계 생략 (%.1fs)", time.monotonic() - started)
             return PipelineResult(
                 student_state=student_state,
                 guidance_plan=guidance_plan,
@@ -148,6 +200,9 @@ class TutorPipeline:
         tutor_message = tutor_message_agent.write_intervention(
             ctx, guidance_plan, self._agent("tutor_message", tutor_message_agent.build_agent)
         )
+        log.info("│ 3/3 tutor_message expects_reply=%s", tutor_message.expects_reply)
+        log.info("│                   💬 %s", _preview(tutor_message.message, 200))
+        log.info("└ 개입 완료 (%.1fs)", time.monotonic() - started)
 
         return PipelineResult(
             student_state=student_state,
@@ -165,13 +220,37 @@ class TutorPipeline:
         직접 말을 걸었으므로 "개입할 시점인가"를 다시 물을 이유가 없다
         (그 판단은 학생의 의사표시로 이미 대체됐다).
         """
+        started = time.monotonic()
+        log.info(
+            "┌ 응답 파이프라인  student=%s problem=%s", ctx.student_id, ctx.problem_id
+        )
+        log.info("│ 🙋 학생: %s", _preview(reply.answer, 200))
+        if reply.question:
+            log.info("│    (직전 질문: %s)", _preview(reply.question, 120))
+
         evaluation = evaluation_agent.evaluate_answer(
             ctx, reply, self._agent("evaluation", evaluation_agent.build_agent)
         )
+        log.info(
+            "│ 1/2 evaluation     understanding=%s correct=%s follow_up=%s next_focus=%s",
+            evaluation.understanding,
+            evaluation.is_correct,
+            evaluation.follow_up_needed,
+            _preview(evaluation.next_focus, 60),
+        )
+        if evaluation.evidence:
+            log.info("│                   근거: %s", _preview(evaluation.evidence, 140))
+        for m in evaluation.misconceptions:
+            log.info("│                   오개념: %s", _preview(m, 120))
+
         tutor_message = tutor_message_agent.write_follow_up(
             ctx,
             reply,
             evaluation,
             self._agent("tutor_message", tutor_message_agent.build_agent),
         )
+        log.info("│ 2/2 tutor_message expects_reply=%s", tutor_message.expects_reply)
+        log.info("│                   💬 %s", _preview(tutor_message.message, 200))
+        log.info("└ 응답 완료 (%.1fs)", time.monotonic() - started)
+
         return ReplyResult(evaluation=evaluation, tutor_message=tutor_message)

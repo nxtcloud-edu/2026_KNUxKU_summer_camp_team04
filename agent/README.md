@@ -618,6 +618,43 @@ INFO:httpx:HTTP Request: GET http://localhost:8100/health "HTTP/1.1 200 OK"
 agent 서비스가 안 떠 있으면 backend가 기동 시 경고를 남기고, 개입 결정은
 전부 WAIT로 폴백합니다 (채점은 영향 없음).
 
+## 파이프라인 로그 (발표 데모용)
+
+agent 서비스를 띄운 터미널에 파이프라인이 단계별로 찍힙니다. 개입 한 번이
+이렇게 보입니다:
+
+```
+┌ 개입 파이프라인  student=user_d213… problem=func_count_positive skip_gate=True idle=341s
+LLM ▸ student_state_agent    StudentState       claude-haiku-4-5-20251001       1.8s
+│ 1/3 state          intervene=True urgency=high branch=struggle signals=[]
+│                   학생은 16분 이상 조건문의 기본 문법을 이해하지 못하고 있으며 …
+LLM ▸ guided_action_agent    GuidedAction       claude-sonnet-4-5               4.2s
+│ 2/3 guided_action  action=send_message hint_level=explain expects_reply=True approach=소크라테스식 질문
+│                   focus: if 문의 조건식
+│                   말할 것: 각 순회에서 무엇을 판단해야 하는지 스스로 떠올리게 할 것
+│                   피할 것: `if i > 0:` 같은 완성된 조건식
+LLM ▸ tutor_message_agent    TutorMessage       claude-haiku-4-5-20251001       1.9s
+│ 3/3 tutor_message expects_reply=True
+│                   💬 지금 `if` 뒤에 조건이 비어 있네요. 각 원소 `i`를 두고 …
+└ 개입 완료 (7.9s)
+```
+
+여기서만 볼 수 있는 것 (trace DB에는 안 남습니다):
+
+- **개입하지 않기로 한 판단.** WAIT은 이벤트를 만들지 않으므로
+  (`backend/app/trace/service.py`), 대부분의 체크가 여기 로그로만 남습니다.
+- **내부 지도 계획** (`focus` / 말할 것 / 피할 것). 학생 화면에도 trace에도
+  가지 않는 지시문이라, 튜터가 왜 그런 문장을 썼는지 보려면 이게 유일한 창입니다.
+- **역할별 모델과 소요 시간.** `LLM ▸` 줄이 `get_model(role)`이 실제로 어떤
+  모델로 라우팅됐는지 보여줍니다 (아래 "모델 프로바이더" 참고).
+
+학생 쪽 이벤트(코드 편집/실행/채점)와 Monitor의 트리거 근거는 backend에 있으므로,
+그쪽은 터미널을 하나 더 띄워서 봅니다:
+
+```bash
+cd ../backend && python scripts/watch_trace.py
+```
+
 ## 모델 프로바이더를 아직 안 정했을 때
 
 `src/tutor_agent/models.py`의 `get_model(role)`이 `.env`의 `MODEL_PROVIDER`
