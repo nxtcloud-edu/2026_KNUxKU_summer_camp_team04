@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, BookOpenCheck, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Plus, Search, Terminal } from 'lucide-react'
-import { getLearningProgress } from './learningProgress'
+import { getAllLearningProgress, getLearningProgress, type LearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 import AcornIcon from './AcornIcon'
 import { getStudentAssignments, getStudentCourses, joinStudentCourse, syncStoredStudentProgress, type EducatorAssignment, type StudentCourse } from './educatorService'
@@ -23,6 +23,7 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
   const [joiningCourse, setJoiningCourse] = useState(false)
   const [assignments, setAssignments] = useState<EducatorAssignment[]>([])
   const [selectedCourseId, setSelectedCourseId] = useState('')
+  const dailySolvedStats = useMemo(() => buildDailySolvedStats(getAllLearningProgress()), [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -119,13 +120,16 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
       <div className="problem-list-container">
         <div className="home-utility"><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
         <div className="problem-list-heading home-heading">
-          <div className="home-squirrel-message">
-            <img src={squirrelTutor} alt="" />
-            <div className="home-squirrel-copy">
-              <span>GOOD TO SEE YOU</span>
-              <h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1>
-              <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
+          <div className="home-hero-main">
+            <div className="home-squirrel-message">
+              <img src={squirrelTutor} alt="" />
+              <div className="home-squirrel-copy">
+                <span>GOOD TO SEE YOU</span>
+                <h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1>
+                <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
+              </div>
             </div>
+            <HomeDailySolvedChart stats={dailySolvedStats} />
           </div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>
         </div>
@@ -233,4 +237,78 @@ function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; num
       <ChevronRight className="problem-arrow" size={17} />
     </button>
   )
+}
+
+function HomeDailySolvedChart({ stats }: { stats: DailySolvedStat[] }) {
+  const maxCount = Math.max(1, ...stats.map((item) => item.count))
+  const total = stats.reduce((sum, item) => sum + item.count, 0)
+
+  return (
+    <section className="home-learning-chart" aria-label="최근 7일 일자별 완료 문제">
+      <div className="daily-chart-summary">
+        <span>최근 7일 완료</span>
+        <strong>{total}문제</strong>
+      </div>
+      <div className="daily-chart-bars">
+        {stats.map((item, index) => (
+          <div className="daily-chart-day" key={item.key}>
+            <div className="daily-chart-bar-wrap">
+              <span
+                className={item.count > 0 ? 'has-count' : ''}
+                style={{
+                  height: `${Math.max(8, (item.count / maxCount) * 100)}%`,
+                  animationDelay: `${index * 70}ms`,
+                }}
+                aria-label={`${item.label} ${item.count}문제 완료`}
+              />
+            </div>
+            <strong>{item.count}</strong>
+            <small>{item.label}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+type DailySolvedStat = {
+  key: string
+  label: string
+  count: number
+}
+
+function buildDailySolvedStats(progress: LearningProgress[]): DailySolvedStat[] {
+  const today = startOfTodayTime()
+  const counts = new Map<number, number>()
+
+  progress
+    .filter((item) => item.status === 'COMPLETED')
+    .forEach((item) => {
+      const day = toLearningDayTime(item.completedAt ?? item.updatedAt)
+      if (day === null) return
+      counts.set(day, (counts.get(day) ?? 0) + 1)
+    })
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const dayTime = today - (6 - index) * DAY_MS
+    const date = new Date(dayTime)
+    return {
+      key: date.toISOString(),
+      label: new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(date),
+      count: counts.get(dayTime) ?? 0,
+    }
+  })
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function startOfTodayTime() {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+}
+
+function toLearningDayTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
