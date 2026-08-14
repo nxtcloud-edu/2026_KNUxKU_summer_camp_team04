@@ -154,7 +154,9 @@ def record_judge_result(
         if total > 0:
             row.total_tests = total
 
-        if status is JudgeStatus.ACCEPTED:
+        # 공개 테스트 실행(run)은 학습 완료나 보상의 근거가 아니다. 전체 테스트를
+        # 통과한 제출(submit)만 SOLVED로 확정한다.
+        if status is JudgeStatus.ACCEPTED and mode == "submit":
             if row.status is not ProgressStatus.SOLVED:
                 first_solve_anywhere = True
             row.status = ProgressStatus.SOLVED
@@ -166,8 +168,8 @@ def record_judge_result(
             primary = row
 
     awarded = 0
-    if status is JudgeStatus.ACCEPTED and first_solve_anywhere:
-        amount = get_settings().acorn_reward_for(problem.difficulty)
+    if status is JudgeStatus.ACCEPTED and mode == "submit" and first_solve_anywhere:
+        amount = problem.acorn_reward
         tx = acorns.post(
             db,
             user_id=user_id,

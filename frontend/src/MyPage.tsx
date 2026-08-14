@@ -60,12 +60,6 @@ const BADGES: Badge[] = [
   { name: '전설의 도토리', minAcorns: 1000, description: '튜토리 최고 레벨 학습자', image: badgeLegend },
 ]
 
-const LEARNING_STREAK = {
-  days: 4,
-  bestDays: 9,
-  message: '이번 주도 꾸준히 문제를 풀고 있어요.',
-}
-
 const RECENT_WRONG_HINT = {
   problemTitle: '짝수의 합 구하기',
   hint: '반복문에서 더하기 전에 짝수인지 먼저 확인해보세요.',
@@ -79,6 +73,7 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
   const learningProgress = useMemo(() => getAllLearningProgress(), [])
   const inProgressProblems = learningProgress.filter((item) => item.status === 'IN_PROGRESS')
   const completedProblems = learningProgress.filter((item) => item.status === 'COMPLETED')
+  const learningStreak = useMemo(() => calculateLearningStreak(learningProgress), [learningProgress])
 
   const currentBadge = useMemo(
     () => [...BADGES].reverse().find((badge) => profile.totalAcorns >= badge.minAcorns) ?? BADGES[0],
@@ -219,9 +214,9 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
               <strong>연속 학습일</strong>
             </div>
             <div className="learning-streak">
-              <strong>{LEARNING_STREAK.days}일</strong>
-              <span>최고 기록 {LEARNING_STREAK.bestDays}일</span>
-              <p>{LEARNING_STREAK.message}</p>
+              <strong>{learningStreak.days}일</strong>
+              <span>최고 기록 {learningStreak.bestDays}일</span>
+              <p>{learningStreak.message}</p>
             </div>
           </div>
 
@@ -274,6 +269,55 @@ function LearningProblemList({ problems, emptyMessage, onSelect }: { problems: L
 
 function formatLearningDate(value: string) {
   return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
+}
+
+function calculateLearningStreak(progress: LearningProgress[]) {
+  const dayTimes = Array.from(new Set(progress.map((item) => toLearningDayTime(item.updatedAt)).filter((value): value is number => value !== null))).sort((a, b) => a - b)
+  if (!dayTimes.length) {
+    return { days: 0, bestDays: 0, message: '아직 학습 기록이 없어요. 오늘 한 문제부터 시작해볼까요?' }
+  }
+
+  let bestDays = 1
+  let currentRun = 1
+  for (let index = 1; index < dayTimes.length; index += 1) {
+    if (dayTimes[index] - dayTimes[index - 1] === DAY_MS) {
+      currentRun += 1
+    } else {
+      currentRun = 1
+    }
+    bestDays = Math.max(bestDays, currentRun)
+  }
+
+  const today = startOfTodayTime()
+  const latest = dayTimes[dayTimes.length - 1]
+  const canContinueToday = latest === today || latest === today - DAY_MS
+  let days = 0
+  if (canContinueToday) {
+    days = 1
+    for (let index = dayTimes.length - 1; index > 0; index -= 1) {
+      if (dayTimes[index] - dayTimes[index - 1] !== DAY_MS) break
+      days += 1
+    }
+  }
+
+  return {
+    days,
+    bestDays,
+    message: days > 0 ? '최근 학습 기록이 연속으로 이어지고 있어요.' : '오늘 학습하면 새로운 연속 기록을 시작할 수 있어요.',
+  }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function startOfTodayTime() {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+}
+
+function toLearningDayTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
 function loadProfile() {

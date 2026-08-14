@@ -34,34 +34,54 @@ const BUBBLE_INTERVAL_MS = 4200
 const FEATURES = [
   {
     icon: Activity,
-    title: '막힌 순간을 먼저 알아챕니다',
-    body:
-      '편집·실행·제출을 초 단위로 기록해 같은 오류 반복, 같은 영역만 고치는 정체, 진전 없는 시간을 신호로 바꿉니다. 학생이 도움을 요청하지 않아도 개입 시점을 찾아냅니다.',
+    title: [
+      '막힌 순간을',
+      '먼저 알아챕니다'
+    ],
+    body: [
+      '편집·실행·제출을 초 단위로',
+      '기록해 신호로 바꿉니다.',
+      '학생이 도움을 요청하지 않아도 개입 시점을 찾아냅니다.',
+    ],
   },
   {
     icon: Lightbulb,
-    title: '정답 대신 다음 한 걸음',
-    body:
-      'AI 튜터는 코드를 대신 써주지 않습니다. 지금 무엇을 확인해야 하는지 질문과 힌트로 되돌려주고, 필요할 때만 개념을 다시 설명합니다.',
+    title: [
+      '정답 대신',
+      '다음 한 걸음',
+    ],
+    body: [
+      '코드를 대신 써주지 않습니다.',
+      '지금 무엇을 확인해야 하는지 질문과 힌트로 되돌려주고,',
+      '필요할 때 개념을 설명합니다.',
+    ],
   },
   {
     icon: Waypoints,
     title: '코드가 흘러가는 길을 눈으로',
-    body:
-      '한 줄씩 실행되는 순서와 변수 변화를 따라가는 트레이스 활동으로, 왜 그 결과가 나왔는지 스스로 설명할 수 있게 만듭니다.',
+    body: [
+      '실행 순서와 변수 변화를 따라가는 트레이스 활동으로,',
+      '왜 그 결과가 나왔는지 스스로 설명할 수 있게 만듭니다.',
+    ],
   },
   {
     icon: LineChart,
-    title: '결과가 아니라 과정의 기록',
-    body:
-      '맞았는지 틀렸는지가 아니라 어떻게 도달했는지가 남습니다. 도토리와 배지로 꾸준함을 보상하고, 타임라인으로 성장을 되돌아봅니다.',
+    title: [
+      '결과가 아니라',
+      '과정의 기록',
+    ],
+    body: [
+      '맞았는지 틀렸는지가 아니라',
+      '어떻게 도달했는지가 남습니다.',
+      '도토리로 꾸준함을 보상하고, 성장 과정을 기록합니다.',
+    ],
   },
 ]
 
 const STEPS = [
-  { no: '01', title: '문제를 고르고 코드를 씁니다', body: '브라우저에서 바로 실행됩니다. 설치할 것은 없습니다.' },
-  { no: '02', title: '과정이 신호로 쌓입니다', body: '편집과 실행 결과가 정체·반복 실패 같은 신호로 요약됩니다.' },
-  { no: '03', title: '막히면 튜터가 먼저 옵니다', body: '정답이 아니라 다음 한 걸음을 짚어주는 힌트와 활동이 도착합니다.' },
+  { no: '01', title: '문제를 고르고 코드를 씁니다', body: ['브라우저에서 바로 실행됩니다.', '설치할 것은 없습니다.'] },
+  { no: '02', title: '과정이 신호로 쌓입니다', body: ['편집과 실행 결과가', '정체·반복 실패 같은 신호로 요약됩니다.'] },
+  { no: '03', title: '막히면 튜터가 먼저 옵니다', body: ['정답이 아니라 다음 한 걸음을 짚어주는', '힌트와 활동이 도착합니다.'] },
 ]
 
 /** 교육자 대시보드 실제 화면(반 전체 진행률 + 막힌 학생 표시)의 축소 미리보기.
@@ -186,8 +206,10 @@ function RevealCard({ icon: Icon, title, body, index }: Feature & { index: numbe
       <span className="lp-card-icon" aria-hidden>
         <Icon size={22} />
       </span>
-      <h3 className="lp-card-title">{title}</h3>
-      <p className="lp-card-body">{body}</p>
+      <h3 className="lp-card-title">
+        {Array.isArray(title) ? title.map((line) => <span key={line}>{line}</span>) : title}
+      </h3>
+      <p className="lp-card-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
     </article>
   )
 }
@@ -289,8 +311,9 @@ export default function LandingPage({
             <br /><span className="lp-title-brand">TUT</span><span className="lp-title-ink">ORY</span>
           </h1>
           <p className="lp-lede">
-            정답을 알려주는 도구는 이미 많습니다. TUTORY는 학생이 코드를 쓰는 <strong>과정</strong>을 읽고,
-            지금 필요한 만큼만 도와줍니다.
+            <span>정답을 알려주는 도구는 이미 많습니다.</span>
+            <span>TUTORY는 학생이 코드를 쓰는 <strong>과정</strong>을 읽고,</span>
+            <span>지금 필요한 만큼만 도와줍니다.</span>
           </p>
           <div className="lp-cta-row">
             <button className="lp-btn lp-btn-primary" type="button" onClick={onStart}>
@@ -325,21 +348,23 @@ export default function LandingPage({
         <RevealHeading text="결과가 아니라 과정을 봅니다" id="lp-features-title" />
         <div className="lp-grid">
           {FEATURES.map((feature, i) => (
-            <RevealCard key={feature.title} index={i} {...feature} />
+            <RevealCard key={Array.isArray(feature.title) ? feature.title.join(' ') : feature.title} index={i} {...feature} />
           ))}
         </div>
       </section>
 
-      <section className="lp-section lp-section-soft" aria-labelledby="lp-steps-title">
-        <p className="lp-kicker">어떻게 동작하나</p>
-        <h2 className="lp-h2" id="lp-steps-title">
-          세 단계면 충분합니다
-        </h2>
-        <ol className="lp-steps">
-          {STEPS.map((step, i) => (
-            <RevealStep key={step.no} index={i} {...step} />
-          ))}
-        </ol>
+      <section className="lp-section lp-section-soft lp-steps-section" aria-labelledby="lp-steps-title">
+        <div className="lp-steps-inner">
+          <p className="lp-kicker">어떻게 동작하나</p>
+          <h2 className="lp-h2" id="lp-steps-title">
+            세 단계면 충분합니다
+          </h2>
+          <ol className="lp-steps">
+            {STEPS.map((step, i) => (
+              <RevealStep key={step.no} index={i} {...step} />
+            ))}
+          </ol>
+        </div>
       </section>
 
       <section className="lp-section lp-educator" aria-labelledby="lp-educator-title">
@@ -349,11 +374,14 @@ export default function LandingPage({
               <GraduationCap size={22} />
             </span>
             <h2 className="lp-h2" id="lp-educator-title">
-              가르치는 사람에게는 반 전체의 과정이 보입니다
+              가르치는 사람에게는
+              <br />
+              반 전체의 과정이 보입니다
             </h2>
             <p className="lp-lede">
-              누가 어디서 막혀 있는지, 어떤 개념에서 반복해서 넘어지는지 한 화면에 모입니다. 코드 열람 범위는
-              강의별로 교수자가 정합니다.
+              <span>누가 어디서 막혀 있는지,</span>
+              <span>어떤 개념에서 반복해서 넘어지는지 한 화면에 모입니다.</span>
+              <span>코드 열람 범위는 강의별로 교수자가 정합니다.</span>
             </p>
           </RevealBlock>
 

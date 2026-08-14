@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   Check,
   ChevronDown,
@@ -19,10 +20,10 @@ import {
   Sun,
   Terminal,
   UserRound,
-  Waypoints,
 } from 'lucide-react'
 import AiTutorPanel from './AiTutorPanel'
 import { onUnauthorized } from './api'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 import EducatorPage from './EducatorPage'
 import LandingPage from './LandingPage'
 import LoginPage from './LoginPage'
@@ -31,7 +32,8 @@ import { preparePython, runPython } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
 import { getLearningProgress, saveCompleted, saveInProgress } from './learningProgress'
-import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { getProblemDetail, getProblems, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { awardLocalProblemReward } from './problemRewards'
 import { isJudgeUnavailable, runJudge } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
@@ -120,6 +122,10 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [isDark, setIsDark] = useState(false)
   const [activity, setActivity] = useState<'landing' | 'problem' | 'trace' | 'list' | 'mypage' | 'educator'>(() => userRole === 'educator' ? 'educator' : userRole ? 'list' : 'landing')
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null)
+  const [submissionComplete, setSubmissionComplete] = useState(false)
+  const [awardedAcorns, setAwardedAcorns] = useState(0)
+  const [submissionFailure, setSubmissionFailure] = useState<JudgeResult['status'] | null>(null)
+  const [nextProblemLoading, setNextProblemLoading] = useState(false)
   const [profileAvatar, setProfileAvatar] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('tutory:profile') ?? '{}').avatar as string || ''
@@ -227,17 +233,22 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setResult(null)
     setJudgeError('')
 
-    const applyJudgeResult = (judgeResult: JudgeResult) => {
+    const applyJudgeResult = (judgeResult: JudgeResult, locallyJudged = false) => {
       setResult(judgeResult)
       if (nextMode === 'submit' && judgeResult.status === 'ACCEPTED') {
         saveCompleted(problem.problem_id, problem.title, code)
+        setAwardedAcorns(judgeResult.awarded_acorns ?? (locallyJudged ? awardLocalProblemReward(problem.problem_id, problem.acorn_reward) : 0))
+        setSubmissionFailure(null)
+        setSubmissionComplete(true)
+      } else if (nextMode === 'submit') {
+        setSubmissionFailure(judgeResult.status)
       }
     }
 
     // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
     // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
     const judgeInBrowser = async () => {
-      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode))
+      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode), true)
     }
 
     try {
@@ -306,6 +317,25 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setActivity('problem')
   }
 
+  const openNextRecommendedProblem = async () => {
+    if (!problem || nextProblemLoading) return
+    setNextProblemLoading(true)
+    try {
+      const { problems } = await getProblems()
+      const currentIndex = problems.findIndex((item) => item.problem_id === problem.problem_id)
+      const ordered = currentIndex >= 0
+        ? [...problems.slice(currentIndex + 1), ...problems.slice(0, currentIndex)]
+        : problems
+      const nextProblem = ordered.find((item) => getLearningProgress(item.problem_id)?.status !== 'COMPLETED')
+        ?? ordered[0]
+      setSubmissionComplete(false)
+      if (nextProblem) selectProblem(nextProblem)
+      else setActivity('list')
+    } finally {
+      setNextProblemLoading(false)
+    }
+  }
+
   const leaveProblem = () => {
     if (!problem) {
       setActivity('list')
@@ -316,15 +346,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
     }
     setActivity('list')
-  }
-
-  const openRestrictedActivity = (service: string, nextActivity: 'trace' | 'mypage') => {
-    if (!userRole) {
-      setLoginPrompt(service)
-      return
-    }
-    if (nextActivity === 'trace') trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' })
-    setActivity(nextActivity)
   }
 
   const handleEditorMount: OnMount = (editor) => {
@@ -384,7 +405,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
 
       {activity === 'landing' ? (
         <LandingPage
-          onStart={() => (userRole ? setActivity('list') : onSignup())}
+          onStart={() => (userRole ? setActivity('list') : onLogin())}
         />
       )
         : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
@@ -419,7 +440,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button></div>
+            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>임시저장</button><button className="icon-text-button" onClick={restoreCheckpoint}>복원</button></div>
           </div>
           <div className="editor-wrap">
             <Editor
@@ -469,9 +490,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
           </div>
 
           <div className="action-bar">
-            <button className="trace-button" onClick={() => openRestrictedActivity('TRACE 학습', 'trace')} disabled={isRunning || runtimeStatus !== 'ready'}>
-              <Waypoints size={17} /> TRACE 학습
-            </button>
             <button
               className="run-button"
               onClick={() => execute('run')}
@@ -488,7 +506,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
               {isRunning && mode === 'submit' ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
               제출하기
             </button>
-            <p>실행은 공개 테스트만 확인해요. · TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
+            <p>실행은 공개 테스트만 확인하고, 제출은 전체 테스트로 채점해요.</p>
           </div>
         </section>
         </div>
@@ -497,6 +515,58 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
+      {submissionComplete && problem && <SubmissionCompleteModal problemTitle={problem.title} reward={problem.acorn_reward} awarded={awardedAcorns} loading={nextProblemLoading} onNext={openNextRecommendedProblem} onList={() => { setSubmissionComplete(false); setActivity('list') }} />}
+      {submissionFailure && <SubmissionFailureModal status={submissionFailure} onRetry={() => { setSubmissionFailure(null); window.setTimeout(() => editorRef.current?.focus(), 0) }} />}
+    </div>
+  )
+}
+
+function SubmissionFailureModal({ status, onRetry }: { status: JudgeResult['status']; onRetry: () => void }) {
+  const message = {
+    WRONG_ANSWER: '아직 통과하지 못한 테스트가 있어요. 입력과 중간값을 다시 따라가 볼까요?',
+    RUNTIME_ERROR: '실행 중 오류가 발생했어요. 변수와 인덱스 범위를 차근차근 확인해 보세요.',
+    SYNTAX_ERROR: '문법 오류가 있어요. 괄호와 콜론, 들여쓰기를 먼저 살펴보세요.',
+    TIME_LIMIT: '실행 시간이 너무 오래 걸렸어요. 반복 횟수와 종료 조건을 확인해 보세요.',
+    INTERNAL_ERROR: '채점 중 문제가 발생했어요. 잠시 후 다시 제출해 주세요.',
+    ACCEPTED: '',
+  }[status]
+
+  return (
+    <div className="submission-success-backdrop">
+      <div className="submission-success-modal failure" role="dialog" aria-modal="true" aria-labelledby="submission-failure-title">
+        <img src={squirrelTutor} alt="응원하는 다람쥐 튜터" />
+        <div className="submission-success-copy">
+          <span><CircleAlert size={15} /> {status}</span>
+          <h2 id="submission-failure-title">조금만 더 확인해 볼까요?</h2>
+          <p>{message}<br />괜찮아요. 지금 과정도 실력이 되고 있어요.</p>
+        </div>
+        <div className="submission-success-actions single">
+          <button className="modal-primary-button" type="button" onClick={onRetry}>코드 다시 확인하기</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SubmissionCompleteModal({ problemTitle, reward, awarded, loading, onNext, onList }: { problemTitle: string; reward: number; awarded: number; loading: boolean; onNext: () => void; onList: () => void }) {
+  return (
+    <div className="submission-success-backdrop">
+      <div className="submission-success-modal" role="dialog" aria-modal="true" aria-labelledby="submission-success-title">
+        <img src={squirrelTutor} alt="도토리를 든 다람쥐 튜터" />
+        <div className="submission-success-copy">
+          <span><Check size={15} /> ACCEPTED</span>
+          <h2 id="submission-success-title">제출이 완료됐어요!</h2>
+          <p><strong>{problemTitle}</strong> 문제를 멋지게 해결했어요.<br />다음 문제도 이어서 도전해볼까요?</p>
+          <div className="submission-reward"><span>🌰</span><strong>{awarded > 0 ? `도토리 ${awarded}개 획득!` : `도토리 ${reward}개는 이미 받았어요`}</strong></div>
+        </div>
+        <div className="submission-success-actions">
+          <button className="modal-secondary-button" type="button" onClick={onList}>문제 목록</button>
+          <button className="modal-primary-button" type="button" onClick={onNext} disabled={loading}>
+            {loading ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={15} />}
+            다음 추천 문제
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
