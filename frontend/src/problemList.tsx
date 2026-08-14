@@ -64,7 +64,7 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
         <div className="problem-list-heading home-heading">
           <div className="home-squirrel-message">
             <img src={squirrelTutor} alt="" />
-            <div className="home-speech-bubble">
+            <div className="home-squirrel-copy">
               <span>GOOD TO SEE YOU</span>
               <h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1>
               <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
