@@ -227,7 +227,7 @@ function RevealStep({ no, title, body, index }: Step & { index: number }) {
     >
       <span className="lp-step-no">{no}</span>
       <h3 className="lp-step-title">{title}</h3>
-      <p className="lp-step-body">{body}</p>
+      <p className="lp-step-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
     </li>
   )
 }
