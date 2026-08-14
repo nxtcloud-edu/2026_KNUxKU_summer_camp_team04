@@ -154,6 +154,10 @@ class ProcessFeaturesRead(BaseModel):
     # 패널이 "왜 지금 불렸는지"를 설명하려면 이 둘도 보여야 한다.
     seconds_since_last_edit: int = 0
     edits_since_last_trigger: int = 0
+    # R7d(완전 무활동)가 읽는 값. 편집 시계와 별개다 -- Process State 패널이
+    # "실행만 하다 멈춘" 경우와 "편집하다 멈춘" 경우를 구분해 보여줄 수 있어야 한다.
+    seconds_since_last_activity: int = 0
+    activity_since_last_trigger: int = 0
     edits_since_last_result: int = 0
     large_change_unverified: bool = False
     last_result: JudgeResultRead | None

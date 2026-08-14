@@ -40,6 +40,28 @@ from app.sessions import store
 from app.trace import service as trace_service
 
 
+#: "학생이 무언가 했다"로 보는 이벤트. R7d(완전 무활동)의 시계를 리셋한다.
+#:
+#: TEST_RESULT를 포함하는 이유: RUN/SUBMIT 클라이언트 이벤트 없이 채점 결과만
+#: 기록되는 경로(judge/router.py)가 있어서, 결과를 빼면 "방금 실행하고 결과를
+#: 읽는 중"인 학생이 무활동으로 잡힌다.
+#: AGENT_TRIGGER / AGENT_INTERVENTION / SESSION_START는 **서버가** 쓴 행이므로 제외한다
+#: -- 개입 그 자체가 시계를 리셋하면 유휴 학생이 영원히 유휴로 안 잡힌다.
+ACTIVITY_EVENT_TYPES: frozenset[EventType] = frozenset(
+    {
+        EventType.CODE_SNAPSHOT,
+        EventType.RUN,
+        EventType.SUBMIT,
+        EventType.UNDO,
+        EventType.RESET,
+        EventType.HINT_REQUEST,
+        EventType.ACTIVITY_OPENED,
+        EventType.ACTIVITY_RESPONSE,
+        EventType.TEST_RESULT,
+    }
+)
+
+
 @dataclass(frozen=True)
 class ResultObservation:
     seq: int
@@ -98,10 +120,21 @@ class ProcessFeatures:
     # 증가하므로 "지금 손을 놓고 있는가"를 판정할 수 없다. 편집이 하나도 없으면
     # 세션 시작을 기준으로 잰다.
     seconds_since_last_edit: int = 0
+    # 마지막 **활동** 이후 흐른 시간. seconds_since_last_edit보다 넓다:
+    # 편집뿐 아니라 실행/제출/힌트요청/undo/reset/활동응답까지 전부 활동으로 센다.
+    # R7d(완전 무활동)가 읽는다 -- "편집은 멈췄지만 방금 실행해서 결과를 보고 있는"
+    # 학생을 유휴로 오판하지 않기 위해 편집 시계와 분리한다.
+    seconds_since_last_activity: int = 0
     # 마지막 AGENT_TRIGGER 이후의 편집 수. 편집만으로 발화하는 규칙(R7b/R7c)이
     # "지난번에 찔렀는데 학생이 아무것도 안 했으면 또 찌르지 않는다"를 지키는 데 쓴다.
     # 트리거 이력이 없으면 전체 편집 수와 같다.
     edits_since_last_trigger: int = 0
+    # 마지막 AGENT_TRIGGER 이후의 **모든** 활동 수. R7d의 anti-spam 가드다.
+    # edits_since_last_trigger로는 부족하다: 무활동 규칙은 정의상 편집이 없는
+    # 구간에서 발화하므로, 편집 수로 막으면 첫 발화 자체가 불가능해진다.
+    # 트리거 이력이 없으면 세션 전체의 활동 수와 같다(활동이 0이면 발화하지 않는다
+    # -- 문제를 열어놓고 아직 아무것도 시작하지 않은 학생은 유휴가 아니라 독해 중이다).
+    activity_since_last_trigger: int = 0
     # 마지막 채점 결과 이후의 편집 수 = "고쳐놓고 아직 안 돌려본 것"이 있는가.
     edits_since_last_result: int = 0
     # 그 미검증 편집 중에 대규모 변경(붙여넣기 의심)이 있는가.
@@ -330,6 +363,27 @@ def extract_features(
         and (last_trigger_seq is None or e.seq > last_trigger_seq)
     )
 
+    # ---- 완전 무활동 시계 (R7d) -------------------------------------------
+    # 편집 시계와 분리한다. 편집만 보면 "방금 Run을 눌러 결과를 읽는 중"인 학생이
+    # 유휴로 잡히고, 반대로 활동 전체를 보면 churn 판정(R7c)이 실행 때문에 리셋된다.
+    # 두 시계는 서로 다른 질문에 답하므로 둘 다 필요하다.
+    activity_times = [
+        e.server_timestamp for e in events if EventType(e.type) in ACTIVITY_EVENT_TYPES
+    ]
+    # 스냅샷의 created_at도 후보에 넣는다: 편집은 배치로 전송되므로 이벤트 seq/시각이
+    # 흔들리지만 스냅샷은 편집 그 자체다 (seconds_since_last_edit과 같은 이유).
+    if snapshots:
+        activity_times.append(snapshots[-1].created_at)
+    last_activity_at = max(activity_times) if activity_times else session.started_at
+    seconds_since_last_activity = seconds_between(last_activity_at, now)
+
+    activity_since_last_trigger = sum(
+        1
+        for e in events
+        if EventType(e.type) in ACTIVITY_EVENT_TYPES
+        and (last_trigger_seq is None or e.seq > last_trigger_seq)
+    )
+
     # ---- 아직 실행해보지 않은 편집 ----------------------------------------
     # large_change_detected와 창이 다르다. 그건 "**현재 결과를 만든** 변경이
     # 대규모였는가"(R2: 붙여넣고 통과했다)라서 결과 이전의 편집을 포함한다.
@@ -382,7 +436,9 @@ def extract_features(
         else 0,
         snapshot_count=len(snapshots),
         seconds_since_last_edit=seconds_since_last_edit,
+        seconds_since_last_activity=seconds_since_last_activity,
         edits_since_last_trigger=edits_since_last_trigger,
+        activity_since_last_trigger=activity_since_last_trigger,
         edits_since_last_result=len(unverified_edits),
         large_change_unverified=large_change_unverified,
         last_result=results[-1] if results else None,

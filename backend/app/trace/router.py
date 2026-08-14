@@ -76,6 +76,8 @@ def _state_response(session_id: str, state: monitor.ProcessState) -> ProcessStat
             snapshot_count=f.snapshot_count,
             seconds_since_last_edit=f.seconds_since_last_edit,
             edits_since_last_trigger=f.edits_since_last_trigger,
+            seconds_since_last_activity=f.seconds_since_last_activity,
+            activity_since_last_trigger=f.activity_since_last_trigger,
             edits_since_last_result=f.edits_since_last_result,
             large_change_unverified=f.large_change_unverified,
             last_result=None

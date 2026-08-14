@@ -31,6 +31,7 @@ cooldown 상태가 AGENT_TRIGGER 이벤트에 살기 때문이다. 데모의 Pro
   --- 이하 채점 결과 없이 편집만으로 발화한다 ---
   R7b UNDERSTANDING_UNCERTAIN  대규모 변경 and 그 후 멈춤
   R7c NO_PROGRESS      같은 영역 churn and 편집 멈춤
+  R7d NO_PROGRESS      아무 활동도 없이 10초 경과 (활동 1건 이상 있었던 세션)
   R8  PRODUCTIVE_STRUGGLE  attempt>=2
   R9  기본             PROGRESSING
 
@@ -139,6 +140,10 @@ def _evidence(f: ProcessFeatures, cfg: MonitorConfig) -> list[str]:
     # 편집 시계는 "손을 놓았을 때"만 근거로 의미가 있다. 타이핑 중에는 노이즈다.
     if f.snapshot_count >= 1 and f.seconds_since_last_edit >= cfg.paste_settle_seconds:
         out.append(f"{f.seconds_since_last_edit}초째 편집 없음")
+    # 무활동은 편집 없음과 별개로 적는다 -- 실행만 반복하다 멈춘 학생은 위 문장이
+    # 오래 전 편집 시각을 가리켜 오해를 만든다.
+    if f.seconds_since_last_activity >= cfg.idle_no_activity_seconds:
+        out.append(f"{f.seconds_since_last_activity}초째 아무 활동 없음")
     if f.progress_delta > 0:
         out.append(f"직전 실행 대비 +{f.progress_delta} 테스트 통과")
     if f.recent_scores:
@@ -300,6 +305,38 @@ def _classify(
             TriggerType.NO_PROGRESS,
             f"같은 영역을 {f.same_region_edit_count}번 고치다가 "
             f"{f.seconds_since_last_edit}초째 멈춰 있습니다.",
+        )
+
+    # R7d 완전 무활동: 편집도 실행도 없이 그냥 손을 놓았다.
+    #
+    # R7c와 무엇이 다른가. R7c는 "같은 영역 churn 3회 + 편집 멈춤"이라 **고치다가**
+    # 멈춘 학생만 잡는다. 한 줄 쓰고 멍하니 있는 학생, 실행 한 번 하고 결과를 보다가
+    # 멈춘 학생은 어떤 규칙에도 걸리지 않아 영원히 침묵했다. 이 규칙이 그 구멍이다.
+    #
+    # 임계값을 10초까지 짧게 잡을 수 있는 근거는 anti-spam 가드 쪽이다:
+    # activity_since_last_trigger >= 1 이므로 **한 유휴 구간에서 최대 한 번** 발화한다.
+    # (개입 후 학생이 아무 반응도 하지 않으면 cooldown이 풀려도 다시 찌르지 않는다.
+    #  AGENT_TRIGGER/AGENT_INTERVENTION은 활동으로 세지 않으므로 카운터가 0에 머문다.)
+    #
+    # 여기가 R8 위여야 하는 이유: R8은 attempt>=2면 trigger 없이 PRODUCTIVE_STRUGGLE로
+    # 끝내버린다. 아래에 두면 실행을 2번 이상 한 학생에게는 무활동 규칙이 죽는다.
+    # 반대로 R3(진전 가드)/R4(통과) 아래에 두는 것은 의도적이다 -- 개선 중이거나
+    # 이미 통과한 학생을 10초 침묵만으로 찌르지 않는다.
+    #
+    # idle_no_activity_seconds=0은 **규칙을 끈다.** 무활동 개입은 교수자 취향이
+    # 갈리는 지점이고(생각할 시간을 주고 싶은 수업이 있다), 다른 임계값과 달리
+    # "아주 크게 잡기"로는 끌 수 없다 -- 값이 크면 오래 자리를 비운 학생에게
+    # 돌아오는 순간 뒤늦은 개입이 튀어나온다.
+    if (
+        cfg.idle_no_activity_seconds > 0
+        and f.seconds_since_last_activity >= cfg.idle_no_activity_seconds
+        and f.activity_since_last_trigger >= 1
+    ):
+        return (
+            ProcessStatus.POSSIBLE_STUCK,
+            TriggerType.NO_PROGRESS,
+            f"{f.seconds_since_last_activity}초 동안 아무 활동이 없어 "
+            "막혀 있을 가능성이 있습니다.",
         )
 
     # R8 생산적 고전.
@@ -471,7 +508,9 @@ def features_to_dict(f: ProcessFeatures) -> dict:
         "consecutive_error_count": f.consecutive_error_count,
         "snapshot_count": f.snapshot_count,
         "seconds_since_last_edit": f.seconds_since_last_edit,
+        "seconds_since_last_activity": f.seconds_since_last_activity,
         "edits_since_last_trigger": f.edits_since_last_trigger,
+        "activity_since_last_trigger": f.activity_since_last_trigger,
         "edits_since_last_result": f.edits_since_last_result,
         "large_change_unverified": f.large_change_unverified,
         "last_result": None

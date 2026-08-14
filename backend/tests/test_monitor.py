@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from sqlmodel import select
 
+from app.config import MonitorConfig
 from app.enums import EventType, JudgeStatus, ProcessStatus, TriggerType
 from app.models import Event
 from app.trace import monitor
@@ -20,9 +21,13 @@ from tests.fixtures_code import (
     RETURN_EDIT,
 )
 
+#: R7d(완전 무활동)를 끈 설정. 무활동과 무관한 규칙을 검증하는 테스트가 쓴다 --
+#: 시간을 길게 흘려야 하는 시나리오는 전부 R7d에 먼저 걸리기 때문이다.
+NO_IDLE_RULE = MonitorConfig(idle_no_activity_seconds=0)
 
-def ev(b: TraceBuilder):
-    return monitor.evaluate(b.db, b.session_id, now=b.t)
+
+def ev(b: TraceBuilder, cfg=None):
+    return monitor.evaluate(b.db, b.session_id, now=b.t, cfg=cfg)
 
 
 def _trigger_events(db, session_id: str) -> list[Event]:
@@ -168,8 +173,10 @@ def test_no_progress_fires_at_threshold(db):
 
 
 def test_no_progress_does_not_fire_below_threshold(db):
+    # R7d를 끈다 -- 89초를 흘리려면 그 사이 학생이 아무것도 하지 않으므로
+    # 무활동 규칙이 먼저 발화한다. 여기서 보려는 것은 R7의 임계값이다.
     b = TraceBuilder.start(db, at=T0).tick(10).run(3).tick(10).run(3).tick(79)
-    s = ev(b)
+    s = ev(b, NO_IDLE_RULE)
     assert s.features.seconds_without_progress == 89
     assert s.trigger is None
 
@@ -179,9 +186,10 @@ def test_no_progress_requires_two_attempts(db):
 
     아직 그에 대한 증거가 없고, 아무것도 안 한 학생에게 LLM을 쏘는 건
     계획서가 경고하는 바로 그 안티패턴이다.
+    (무활동 규칙 R7d는 별개다 -- 그건 '실행 1회 + 침묵'을 의도적으로 잡는다.)
     """
     b = TraceBuilder.start(db).tick(10).run(3).tick(300)
-    assert ev(b).trigger is None
+    assert ev(b, NO_IDLE_RULE).trigger is None
 
 
 def test_staring_at_problem_without_running_does_not_trigger(db):
@@ -343,7 +351,7 @@ def test_first_draft_over_template_is_not_treated_as_paste(db):
     (첫 행동이 진짜 붙여넣기인 학생은 그걸 실행해 통과하는 순간 R2가 잡는다.)
     """
     b = TraceBuilder.start(db).tick(10).edit(BIG_REWRITE).tick(60)
-    s = ev(b)
+    s = ev(b, NO_IDLE_RULE)  # 여기서 보려는 것은 붙여넣기 판정이다 (R7d는 별개)
     assert s.trigger is None
     assert not s.features.large_change_unverified
 
@@ -428,3 +436,130 @@ def test_editing_rules_do_not_refire_without_new_edits(db):
     # 학생이 다시 손대면 그때는 발화할 수 있다
     b.edit(BIG_REWRITE_TWEAK).tick(60)
     assert ev(b).features.edits_since_last_trigger >= 1
+
+
+# ------------------------------------------------- 완전 무활동 규칙 (R7d)
+#
+# R7c는 "같은 영역 churn 3회 + 편집 멈춤"이라 **고치다가** 멈춘 학생만 잡는다.
+# 한 줄 쓰고 멍하니 있거나, 실행 한 번 하고 결과만 보다 멈춘 학생은 어디에도
+# 걸리지 않았다. R7d가 그 구멍을 메운다.
+
+
+def test_idle_with_no_activity_triggers(db):
+    """편집 1회 후 10초 동안 아무 활동이 없으면 막힘으로 간주한다 (R7d).
+
+    churn(3회)도 붙여넣기도 실행도 없어서 R7a~R7c는 전부 침묵한다.
+    """
+    b = TraceBuilder.start(db).tick(5).edit(LOOP_V2).tick(10)
+    s = ev(b)
+    assert s.trigger is TriggerType.NO_PROGRESS
+    assert s.status is ProcessStatus.POSSIBLE_STUCK
+    assert s.features.attempt_count == 0
+    assert s.features.same_region_edit_count < 3, "churn 규칙(R7c)이 아닌 경로여야 한다"
+    assert s.features.seconds_since_last_activity >= 10
+
+
+def test_idle_below_threshold_does_not_trigger(db):
+    """임계값(10초) 이전에는 침묵한다."""
+    b = TraceBuilder.start(db).tick(5).edit(LOOP_V2).tick(9)
+    s = ev(b)
+    assert s.trigger is None
+
+
+def test_run_resets_the_activity_clock(db):
+    """실행은 편집이 아니지만 활동이다 -- 결과를 읽는 중인 학생을 유휴로 보지 않는다.
+
+    회귀 가드: 무활동 시계를 seconds_since_last_edit으로 구현하면 이 케이스가
+    바로 오발화한다(편집은 40초 전이지만 방금 Run을 눌렀다).
+    """
+    b = TraceBuilder.start(db).tick(5).edit(LOOP_V2).tick(40).run(2).tick(3)
+    s = ev(b)
+    assert s.features.seconds_since_last_edit >= 40
+    assert s.features.seconds_since_last_activity == 3
+    assert s.trigger is None
+
+
+def test_idle_fires_once_per_idle_period(db):
+    """계속 가만히 있어도 유휴 구간당 한 번만 찌른다.
+
+    cooldown만으로는 못 막는다 -- 무활동 세션에는 Run도 편집도 영영 오지 않아서
+    cooldown이 풀리는 순간마다 같은 트리거가 반복된다(하트비트가 3초마다 온다).
+    activity_since_last_trigger 가드가 그걸 막는다.
+    """
+    b = TraceBuilder.start(db).tick(5).edit(LOOP_V2).tick(10)
+    first = monitor.evaluate_and_record(db, b.session, now=b.t)
+    assert first.trigger is TriggerType.NO_PROGRESS
+
+    b.tick(300)  # cooldown이 한참 지났지만 학생은 여전히 아무것도 안 했다
+    again = ev(b)
+    assert again.features.activity_since_last_trigger == 0
+    assert again.trigger is None
+
+    # 다시 뭐라도 하면(여기서는 편집) 그 다음 유휴 구간에는 발화한다
+    b.edit(LOOP_V3).tick(10)
+    assert ev(b).trigger is TriggerType.NO_PROGRESS
+
+
+def test_untouched_session_is_not_nagged(db):
+    """문제를 열어놓고 아직 아무것도 시작하지 않은 학생은 유휴가 아니라 독해 중이다."""
+    b = TraceBuilder.start(db).tick(120)
+    s = ev(b)
+    assert s.features.activity_since_last_trigger == 0
+    assert s.trigger is None
+
+
+def test_idle_does_not_override_solved(db):
+    """이미 통과한 학생은 10초 침묵으로 찌르지 않는다 (R4가 R7d보다 위).
+
+    통과 결과가 2개다 -- 하나면 '큰 편집 직후 통과'라 R2(이해도 확인)가 먼저 잡는다.
+    """
+    b = (
+        TraceBuilder.start(db)
+        .tick(5).edit(LOOP_V5_CORRECT).tick(5).run(5)
+        .tick(5).run(5)
+        .tick(60)
+    )
+    s = ev(b)
+    assert s.trigger is None
+    assert s.status is ProcessStatus.PROGRESSING
+
+
+def test_idle_rule_can_be_disabled(db):
+    """MONITOR_IDLE_NO_ACTIVITY_SECONDS=0 이면 무활동 개입을 끈다.
+
+    "아주 크게 잡기"로는 끌 수 없다 -- 값이 크면 오래 자리를 비운 학생이 돌아오는
+    순간 뒤늦은 개입이 튀어나온다.
+    """
+    b = TraceBuilder.start(db).tick(5).edit(LOOP_V2).tick(600)
+    assert ev(b).trigger is TriggerType.NO_PROGRESS
+    assert ev(b, NO_IDLE_RULE).trigger is None
+
+
+def test_idle_does_not_override_progress_guard(db):
+    """개선 중인 학생도 보호한다 (R3가 R7d보다 위)."""
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2).tick(5).run(2)
+        .tick(10).edit(LOOP_V3).tick(5).run(3)
+        .tick(60)
+    )
+    s = ev(b)
+    assert s.trigger is None
+    assert s.status is ProcessStatus.PROGRESSING
+
+
+def test_idle_beats_productive_struggle(db):
+    """실행을 2번 이상 한 학생에게도 무활동 규칙이 살아 있어야 한다 (R7d가 R8 위).
+
+    R8은 trigger 없이 PRODUCTIVE_STRUGGLE로 끝내버리므로, R7d를 아래에 두면
+    실행 이력이 있는 학생에게는 이 규칙이 죽는다.
+    """
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2).tick(5).run(2)
+        .tick(10).edit(RETURN_EDIT).tick(5).run(2)
+        .tick(30)
+    )
+    s = ev(b)
+    assert s.features.attempt_count >= 2
+    assert s.trigger is TriggerType.NO_PROGRESS

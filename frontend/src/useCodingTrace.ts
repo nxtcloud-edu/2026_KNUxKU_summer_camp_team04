@@ -44,8 +44,13 @@ const RETRY_DELAYS_MS = [1000, 2000, 4000]
  *
  * POST 라 서버가 evaluate_and_record() 로 실제 기록한다 -- 그래서 폴링만큼
  * 촘촘하게 두지 않는다. 트리거가 발화한 뒤에는 cooldown 이 중복 발화를 막는다.
+ *
+ * 5초 -> 3초로 내린 이유: backend R7d(완전 무활동)의 임계값이 10초라서, 5초 틱이면
+ * 감지가 10~15초에 걸쳐 최악의 경우 임계값의 1.5배로 늦어졌다. 3초면 10~13초다.
+ * 이보다 더 내리는 것은 의미가 없다 -- 하트비트가 트리거를 만들면 그 뒤는 서버
+ * cooldown(MONITOR_COOLDOWN_SECONDS)이 간격을 지배한다.
  */
-const HEARTBEAT_INTERVAL_MS = 5000
+const HEARTBEAT_INTERVAL_MS = 3000
 /**
  * 개입 이벤트 폴링 주기. 하트비트와 **분리해서** 더 촘촘하게 돈다.
  *

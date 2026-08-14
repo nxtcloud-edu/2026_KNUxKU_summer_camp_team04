@@ -46,6 +46,19 @@ class MonitorConfig:
     # 쳐다보고 있으면 "직접 친 게 아니다"라는 판단에 충분하다.
     paste_settle_seconds: int = 5
 
+    # --- 완전 무활동 규칙(R7d)의 임계값 ---
+    # "아무 활동도 없다"의 기준. 위의 idle_edit_seconds와 다른 시계다:
+    #   idle_edit_seconds   마지막 **편집** 이후 (+ 같은 영역 churn 3회를 함께 요구)
+    #   여기                마지막 **모든 활동**(편집/실행/제출/힌트/활동응답) 이후
+    # churn도 붙여넣기도 실행 이력도 없이 그냥 손을 놓은 학생은 R7a~R7c 어디에도
+    # 걸리지 않아 영원히 침묵했다. 이 값이 그 구멍을 메운다.
+    #
+    # 짧게 잡을 수 있는 근거: 이 규칙은 "지난 개입 이후 활동이 1건 이상"을 함께
+    # 요구하므로(monitor.py R7d) 한 번의 유휴 구간에서 최대 한 번만 발화한다.
+    # 실제 감지 시각은 여기에 하트비트 주기(프론트 3초)가 더해진다.
+    # **0이면 규칙을 끈다** (monitor.py R7d 주석 참고).
+    idle_no_activity_seconds: int = 10
+
 
 DEFAULT_MONITOR_CONFIG = MonitorConfig()
 
@@ -118,6 +131,7 @@ class Settings(BaseSettings):
     monitor_idle_edit_seconds: int = DEFAULT_MONITOR_CONFIG.idle_edit_seconds
     monitor_edit_churn_threshold: int = DEFAULT_MONITOR_CONFIG.edit_churn_threshold
     monitor_paste_settle_seconds: int = DEFAULT_MONITOR_CONFIG.paste_settle_seconds
+    monitor_idle_no_activity_seconds: int = DEFAULT_MONITOR_CONFIG.idle_no_activity_seconds
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -143,6 +157,7 @@ class Settings(BaseSettings):
             idle_edit_seconds=self.monitor_idle_edit_seconds,
             edit_churn_threshold=self.monitor_edit_churn_threshold,
             paste_settle_seconds=self.monitor_paste_settle_seconds,
+            idle_no_activity_seconds=self.monitor_idle_no_activity_seconds,
         )
 
 
