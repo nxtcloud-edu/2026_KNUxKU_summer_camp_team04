@@ -53,7 +53,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 }
 .brand { display: inline-flex; align-items: center; gap: 11px; width: fit-content; padding: 5px; border: 0; border-radius: 8px; background: transparent; color: #25211e; text-decoration: none; }
 .brand:hover { background: var(--surface-soft); }
-.brand img { width: 28px; height: 23px; transform: scale(1.25); transform-origin: left center; }
+.brand img { width: 34px; height: 28px; transform: scale(1.25); transform-origin: left center; }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .login-top-button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--brand); border-radius: 9px; background: var(--brand); color: #fff; font-size: 11px; font-weight: 800; }
@@ -941,7 +941,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 
 @media (max-width: 720px) {
   .topbar { height: 60px; flex-basis: 60px; padding: 0 12px 0 16px; }
-  .brand img { transform: scale(1.1); }
+  .brand img { transform: scale(1.18); }
   .runtime-pill { padding: 7px; }
   .runtime-pill:not(.error) { font-size: 0; gap: 0; }
   .settings-menu { position: fixed; top: 66px; right: 10px; width: min(292px, calc(100vw - 20px)); }

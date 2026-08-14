@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Terminal } from 'lucide-react'
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 
@@ -66,7 +66,7 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
 
         {!loading && !error && recommendations.length > 0 && (
           <section className="recommended-section">
-            <div className="home-section-title"><div><Sparkles size={16} /><strong>추천 문제</strong></div><span>Checkpoint와 기초 학습 순서를 반영했어요</span></div>
+            <div className="home-section-title"><div><strong>추천 문제</strong></div><span>Checkpoint와 기초 학습 순서를 반영했어요</span></div>
             <div className="recommended-grid">
               {recommendations.map((problem, index) => <RecommendedProblem key={problem.problem_id} problem={problem} rank={index + 1} onClick={() => onSelect(problem)} />)}
             </div>
