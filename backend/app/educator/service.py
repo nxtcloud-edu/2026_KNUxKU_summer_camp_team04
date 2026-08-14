@@ -32,6 +32,7 @@ from app.errors import (
     StudentNotInCourse,
 )
 from app.models import (
+    Assignment,
     Course,
     CourseProblem,
     Enrollment,
@@ -122,6 +123,16 @@ def assigned_problem_ids(db: DbSession, course: Course, repo: ProblemRepository)
     ).all()
     if rows:
         return [r.problem_id for r in rows]
+    # 별도 CourseProblem 목록이 없더라도 과제가 만들어졌다면 과제 문제의 합집합이
+    # 실제 강의 진도 분모다. 전체 문제은행 26개를 분모로 쓰면 4문제 과제에서
+    # 한 문제를 풀어도 4%로 보이는 잘못된 통계가 된다.
+    assignments = db.exec(
+        select(Assignment)
+        .where(Assignment.course_id == course.id)
+        .order_by(col(Assignment.created_at))
+    ).all()
+    if assignments:
+        return list(dict.fromkeys(pid for assignment in assignments for pid in assignment.problem_ids))
     return [p.problem_id for p in repo.list()]
 
 

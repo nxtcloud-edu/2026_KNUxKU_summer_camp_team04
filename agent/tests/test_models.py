@@ -43,6 +43,9 @@ def test_unknown_provider_is_a_loud_error(monkeypatch) -> None:
 
 def test_for_role_prefers_the_role_specific_value(monkeypatch) -> None:
     """작문 단계만 더 작은 모델로 내리는 것이 이 함수의 목적이다."""
+    # .env가 이제 ANTHROPIC_MODEL_ID_STATE 등을 실제로 설정해 두므로, 이 값이
+    # 테스트에 새어 들어와 "state는 공통값을 따른다"는 기대를 깨지 않도록 지운다.
+    monkeypatch.delenv("ANTHROPIC_MODEL_ID_STATE", raising=False)
     monkeypatch.setenv("ANTHROPIC_MODEL_ID", "claude-sonnet-4-5")
     monkeypatch.setenv("ANTHROPIC_MODEL_ID_TUTOR_MESSAGE", "claude-haiku-4-5")
 

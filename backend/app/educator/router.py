@@ -13,20 +13,25 @@ from sqlmodel import Session as DbSession
 from sqlmodel import col, select
 
 from app.auth import service as auth_service
-from app.auth.deps import require_educator
+from app.auth.deps import get_current_user, require_educator
 from app.db import get_db
 from app.educator import service
 from app.educator.schemas import (
+    AssignmentCreate,
+    AssignmentProblemRead,
+    AssignmentRead,
     AttentionItem,
     AttentionListRead,
     CourseBrief,
     CourseCreate,
+    CourseJoinRequest,
     CourseRead,
     DashboardMetrics,
     DashboardRead,
     EnrollRequest,
     ProblemActivity,
     StudentBrief,
+    StudentCourseRead,
     StudentDetailRead,
     StudentListRead,
     StudentRow,
@@ -35,10 +40,67 @@ from app.educator.schemas import (
 )
 from app.enums import CodeVisibility, LearningStatus, ProgressStatus
 from app.errors import StudentNotInCourse, UserNotFound
-from app.models import StudentCourseStats, User, UserProblemProgress
+from app.models import Assignment, Course, Enrollment, StudentCourseStats, User, UserProblemProgress
+from app.enums import EnrollmentStatus, UserRole
 from app.problems.service import ProblemRepository, get_problem_repository
 
 router = APIRouter(tags=["educator"])
+
+
+# --------------------------------------------------------------------- 학생의 강의 참여
+
+
+@router.get("/student/courses", response_model=list[StudentCourseRead], tags=["student"])
+def student_courses(
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> list[StudentCourseRead]:
+    if UserRole(user.role) is not UserRole.STUDENT:
+        return []
+    enrollments = db.exec(
+        select(Enrollment)
+        .where(Enrollment.student_id == user.id)
+        .where(Enrollment.status == EnrollmentStatus.ACTIVE)
+    ).all()
+    out: list[StudentCourseRead] = []
+    for enrollment in enrollments:
+        course = db.get(Course, enrollment.course_id)
+        if course is None or not course.is_active:
+            continue
+        educator = db.get(User, course.educator_id)
+        out.append(StudentCourseRead(
+            id=course.id,
+            title=course.title,
+            term=course.term,
+            educator_name=educator.name if educator else "교수자",
+            assigned_problem_count=len(service.assigned_problem_ids(db, course, repo)),
+        ))
+    return out
+
+
+@router.post("/student/courses/join", response_model=StudentCourseRead, status_code=status.HTTP_201_CREATED, tags=["student"])
+def join_course(
+    body: CourseJoinRequest,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> StudentCourseRead:
+    if UserRole(user.role) is not UserRole.STUDENT:
+        raise StudentNotInCourse(user.id)
+    course = db.exec(select(Course).where(Course.invite_code == body.invite_code.strip())).first()
+    if course is None or not course.is_active:
+        from app.errors import InvalidInviteCode
+        raise InvalidInviteCode("강의 초대 코드가 올바르지 않습니다.")
+    service.enroll_student(db, course, user)
+    service.recalculate_stats(db, course=course, student=user, repo=repo)
+    db.commit()
+    educator = db.get(User, course.educator_id)
+    return StudentCourseRead(
+        id=course.id, title=course.title, term=course.term,
+        educator_name=educator.name if educator else "교수자",
+        assigned_problem_count=len(service.assigned_problem_ids(db, course, repo)),
+    )
 
 
 def _stats_map(db: DbSession, course_id: str) -> dict[str, StudentCourseStats]:
@@ -53,6 +115,71 @@ def _students_of(db: DbSession, course_id: str) -> list[User]:
     if not ids:
         return []
     return list(db.exec(select(User).where(col(User.id).in_(ids))).all())
+
+
+def _fresh_stats_map(
+    db: DbSession, course: Course, students: list[User], repo: ProblemRepository
+) -> dict[str, StudentCourseStats]:
+    """교수자 조회 시 원본 진도에서 요약을 갱신해 오래된 캐시를 노출하지 않는다."""
+    return {
+        student.id: service.recalculate_stats(db, course=course, student=student, repo=repo)
+        for student in students
+    }
+
+
+def _assignment_read(
+    db: DbSession, assignment: Assignment, course: Course, repo: ProblemRepository,
+    *, student_id: str | None = None,
+) -> AssignmentRead:
+    student_ids = [u.id for u in _students_of(db, course.id)]
+    progress_rows = db.exec(
+        select(UserProblemProgress).where(UserProblemProgress.course_id == course.id)
+    ).all()
+    progress = {(row.user_id, row.problem_id): row for row in progress_rows}
+    problem_ids = list(assignment.problem_ids or [])
+    completed_students = sum(
+        all(progress.get((sid, pid)) and progress[(sid, pid)].status == ProgressStatus.SOLVED for pid in problem_ids)
+        for sid in student_ids
+    )
+    own_completed = sum(
+        1 for pid in problem_ids
+        if student_id and progress.get((student_id, pid)) and progress[(student_id, pid)].status == ProgressStatus.SOLVED
+    )
+    problems = []
+    for pid in problem_ids:
+        row = progress.get((student_id, pid)) if student_id else None
+        problems.append(AssignmentProblemRead(
+            problem_id=pid,
+            title=repo.get(pid).title if repo.exists(pid) else pid,
+            status=str(row.status) if row else "NOT_STARTED",
+        ))
+    return AssignmentRead(
+        id=assignment.id, course_id=course.id, course_title=course.title,
+        title=assignment.title, description=assignment.description, due_at=assignment.due_at,
+        problems=problems, completed_students=completed_students,
+        total_students=len(student_ids), completed_problems=own_completed,
+        total_problems=len(problem_ids),
+    )
+
+
+@router.get("/student/assignments", response_model=list[AssignmentRead], tags=["student"])
+def student_assignments(
+    user: User = Depends(get_current_user), db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> list[AssignmentRead]:
+    if UserRole(user.role) is not UserRole.STUDENT:
+        return []
+    enrollments = db.exec(select(Enrollment).where(
+        Enrollment.student_id == user.id, Enrollment.status == EnrollmentStatus.ACTIVE
+    )).all()
+    out = []
+    for enrollment in enrollments:
+        course = db.get(Course, enrollment.course_id)
+        if course is None or not course.is_active:
+            continue
+        rows = db.exec(select(Assignment).where(Assignment.course_id == course.id).order_by(col(Assignment.created_at).desc())).all()
+        out.extend(_assignment_read(db, row, course, repo, student_id=user.id) for row in rows)
+    return out
 
 
 # --------------------------------------------------------------------- 강의
@@ -123,6 +250,45 @@ def get_course(
     )
 
 
+@router.get("/educator/courses/{course_id}/assignments", response_model=list[AssignmentRead])
+def list_assignments(
+    course_id: str, educator: User = Depends(require_educator),
+    db: DbSession = Depends(get_db), repo: ProblemRepository = Depends(get_problem_repository),
+) -> list[AssignmentRead]:
+    course = service.require_course(db, course_id, educator)
+    rows = db.exec(
+        select(Assignment).where(Assignment.course_id == course.id)
+        .order_by(col(Assignment.created_at).desc())
+    ).all()
+    return [_assignment_read(db, row, course, repo) for row in rows]
+
+
+@router.post(
+    "/educator/courses/{course_id}/assignments",
+    response_model=AssignmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_assignment(
+    course_id: str, body: AssignmentCreate,
+    educator: User = Depends(require_educator), db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> AssignmentRead:
+    course = service.require_course(db, course_id, educator)
+    problem_ids = list(dict.fromkeys(body.problem_ids))
+    unknown = [pid for pid in problem_ids if not repo.exists(pid)]
+    if unknown:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=f"존재하지 않는 문제입니다: {', '.join(unknown)}")
+    assignment = Assignment(
+        course_id=course.id, title=body.title.strip(), description=body.description.strip(),
+        problem_ids=problem_ids, due_at=body.due_at,
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    return _assignment_read(db, assignment, course, repo)
+
+
 @router.post(
     "/educator/courses/{course_id}/students", status_code=status.HTTP_201_CREATED
 )
@@ -188,7 +354,7 @@ def dashboard(
     """
     course = service.require_course(db, course_id, educator)
     students = _students_of(db, course.id)
-    stats = _stats_map(db, course.id)
+    stats = _fresh_stats_map(db, course, students, repo)
     assigned = len(service.assigned_problem_ids(db, course, repo))
 
     rows = [stats.get(u.id) for u in students]
@@ -245,10 +411,12 @@ def list_students(
     size: int = Query(default=30, ge=1, le=100),
     educator: User = Depends(require_educator),
     db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
 ) -> StudentListRead:
     course = service.require_course(db, course_id, educator)
-    stats = _stats_map(db, course.id)
-    pairs = [(u, stats.get(u.id)) for u in _students_of(db, course.id)]
+    students = _students_of(db, course.id)
+    stats = _fresh_stats_map(db, course, students, repo)
+    pairs = [(u, stats.get(u.id)) for u in students]
 
     if q:
         needle = q.strip().lower()
@@ -281,11 +449,13 @@ def attention(
     limit: int = Query(default=10, ge=1, le=50),
     educator: User = Depends(require_educator),
     db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
 ) -> AttentionListRead:
     """지금 확인해야 할 학생. risk_score 높은 순."""
     course = service.require_course(db, course_id, educator)
-    stats = _stats_map(db, course.id)
-    students = {u.id: u for u in _students_of(db, course.id)}
+    student_rows = _students_of(db, course.id)
+    stats = _fresh_stats_map(db, course, student_rows, repo)
+    students = {u.id: u for u in student_rows}
 
     rows = [
         s
@@ -332,11 +502,7 @@ def student_detail(
     if student is None:
         raise StudentNotInCourse(student_id)
 
-    stats = db.exec(
-        select(StudentCourseStats)
-        .where(StudentCourseStats.course_id == course.id)
-        .where(StudentCourseStats.student_id == student_id)
-    ).first()
+    stats = service.recalculate_stats(db, course=course, student=student, repo=repo)
 
     rows = db.exec(
         select(UserProblemProgress)
@@ -348,8 +514,23 @@ def student_detail(
     visibility = CodeVisibility(course.code_visibility)
 
     activity: list[ProblemActivity] = []
-    for r in rows[:20]:
-        title = repo.get(r.problem_id).title if repo.exists(r.problem_id) else r.problem_id
+    rows_by_problem = {row.problem_id: row for row in rows}
+    assigned_ids = service.assigned_problem_ids(db, course, repo)
+    assigned_set = set(assigned_ids)
+    # 활동한 문제는 최근순, 미시도 문제는 강의 배정순. 기존의 "최근 활동" 의미와
+    # 전체 현황 표시를 동시에 지킨다.
+    problem_order = [row.problem_id for row in rows if row.problem_id in assigned_set]
+    problem_order.extend(pid for pid in assigned_ids if pid not in rows_by_problem)
+    for problem_id in problem_order:
+        r = rows_by_problem.get(problem_id)
+        title = repo.get(problem_id).title if repo.exists(problem_id) else problem_id
+        if r is None:
+            activity.append(ProblemActivity(
+                problem_id=problem_id, title=title, status="NOT_STARTED",
+                best_passed=0, total_tests=0, attempt_count=0,
+                last_judge_status=None, last_attempted_at=None,
+            ))
+            continue
         # **교수자가 강의별로 정한 정책에 따라 코드를 채운다.**
         code: str | None = None
         kind: str | None = None
@@ -360,7 +541,7 @@ def student_detail(
 
         activity.append(
             ProblemActivity(
-                problem_id=r.problem_id,
+                problem_id=problem_id,
                 title=title,
                 status=str(r.status),
                 best_passed=r.best_passed,

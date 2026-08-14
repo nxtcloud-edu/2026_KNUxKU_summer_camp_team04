@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.enums import ProgressStatus
+from app.enums import JudgeStatus, ProgressStatus
 from app.models import AcornTransaction, UserProblemProgress
 from app.schemas_common import UtcDatetime
 
@@ -80,6 +80,15 @@ class ProgressListRead(BaseModel):
 
 class CheckpointRequest(BaseModel):
     student_code: str = Field(max_length=100_000)
+
+
+class LocalJudgeResultRequest(BaseModel):
+    """서버 judge가 꺼진 개발 환경에서 브라우저 채점 결과를 동기화한다."""
+    student_code: str = Field(max_length=100_000)
+    status: JudgeStatus
+    passed: int = Field(ge=0)
+    total: int = Field(ge=0)
+    mode: str = Field(pattern="^(run|submit)$")
 
 
 class SolvedProblemRead(BaseModel):
