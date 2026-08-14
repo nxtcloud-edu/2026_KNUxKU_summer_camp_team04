@@ -44,6 +44,46 @@ export async function runPython(code: string, problem: ProblemDetail): Promise<E
     : runFunctionProblem(code, problem.function_name, problem.public_test_cases)
 }
 
+export async function runPythonWithStdin(code: string, stdin: string): Promise<ExecutionResult> {
+  const startedAt = performance.now()
+  const stdout: string[] = []
+  const pyodide = await preparePython()
+  pyodide.setStdout({ batched: (message) => stdout.push(message) })
+  pyodide.setStderr({ batched: (message) => stdout.push(message) })
+
+  const serializedCode = JSON.stringify(code)
+  const serializedStdin = JSON.stringify(stdin)
+  const script = `
+import contextlib
+import io
+import sys
+
+__codetrace_code = ${serializedCode}
+__stdin = io.StringIO(${serializedStdin})
+__stdout = io.StringIO()
+__old_stdin = sys.stdin
+try:
+    sys.stdin = __stdin
+    with contextlib.redirect_stdout(__stdout):
+        exec(compile(__codetrace_code, "<terminal>", "exec"), {})
+finally:
+    sys.stdin = __old_stdin
+
+__stdout.getvalue()
+`
+
+  try {
+    const value = await pyodide.runPythonAsync(script)
+    return {
+      stdout: String(value),
+      tests: [],
+      duration: performance.now() - startedAt,
+    }
+  } catch (caught) {
+    return pythonErrorResult(caught, stdout, startedAt)
+  }
+}
+
 async function runFunctionProblem(code: string, functionName: string | undefined, tests: PublicTestCase[]): Promise<ExecutionResult> {
   const startedAt = performance.now()
   const stdout: string[] = []
