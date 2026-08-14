@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   Award,
+  BarChart3,
   BadgeCheck,
   CalendarDays,
   Check,
@@ -70,6 +71,7 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
   const inProgressProblems = learningProgress.filter((item) => item.status === 'IN_PROGRESS')
   const completedProblems = learningProgress.filter((item) => item.status === 'COMPLETED')
   const learningStreak = useMemo(() => calculateLearningStreak(learningProgress), [learningProgress])
+  const dailySolvedStats = useMemo(() => buildDailySolvedStats(learningProgress), [learningProgress])
   const recentWrongHint = useMemo(() => getRecentWrongHint(), [])
 
   const currentBadge = useMemo(
@@ -238,6 +240,14 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
           </div>
         </section>
 
+        <section className="mypage-panel daily-solved-panel">
+          <div className="mypage-panel-title">
+            <BarChart3 size={17} />
+            <strong>일자별 완료 문제</strong>
+          </div>
+          <DailySolvedChart stats={dailySolvedStats} />
+        </section>
+
         <section className="mypage-grid learning-history-grid">
           <div className="mypage-panel solved-panel">
             <div className="mypage-panel-title">
@@ -291,6 +301,36 @@ function LearningProblemList({ problems, emptyMessage, onSelect }: { problems: L
   )
 }
 
+function DailySolvedChart({ stats }: { stats: DailySolvedStat[] }) {
+  const maxCount = Math.max(1, ...stats.map((item) => item.count))
+  const total = stats.reduce((sum, item) => sum + item.count, 0)
+
+  return (
+    <div className="daily-solved-chart">
+      <div className="daily-chart-summary">
+        <span>최근 7일 완료</span>
+        <strong>{total}문제</strong>
+      </div>
+      <div className="daily-chart-bars" aria-label="최근 7일 일자별 완료 문제 수">
+        {stats.map((item) => (
+          <div className="daily-chart-day" key={item.key}>
+            <div className="daily-chart-bar-wrap">
+              <span
+                className={item.count > 0 ? 'has-count' : ''}
+                style={{ height: `${Math.max(8, (item.count / maxCount) * 100)}%` }}
+                aria-label={`${item.label} ${item.count}문제 완료`}
+              />
+            </div>
+            <strong>{item.count}</strong>
+            <small>{item.label}</small>
+          </div>
+        ))}
+      </div>
+      <p>완료한 문제의 저장 시각을 기준으로 집계해요.</p>
+    </div>
+  )
+}
+
 function formatLearningDate(value: string) {
   return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
@@ -332,6 +372,35 @@ function calculateLearningStreak(progress: LearningProgress[]) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+type DailySolvedStat = {
+  key: string
+  label: string
+  count: number
+}
+
+function buildDailySolvedStats(progress: LearningProgress[]): DailySolvedStat[] {
+  const today = startOfTodayTime()
+  const counts = new Map<number, number>()
+
+  progress
+    .filter((item) => item.status === 'COMPLETED')
+    .forEach((item) => {
+      const day = toLearningDayTime(item.completedAt ?? item.updatedAt)
+      if (day === null) return
+      counts.set(day, (counts.get(day) ?? 0) + 1)
+    })
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const dayTime = today - (6 - index) * DAY_MS
+    const date = new Date(dayTime)
+    return {
+      key: date.toISOString(),
+      label: new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(date),
+      count: counts.get(dayTime) ?? 0,
+    }
+  })
+}
 
 function startOfTodayTime() {
   const now = new Date()
