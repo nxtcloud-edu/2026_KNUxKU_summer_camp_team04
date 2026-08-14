@@ -6,67 +6,59 @@ import {
   BookOpenCheck,
   CheckCircle2,
   ChevronDown,
+  Copy,
   Clock3,
   Search,
+  Plus,
   Send,
   Sparkles,
   TrendingUp,
   UserRound,
   UsersRound,
 } from 'lucide-react'
-import { getEducatorDashboard, type EducatorAssignment, type EducatorDashboardData, type EducatorStudent, type StudentStatus } from './educatorService'
-
-const DEMO_STUDENTS: EducatorStudent[] = [
-  { id: 'STU-001', name: '김민서', email: 'minseo@univ.ac.kr', progress: 82, solved: 21, attempts: 31, lastActive: '12분 전', status: '순조로움', weakConcept: '반복문' },
-  { id: 'STU-002', name: '박지훈', email: 'jihoon@univ.ac.kr', progress: 46, solved: 12, attempts: 38, lastActive: '34분 전', status: '도움 필요', weakConcept: '조건문' },
-  { id: 'STU-003', name: '이서연', email: 'seoyeon@univ.ac.kr', progress: 73, solved: 19, attempts: 27, lastActive: '1시간 전', status: '순조로움', weakConcept: '함수' },
-  { id: 'STU-004', name: '최현우', email: 'hyunwoo@univ.ac.kr', progress: 58, solved: 15, attempts: 33, lastActive: '어제', status: '관찰 필요', weakConcept: '리스트' },
-  { id: 'STU-005', name: '정하린', email: 'harin@univ.ac.kr', progress: 31, solved: 8, attempts: 29, lastActive: '3일 전', status: '도움 필요', weakConcept: '입출력' },
-  { id: 'STU-006', name: '오도현', email: 'dohyun@univ.ac.kr', progress: 65, solved: 17, attempts: 25, lastActive: '2시간 전', status: '관찰 필요', weakConcept: '중첩 반복' },
-]
-
-const DEMO_ASSIGNMENTS: EducatorAssignment[] = [
-  { title: 'Python 기초 · 조건문', due: '8월 16일', completed: 21, total: 28, average: 78 },
-  { title: '반복문 집중 연습', due: '8월 20일', completed: 14, total: 28, average: 64 },
-  { title: '함수와 리스트', due: '8월 25일', completed: 6, total: 28, average: 51 },
-]
-
-const DEMO_DASHBOARD: EducatorDashboardData = {
-  courseTitle: 'Python 기초 01',
-  courseSubtitle: '2026 여름학기 · 수강생 28명 · 담당 교수 김튜토리',
-  totalStudents: 28,
-  averageProgress: 64,
-  completionRate: 71,
-  needsHelp: DEMO_STUDENTS.filter((student) => student.status === '도움 필요').length,
-  students: DEMO_STUDENTS,
-  attentionStudents: DEMO_STUDENTS.filter((student) => student.status !== '순조로움'),
-  assignments: DEMO_ASSIGNMENTS,
-}
+import { createEducatorCourse, getEducatorCourses, getEducatorDashboard, type EducatorCourse, type EducatorDashboardData, type EducatorStudent, type StudentStatus } from './educatorService'
 
 export default function EducatorPage() {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'전체' | StudentStatus>('전체')
   const [selectedStudent, setSelectedStudent] = useState<EducatorStudent | null>(null)
-  const [dashboard, setDashboard] = useState(DEMO_DASHBOARD)
+  const [courses, setCourses] = useState<EducatorCourse[]>([])
+  const [selectedCourseId, setSelectedCourseId] = useState('')
+  const [dashboard, setDashboard] = useState<EducatorDashboardData | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [courseTitle, setCourseTitle] = useState('')
+  const [courseTerm, setCourseTerm] = useState('')
+  const [message, setMessage] = useState('')
 
   useEffect(() => {
-    getEducatorDashboard()
-      .then((data) => {
-        if (data) setDashboard({
-          ...data,
-          students: data.students.length ? data.students : DEMO_STUDENTS,
-          attentionStudents: data.attentionStudents.length ? data.attentionStudents : DEMO_DASHBOARD.attentionStudents,
-          assignments: data.assignments.length ? data.assignments : DEMO_ASSIGNMENTS,
-        })
-      })
-      .catch((error) => console.warn('Educator dashboard API unavailable. Using demo data.', error))
+    getEducatorCourses().then((items) => {
+      setCourses(items)
+      if (items[0]) setSelectedCourseId(items[0].id)
+    }).catch((error) => setMessage(error instanceof Error ? error.message : '강의를 불러오지 못했습니다.'))
   }, [])
 
-  const filtered = useMemo(() => dashboard.students.filter((student) => {
+  useEffect(() => {
+    const course = courses.find((item) => item.id === selectedCourseId)
+    if (!course) { setDashboard(null); return }
+    getEducatorDashboard(course).then(setDashboard).catch((error) => setMessage(error instanceof Error ? error.message : '대시보드를 불러오지 못했습니다.'))
+  }, [courses, selectedCourseId])
+
+  const createCourse = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setCreating(true); setMessage('')
+    try {
+      const course = await createEducatorCourse(courseTitle, courseTerm)
+      setCourses((items) => [course, ...items]); setSelectedCourseId(course.id)
+      setCourseTitle(''); setCourseTerm('')
+    } catch (error) { setMessage(error instanceof Error ? error.message : '강의를 만들지 못했습니다.') }
+    finally { setCreating(false) }
+  }
+
+  const filtered = useMemo(() => (dashboard?.students ?? []).filter((student) => {
     const keyword = query.trim().toLowerCase()
     return (status === '전체' || student.status === status)
       && (!keyword || `${student.name} ${student.email} ${student.weakConcept}`.toLowerCase().includes(keyword))
-  }), [dashboard.students, query, status])
+  }), [dashboard?.students, query, status])
 
   return (
     <main className="educator-page">
@@ -74,11 +66,22 @@ export default function EducatorPage() {
         <header className="educator-heading">
           <div>
             <span>EDUCATOR CONSOLE</span>
-            <h1>{dashboard.courseTitle}</h1>
-            <p>{dashboard.courseSubtitle}</p>
+            <h1>{dashboard?.courseTitle ?? '새 강의를 시작하세요'}</h1>
+            <p>{dashboard?.courseSubtitle ?? '강의를 만들면 학생 초대 코드가 자동으로 생성됩니다.'}</p>
           </div>
-          <button className="educator-primary"><Send size={15} /> 공지 보내기</button>
+          {courses.length > 0 && <select className="course-selector" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)}>{courses.map((course) => <option key={course.id} value={course.id}>{course.title} · {course.term}</option>)}</select>}
         </header>
+
+        <form className="course-create-bar" onSubmit={createCourse}>
+          <input value={courseTitle} onChange={(event) => setCourseTitle(event.target.value)} placeholder="강의명 (예: Python 기초 01)" required />
+          <input value={courseTerm} onChange={(event) => setCourseTerm(event.target.value)} placeholder="학기 (예: 2026 여름학기)" />
+          <button className="educator-primary" disabled={creating}><Plus size={15} /> 강의 만들기</button>
+        </form>
+        {message && <p className="educator-message">{message}</p>}
+
+        {dashboard && <div className="course-invite-banner"><div><strong>학생 초대 코드</strong><span>{dashboard.inviteCode}</span><small>학생이 회원가입할 때 이 코드를 입력하면 자동으로 강의에 참여합니다.</small></div><button type="button" onClick={async () => { await navigator.clipboard.writeText(dashboard.inviteCode); setMessage('초대 코드를 복사했습니다.') }}><Copy size={15} /> 복사</button></div>}
+
+        {!dashboard ? <section className="educator-empty"><UsersRound /><h2>아직 운영 중인 강의가 없어요</h2><p>위에서 첫 강의를 만들고 생성된 코드를 학생들에게 공유해 주세요.</p></section> : <>
 
         <section className="educator-metrics" aria-label="수업 요약">
           <Metric icon={<UsersRound />} label="전체 수강생" value={`${dashboard.totalStudents}명`} note="현재 강의 기준" />
@@ -91,6 +94,7 @@ export default function EducatorPage() {
           <section className="educator-panel educator-attention">
             <PanelTitle icon={<Sparkles />} title="지금 확인할 학생" caption="반복 실패와 학습 정체를 감지했어요" />
             <div className="attention-list">
+              {dashboard.attentionStudents.length === 0 && <p className="panel-empty">현재 확인이 필요한 학생이 없습니다.</p>}
               {dashboard.attentionStudents.slice(0, 3).map((student) => (
                 <button key={student.id} onClick={() => setSelectedStudent(student)}>
                   <span className={`student-avatar ${student.status === '도움 필요' ? 'alert' : ''}`}>{student.name.slice(-1)}</span>
@@ -105,6 +109,7 @@ export default function EducatorPage() {
           <section className="educator-panel assignment-overview">
             <PanelTitle icon={<BookOpenCheck />} title="과제 현황" caption="마감일과 평균 성취도를 확인하세요" />
             <div className="assignment-list">
+              {dashboard.assignments.length === 0 && <p className="panel-empty">과제 데이터가 아직 없습니다.</p>}
               {dashboard.assignments.map((assignment) => (
                 <div key={assignment.title}>
                   <div><strong>{assignment.title}</strong><small><Clock3 size={11} /> {assignment.due} 마감</small></div>
@@ -140,10 +145,11 @@ export default function EducatorPage() {
                   <td><span className={`student-status status-${student.status.replace(' ', '-')}`}>{student.status}</span></td>
                   <td><button aria-label={`${student.name} 상세 보기`} onClick={() => setSelectedStudent(student)}><ArrowRight size={15} /></button></td>
                 </tr>
-              ))}</tbody>
+              ))}{filtered.length === 0 && <tr><td colSpan={7} className="student-empty">초대 코드를 사용해 참여한 학생이 여기에 표시됩니다.</td></tr>}</tbody>
             </table>
           </div>
         </section>
+        </>}
       </div>
 
       {selectedStudent && <StudentDrawer student={selectedStudent} onClose={() => setSelectedStudent(null)} />}

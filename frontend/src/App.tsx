@@ -411,7 +411,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
         : activity === 'educator' ? <EducatorPage />
         : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} onProblemSelect={(problemId) => { setSelectedProblemId(problemId); setActivity('problem') }} />
-        : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
+        : activity === 'list' ? <ProblemList onSelect={selectProblem} canJoinCourse={userRole === 'student'} /> : (
 
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>

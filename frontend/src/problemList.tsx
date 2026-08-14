@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Terminal } from 'lucide-react'
+import { ArrowRight, BookOpenCheck, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Plus, Search, Terminal } from 'lucide-react'
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 import AcornIcon from './AcornIcon'
+import { getStudentCourses, joinStudentCourse, type StudentCourse } from './educatorService'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 const PROBLEMS_PER_PAGE = 10
 
-export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) => void }) {
+export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (problem: ProblemSummary) => void; canJoinCourse?: boolean }) {
   const [problems, setProblems] = useState<ProblemSummary[]>([])
   const [source, setSource] = useState<ProblemListSource>('local')
   const [query, setQuery] = useState('')
@@ -15,6 +16,10 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [courses, setCourses] = useState<StudentCourse[]>([])
+  const [inviteCode, setInviteCode] = useState('')
+  const [courseMessage, setCourseMessage] = useState('')
+  const [joiningCourse, setJoiningCourse] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -26,6 +31,28 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
       .finally(() => setLoading(false))
     return () => controller.abort()
   }, [])
+
+  useEffect(() => {
+    if (!canJoinCourse) return
+    getStudentCourses().then(setCourses).catch((caught) => setCourseMessage(caught instanceof Error ? caught.message : '참여 강의를 불러오지 못했습니다.'))
+  }, [canJoinCourse])
+
+  const joinCourse = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!inviteCode.trim()) return
+    setJoiningCourse(true)
+    setCourseMessage('')
+    try {
+      const course = await joinStudentCourse(inviteCode)
+      setCourses((items) => items.some((item) => item.id === course.id) ? items : [...items, course])
+      setInviteCode('')
+      setCourseMessage(`${course.title} 강의에 참여했습니다.`)
+    } catch (caught) {
+      setCourseMessage(caught instanceof Error ? caught.message : '강의에 참여하지 못했습니다.')
+    } finally {
+      setJoiningCourse(false)
+    }
+  }
 
   const filtered = useMemo(() => problems
     .filter((problem) => {
@@ -70,6 +97,13 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
           <div><span>GOOD TO SEE YOU</span><h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1><p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p></div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>
         </div>
+
+        {canJoinCourse && <section className="student-course-section">
+          <div className="student-course-heading"><div><BookOpenCheck size={17} /><strong>내 강의</strong></div><span>교수자에게 받은 코드로 다른 강의에도 참여할 수 있어요.</span></div>
+          {courses.length > 0 && <div className="student-course-chips">{courses.map((course) => <span key={course.id}><strong>{course.title}</strong><small>{course.term || '학기 미정'} · {course.educatorName}</small></span>)}</div>}
+          <form onSubmit={joinCourse}><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="강의 초대 코드 입력" aria-label="강의 초대 코드" /><button type="submit" disabled={joiningCourse || !inviteCode.trim()}>{joiningCourse ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} 강의 참여</button></form>
+          {courseMessage && <p>{courseMessage}</p>}
+        </section>}
 
         {!loading && !error && recommendations.length > 0 && (
           <section className="recommended-section">

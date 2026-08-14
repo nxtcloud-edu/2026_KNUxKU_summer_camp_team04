@@ -23,6 +23,8 @@ export type EducatorAssignment = {
 }
 
 export type EducatorDashboardData = {
+  courseId: string
+  inviteCode: string
   courseTitle: string
   courseSubtitle: string
   totalStudents: number
@@ -34,15 +36,83 @@ export type EducatorDashboardData = {
   assignments: EducatorAssignment[]
 }
 
-type DashboardResponse = Partial<EducatorDashboardData> & Record<string, unknown>
+export type EducatorCourse = {
+  id: string
+  title: string
+  term: string
+  educatorName: string
+  inviteCode: string
+  studentCount: number
+  assignedProblemCount: number
+}
 
-const DEFAULT_COURSE_ID = 'demo-course'
+export type StudentCourse = {
+  id: string
+  title: string
+  term: string
+  educatorName: string
+  assignedProblemCount: number
+}
 
-export async function getEducatorDashboard(courseId = DEFAULT_COURSE_ID): Promise<EducatorDashboardData | null> {
+export async function getStudentCourses(): Promise<StudentCourse[]> {
+  if (!isApiConfigured) return []
+  return normalizeStudentCourses(await apiRequest<unknown>('/student/courses'))
+}
+
+export async function joinStudentCourse(inviteCode: string): Promise<StudentCourse> {
+  const payload = await apiRequest<unknown>('/student/courses/join', {
+    method: 'POST',
+    body: JSON.stringify({ invite_code: inviteCode.trim() }),
+  })
+  const [course] = normalizeStudentCourses([payload])
+  if (!course) throw new Error('강의 정보가 올바르지 않습니다.')
+  return course
+}
+
+function normalizeStudentCourses(payload: unknown): StudentCourse[] {
+  if (!Array.isArray(payload)) return []
+  return payload.flatMap((item) => isObject(item) && typeof item.id === 'string' ? [{
+    id: item.id,
+    title: stringOr(item.title) || '강의',
+    term: stringOr(item.term),
+    educatorName: stringOr(item.educator_name) || '교수자',
+    assignedProblemCount: numberOr(item.assigned_problem_count, 0),
+  }] : [])
+}
+
+export async function getEducatorCourses(): Promise<EducatorCourse[]> {
+  if (!isApiConfigured) return []
+  const payload = await apiRequest<unknown>('/educator/courses')
+  if (!Array.isArray(payload)) return []
+  return payload.flatMap((item) => isObject(item) && typeof item.id === 'string' ? [{
+    id: item.id,
+    title: stringOr(item.title) || '새 강의',
+    term: stringOr(item.term),
+    educatorName: stringOr(item.educator_name) || '교수자',
+    inviteCode: stringOr(item.invite_code),
+    studentCount: numberOr(item.student_count, 0),
+    assignedProblemCount: numberOr(item.assigned_problem_count, 0),
+  }] : [])
+}
+
+export async function createEducatorCourse(title: string, term: string): Promise<EducatorCourse> {
+  const item = await apiRequest<Record<string, unknown>>('/educator/courses', {
+    method: 'POST',
+    body: JSON.stringify({ title, term, problem_ids: [] }),
+  })
+  return {
+    id: String(item.id), title: stringOr(item.title) || title, term: stringOr(item.term) || term,
+    educatorName: stringOr(item.educator_name) || '교수자', inviteCode: stringOr(item.invite_code),
+    studentCount: numberOr(item.student_count, 0), assignedProblemCount: numberOr(item.assigned_problem_count, 0),
+  }
+}
+
+export async function getEducatorDashboard(course: EducatorCourse): Promise<EducatorDashboardData | null> {
   if (!isApiConfigured) return null
+  const courseId = course.id
 
   const [dashboard, students, attention] = await Promise.all([
-    apiRequest<DashboardResponse>(`/educator/courses/${encodeURIComponent(courseId)}/dashboard`),
+    apiRequest<Record<string, unknown>>(`/educator/courses/${encodeURIComponent(courseId)}/dashboard`),
     apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/students`),
     apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/attention`).catch(() => null),
   ])
@@ -50,13 +120,16 @@ export async function getEducatorDashboard(courseId = DEFAULT_COURSE_ID): Promis
   const normalizedStudents = normalizeStudents(students)
   const attentionStudents = normalizeStudents(attention).length ? normalizeStudents(attention) : normalizedStudents.filter((student) => student.status !== '순조로움')
 
+  const metrics = isObject(dashboard.metrics) ? dashboard.metrics : dashboard
   return {
-    courseTitle: typeof dashboard.courseTitle === 'string' ? dashboard.courseTitle : typeof dashboard.course_title === 'string' ? dashboard.course_title : 'Python 기초 01',
-    courseSubtitle: typeof dashboard.courseSubtitle === 'string' ? dashboard.courseSubtitle : typeof dashboard.course_subtitle === 'string' ? dashboard.course_subtitle : '2026 여름학기 · 수강생 현황',
-    totalStudents: numberOr(dashboard.totalStudents, dashboard.total_students, normalizedStudents.length),
-    averageProgress: numberOr(dashboard.averageProgress, dashboard.average_progress, average(normalizedStudents.map((student) => student.progress))),
-    completionRate: numberOr(dashboard.completionRate, dashboard.completion_rate, 0),
-    needsHelp: numberOr(dashboard.needsHelp, dashboard.needs_help, attentionStudents.filter((student) => student.status === '도움 필요').length),
+    courseId,
+    inviteCode: course.inviteCode,
+    courseTitle: course.title,
+    courseSubtitle: `${course.term || '학기 미정'} · 수강생 ${course.studentCount}명 · 담당 교수 ${course.educatorName}`,
+    totalStudents: numberOr(metrics.student_count, normalizedStudents.length),
+    averageProgress: numberOr(metrics.average_progress, average(normalizedStudents.map((student) => student.progress))),
+    completionRate: numberOr(metrics.completion_rate, 0),
+    needsHelp: numberOr(metrics.needs_attention_count, attentionStudents.filter((student) => student.status === '도움 필요').length),
     students: normalizedStudents,
     attentionStudents,
     assignments: normalizeAssignments(dashboard.assignments),
@@ -66,9 +139,9 @@ export async function getEducatorDashboard(courseId = DEFAULT_COURSE_ID): Promis
 function normalizeStudents(payload: unknown): EducatorStudent[] {
   const items = Array.isArray(payload)
     ? payload
-    : isObject(payload) && Array.isArray(payload.students)
-      ? payload.students
-      : []
+    : isObject(payload) && Array.isArray(payload.items)
+      ? payload.items
+      : isObject(payload) && Array.isArray(payload.students) ? payload.students : []
 
   return items.flatMap((item) => {
     if (!isObject(item)) return []
