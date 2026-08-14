@@ -24,6 +24,7 @@ import {
 import AiTutorPanel from './AiTutorPanel'
 import { onUnauthorized } from './api'
 import EducatorPage from './EducatorPage'
+import LandingPage from './LandingPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
 import { preparePython, runPython } from './pythonRunner'
@@ -117,7 +118,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [menuOpen, setMenuOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [isDark, setIsDark] = useState(false)
-  const [activity, setActivity] = useState<'problem' | 'trace' | 'list' | 'mypage' | 'educator'>(() => userRole === 'educator' ? 'educator' : 'list')
+  const [activity, setActivity] = useState<'landing' | 'problem' | 'trace' | 'list' | 'mypage' | 'educator'>(() => userRole === 'educator' ? 'educator' : userRole ? 'list' : 'landing')
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null)
   const [profileAvatar, setProfileAvatar] = useState(() => {
     try {
@@ -128,6 +129,15 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   })
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  // 쿠키로 로그인이 복원되는 경우 userRole은 마운트 **이후에** 도착한다. 그때 아직
+  // 랜딩에 있으면 앱 화면으로 넘긴다 (이미 로그인한 사람에게 소개 페이지를 보일
+  // 이유가 없다). 사용자가 직접 로고를 눌러 랜딩으로 온 경우를 덮지 않도록 1회만 동작한다.
+  const autoRouted = useRef(false)
+  useEffect(() => {
+    if (autoRouted.current || !userRole) return
+    autoRouted.current = true
+    setActivity((current) => (current === 'landing' ? (userRole === 'educator' ? 'educator' : 'list') : current))
+  }, [userRole])
 
   // Coding Trace 수집. 세션은 **첫 편집이나 첫 실행 때** 지연 생성된다 --
   // 아래 문제 로드 useEffect 는 마운트 즉시 1회 돌기 때문에, 거기서 세션을 만들면
@@ -326,17 +336,14 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-left">
-          <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity('list')}>
+          <button className="brand" type="button" aria-label="TUTORY 홈" onClick={() => setActivity(userRole ? 'list' : 'landing')}>
             <img src="/TUTORY_logo.svg" alt="" />
           </button>
         </div>
         <div className="topbar-actions">
-          <div className={`runtime-pill ${runtimeStatus}`}>
-            <span className="status-dot" />
-            {runtimeStatus === 'loading' && 'Python 준비 중'}
-            {runtimeStatus === 'ready' && 'Python 준비됨'}
-            {runtimeStatus === 'error' && '실행 환경 오류'}
-          </div>
+          {/* 실행 환경(Python) 상태 배지는 상단에서 제거했다. 같은 정보를 우측 메뉴의
+              상태 행이 이미 보여주고, 랜딩/목록 화면에서는 아직 실행할 코드가 없어
+              "실행 환경 오류"가 첫인상으로 노출되는 부작용만 있었다. */}
           {userRole ? <button className="profile-trigger" type="button" aria-label="도토리창고 열기" onClick={() => setActivity('mypage')}>
             {profileAvatar ? <img src={profileAvatar} alt="내 프로필" /> : <UserRound size={18} />}
           </button> : <button className="guest-login-button" type="button" onClick={onLogin}>로그인</button>}
@@ -375,7 +382,12 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </div>
       </header>
 
-      {activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
+      {activity === 'landing' ? (
+        <LandingPage
+          onStart={() => (userRole ? setActivity('list') : onSignup())}
+        />
+      )
+        : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
         : activity === 'educator' ? <EducatorPage />
         : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} onProblemSelect={(problemId) => { setSelectedProblemId(problemId); setActivity('problem') }} />
         : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
