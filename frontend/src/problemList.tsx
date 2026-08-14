@@ -9,7 +9,7 @@ import squirrelTutor from './assets/squirrel-tutor-v2.png'
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 const PROBLEMS_PER_PAGE = 10
 
-export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (problem: ProblemSummary) => void; canJoinCourse?: boolean }) {
+export function ProblemList({ onSelect, canJoinCourse = false, isAuthenticated = false }: { onSelect: (problem: ProblemSummary) => void; canJoinCourse?: boolean; isAuthenticated?: boolean }) {
   const [problems, setProblems] = useState<ProblemSummary[]>([])
   const [source, setSource] = useState<ProblemListSource>('local')
   const [query, setQuery] = useState('')
@@ -23,7 +23,7 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
   const [joiningCourse, setJoiningCourse] = useState(false)
   const [assignments, setAssignments] = useState<EducatorAssignment[]>([])
   const [selectedCourseId, setSelectedCourseId] = useState('')
-  const dailySolvedStats = useMemo(() => buildDailySolvedStats(getAllLearningProgress()), [])
+  const dailySolvedStats = useMemo(() => isAuthenticated ? buildDailySolvedStats(getAllLearningProgress()) : [], [isAuthenticated])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -120,7 +120,7 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
       <div className="problem-list-container">
         <div className="home-utility"><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
         <div className="problem-list-heading home-heading">
-          <div className="home-hero-main">
+          <div className={`home-hero-main ${isAuthenticated ? '' : 'no-chart'}`}>
             <div className="home-squirrel-message">
               <img src={squirrelTutor} alt="" />
               <div className="home-squirrel-copy">
@@ -129,7 +129,7 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
                 <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
               </div>
             </div>
-            <HomeDailySolvedChart stats={dailySolvedStats} />
+            {isAuthenticated && <HomeDailySolvedChart stats={dailySolvedStats} />}
           </div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>
         </div>

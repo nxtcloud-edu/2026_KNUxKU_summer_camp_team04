@@ -535,6 +535,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 .problem-list-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; margin: 27px 0 29px; }
 .home-heading { margin-top: 35px; margin-bottom: 38px; }
 .home-hero-main { min-width: 0; flex: 1; display: grid; grid-template-columns: minmax(410px, 1fr) minmax(340px, 430px); align-items: end; gap: 28px; }
+.home-hero-main.no-chart { grid-template-columns: minmax(0, 1fr); }
 .problem-list-heading > div:first-child > span { color: var(--brand); font-size: 10px; font-weight: 500; letter-spacing: .12em; }
 .problem-list-heading h1 { margin: 7px 0; color: var(--text); font-size: clamp(28px, 4vw, 39px); font-weight: 600; letter-spacing: -.05em; }
 .home-heading h1 { line-height: 1.22; }
