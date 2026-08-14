@@ -90,6 +90,7 @@ def install(app: Any, *, respect_setting: bool = False, wiring: str | None = Non
         # Depends라, 매번 새로 만들면 httpx 연결 풀도 매번 새로 생긴다.
         client = HttpAgentClient()
         app.dependency_overrides[get_agent] = lambda: client
+        _install_problem_generator(app, client)
         log.info("tutor_agent 서비스(%s)를 get_agent에 연결했습니다.", client.base_url)
         if not client.is_available():
             # 치명적이지 않다 — 서비스가 나중에 떠도 되고, 그동안은 WAIT로 폴백한다.
@@ -103,6 +104,40 @@ def install(app: Any, *, respect_setting: bool = False, wiring: str | None = Non
         # 여기서 던지면 backend가 아예 기동하지 못한다. Agent 없이라도 떠야 한다.
         log.exception("tutor_agent 연결 실패. backend는 WaitAgent로 계속 동작합니다.")
     return app
+
+
+def _install_problem_generator(app: Any, client: Any) -> None:
+    """복습 문제 생성 seam(`app.review.get_problem_generator`)도 함께 치환한다.
+
+    **실패해도 조용히 넘어간다.** 이 seam은 backend에 나중에 생긴 것이라, 이
+    모듈이 그것 없는 버전의 backend와도 함께 동작해야 한다 (agent와 backend는
+    각자 따로 배포/체크아웃될 수 있다). 여기서 ImportError를 밖으로 내면
+    `install()`의 except가 통째로 잡아서 **agent 개입 배선까지 같이** 죽는다 —
+    복습 문제라는 부가 기능 때문에 실시간 튜터가 꺼지는 건 명백히 잘못된 교환이다.
+    """
+    try:
+        from app.review.interface import GenerationResult, get_problem_generator
+    except Exception:
+        log.info("backend에 복습 문제 생성 seam이 없습니다. 그 기능만 건너뜁니다.")
+        return
+
+    class _HttpProblemGenerator:
+        """`ProblemGeneratorProtocol` 구현. HTTP 클라이언트를 감싸기만 한다."""
+
+        name = "tutor_agent"
+
+        def generate(self, request: dict[str, Any]) -> Any:
+            body = client.generate_problem(request)
+            return GenerationResult(
+                is_valid=bool(body.get("is_valid")),
+                problem_json=body.get("problem_json"),
+                error_message=body.get("error_message"),
+                failed_categories=list(body.get("failed_categories") or []),
+            )
+
+    generator = _HttpProblemGenerator()
+    app.dependency_overrides[get_problem_generator] = lambda: generator
+    log.info("tutor_agent 서비스(%s)를 get_problem_generator에 연결했습니다.", client.base_url)
 
 
 def create_app() -> Any:

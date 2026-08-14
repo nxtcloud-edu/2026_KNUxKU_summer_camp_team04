@@ -143,6 +143,13 @@ ACTION_TYPE_TO_AGENT_ACTION: dict[str, AgentAction] = {
 #: 그 필드로 옮긴다 — `state_agent`가 LLM 없이 이해도 확인 경로로 보낸다.
 COMPREHENSION_CHECK_SIGNAL = "UNDERSTANDING_UNCERTAIN"
 
+#: backend `app/agent/router.py`가 SOS(`AgentDecideRequest.trigger ==
+#: "HELP_REQUESTED"`) 요청일 때 `trigger`/`process_status`를 이 값으로 덮어써서
+#: 넘긴다 (Monitor의 R0가 실제로 만들어냈을 값과 같다). `paste_detected`와 같은
+#: 방식으로 옮긴다 — `state_agent`가 이걸 보면 should_intervene을 LLM에게
+#: 묻지 않고 고정한다 (자세한 배경은 `state_agent._help_requested_state()` 참고).
+HELP_REQUESTED_SIGNAL = "HELP_REQUESTED"
+
 #: judge 결과 중 "점수 없음(에러)"에 해당하는 status (backend/app/enums.py 참고).
 JUDGE_ERROR_STATUSES = frozenset(
     {"RUNTIME_ERROR", "SYNTAX_ERROR", "TIME_LIMIT", "INTERNAL_ERROR"}
@@ -259,6 +266,12 @@ def _is_comprehension_check(ctx: Any) -> bool:
     return COMPREHENSION_CHECK_SIGNAL in (trigger, status)
 
 
+def _is_explicit_help_request(ctx: Any) -> bool:
+    trigger = str(_field_of(ctx, "trigger", "") or "")
+    status = str(_field_of(ctx, "process_status", "") or "")
+    return HELP_REQUESTED_SIGNAL in (trigger, status)
+
+
 def to_session_context(ctx: Any) -> SessionContext:
     """backend `AgentContext`(또는 같은 필드를 가진 dict) → agent `SessionContext`.
 
@@ -272,6 +285,7 @@ def to_session_context(ctx: Any) -> SessionContext:
     | `edit_churn_count` | `features["same_region_edit_count"]` | 같은 영역 반복 수정 = churn |
     | `cursor_stuck_seconds` | 0.0 | backend는 커서 위치를 추적하지 않는다 |
     | `paste_detected` | `trigger`/`process_status == UNDERSTANDING_UNCERTAIN` | backend R2(대규모 변경 직후 통과) = 이해도 확인 분기 |
+    | `help_requested` | `trigger`/`process_status == HELP_REQUESTED` | backend `/agent/decide`가 SOS 요청일 때 덮어쓰는 값 (`app/agent/router.py`) |
     | `session_ended` | False | backend는 세션이 살아 있을 때만 우리를 부른다 |
     | `seconds_since_last_intervention` | None | backend ctx는 개입 이력의 seq만 준다(초 없음). 쿨다운은 backend Monitor가 이미 적용한다 |
     | `backend_signals` | ctx 전체 요약 | 위 표로 표현되지 않는 신호(트리거/근거/문제 설명/features 전체)를 LLM 프롬프트까지 그대로 실어 보낸다 |
@@ -297,6 +311,7 @@ def to_session_context(ctx: Any) -> SessionContext:
         edit_churn_count=_as_int(features.get("same_region_edit_count", 0)),
         cursor_stuck_seconds=0.0,
         paste_detected=_is_comprehension_check(ctx),
+        help_requested=_is_explicit_help_request(ctx),
         backend_signals={
             "process_status": str(_field_of(ctx, "process_status", "") or ""),
             "trigger": _field_of(ctx, "trigger"),

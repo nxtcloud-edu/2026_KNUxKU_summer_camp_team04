@@ -28,6 +28,7 @@ import EducatorPage from './EducatorPage'
 import LandingPage from './LandingPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
+import ReviewProblemCard from './ReviewProblemCard'
 import { preparePython, runPython, runPythonWithStdin } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
@@ -534,6 +535,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
             ) : judgeError ? <JudgeErrorView message={judgeError} /> : !result ? (
               <div className="empty-state"><Play /><strong>준비가 되었어요</strong><p>코드를 작성하고 실행해 보세요.</p></div>
             ) : <JudgeResultView result={result} mode={mode} />}
+
             {problem && (
               <InteractiveTerminal
                 input={terminalInput}
@@ -542,6 +544,20 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
                 running={isTerminalRunning}
                 onInputChange={setTerminalInput}
                 onRun={runInteractiveTerminal}
+              />
+            )}
+
+            {/*
+              복습 문제 카드는 **통과했을 때만** 띄운다. 아직 틀리고 있는 학생에게
+              "비슷한 문제 하나 더"를 권하는 건 도움이 아니라 방해다 — 지금 문제를
+              끝내는 게 먼저다.
+            */}
+            {result?.status === 'ACCEPTED' && (
+              <ReviewProblemCard
+                sourceProblemId={problem?.problem_id ?? null}
+                isAuthenticated={Boolean(userRole)}
+                onRequireLogin={() => setLoginPrompt('복습 문제 생성')}
+                onOpenProblem={(problemId) => setSelectedProblemId(problemId)}
               />
             )}
           </div>
@@ -568,7 +584,9 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} intervention={trace.intervention} />
+        {/* onHintRequest는 넘기지 않는다 — SOS 중복 응답 수정 이후 HINT_REQUEST는
+            backend가 /agent/decide에서 한 번만 기록한다 (AiTutorPanel 주석 참고). */}
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} intervention={trace.intervention} tutorPending={trace.tutorPending} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}

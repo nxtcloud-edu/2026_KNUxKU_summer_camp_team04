@@ -78,6 +78,13 @@ DEFAULT_READ_TIMEOUT_SECONDS = 30.0
 #: 서비스가 안 떠 있는 경우를 빨리 포기하기 위한 값. 읽기 타임아웃과 분리한다.
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 0.5
 
+#: 복습 문제 생성(`/generate-problem`)의 읽기 타임아웃. `decide()`와 **별도다.**
+#: 이쪽은 LLM 생성 + judge 샌드박스 실행(도커 컨테이너 기동)이라 성격이 다르다 —
+#: 실측 ~25초이고, judge 검증에 실패하면 최대 2회 재시도(problem_generator_agent.
+#: MAX_RETRIES)까지 돌아 3배가 될 수 있다. 그래서 그 최악을 담을 값으로 잡는다.
+#: 학생이 이 시간을 직접 기다리지는 않는다 — backend가 백그라운드로 부른다.
+DEFAULT_GENERATE_TIMEOUT_SECONDS = 180.0
+
 #: backend `AgentContext`에서 서비스로 넘길 필드 (= 계약).
 CONTEXT_FIELDS = (
     "session_id",
@@ -221,6 +228,54 @@ class HttpAgentClient:
         except Exception:
             log.warning("Agent 서비스 응답 해석 실패: %r", body, exc_info=True)
             return _wait_decision(ctx, WAIT_REASON_BAD_RESPONSE)
+
+    def generate_problem(
+        self, request: dict[str, Any], *, timeout_seconds: float | None = None
+    ) -> dict[str, Any]:
+        """복습 문제 생성. **`decide()`와 마찬가지로 예외를 던지지 않는다.**
+
+        실패는 전부 `{"is_valid": False, "error_message": ...}` 형태로 돌려준다
+        — 호출자(backend의 백그라운드 태스크)가 이 모양 하나만 처리하면 되도록.
+
+        `decide()`와 타임아웃을 **분리한다.** 이쪽은 LLM 생성 + judge 샌드박스
+        실행(도커 컨테이너 기동 포함)이라 성격이 완전히 다르다 — 실측 ~25초이고
+        judge 검증에 실패해 재시도까지 돌면 그 배가 된다. `decide()`의 30초를
+        그대로 쓰면 정상 동작을 타임아웃으로 죽인다.
+
+        Args:
+            request: agent `ReviewRequest` 모양의 dict.
+            timeout_seconds: 읽기 타임아웃. None이면
+                `AGENT_GENERATE_TIMEOUT_SECONDS` 환경변수, 그것도 없으면
+                `DEFAULT_GENERATE_TIMEOUT_SECONDS`.
+        """
+        read_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else _env_float(
+                "AGENT_GENERATE_TIMEOUT_SECONDS", DEFAULT_GENERATE_TIMEOUT_SECONDS
+            )
+        )
+        try:
+            response = self._get_client().post(
+                "/generate-problem",
+                json=request,
+                timeout=httpx.Timeout(read_timeout, connect=self._connect_timeout),
+            )
+            response.raise_for_status()
+            body = response.json()
+        except Exception as exc:
+            log.warning(
+                "Agent 서비스(%s) 문제 생성 호출 실패.", self.base_url, exc_info=True
+            )
+            return {
+                "is_valid": False,
+                "error_message": f"Agent 서비스를 호출하지 못했습니다: {exc}",
+            }
+
+        if not isinstance(body, dict):
+            log.warning("문제 생성 응답이 dict가 아닙니다: %r", body)
+            return {"is_valid": False, "error_message": "Agent 응답 형식이 올바르지 않습니다."}
+        return body
 
     def respond(self, ctx: Any, answer: str, question: str = "") -> AgentReply:
         """학생이 보낸 답변에 대한 튜터 응답을 받아온다. **예외를 던지지 않는다.**

@@ -29,6 +29,7 @@ from app.enums import (
     EnrollmentStatus,
     EventSource,
     EventType,
+    GeneratedProblemStatus,
     LearningStatus,
     ProgressStatus,
     SessionStatus,
@@ -383,3 +384,37 @@ class Event(SQLModel, table=True):
         Index("ix_event_session_seq", "session_id", "seq"),
         Index("ix_event_session_type_seq", "session_id", "type", "seq"),
     )
+
+
+class GeneratedProblem(SQLModel, table=True):
+    """복습 문제 생성 요청 1건. **문제 내용은 여기 담지 않는다.**
+
+    이 파일 상단의 원칙("문제는 JSON 파일이 진실이다. DB에도 두면 반드시
+    drift한다")을 생성 문제에도 그대로 적용한다. 검증을 통과한 문제 본문은
+    `Settings.generated_problems_path`에 `*.json`으로 떨어지고, 이 행은
+    **누가 언제 무엇으로부터 요청했는지와 그 결과가 어느 problem_id인지만**
+    가리킨다. 그래서 여기엔 description도 test case도 없다.
+
+    덕분에 `ProblemRepository.get()` 하나로 큐레이션 문제와 생성 문제가 똑같이
+    풀린다 — 세션/채점/agent context는 이 테이블의 존재조차 몰라도 된다.
+    """
+
+    __tablename__ = "generated_problems"
+
+    id: str = Field(default_factory=_id("genp"), primary_key=True, max_length=64)
+    user_id: str = Field(foreign_key="users.id", index=True, max_length=64)
+    # 이 복습의 바탕이 된 문제. 학생이 방금 틀린/막힌 문제다.
+    source_problem_id: str = Field(max_length=64, index=True)
+    # 생성이 끝나야 정해지므로 PENDING 동안은 None이다. READY면 이 값으로
+    # ProblemRepository.get()이 풀린다.
+    problem_id: str | None = Field(default=None, max_length=64, index=True)
+    status: GeneratedProblemStatus = Field(
+        # 다른 테이블과 같은 이유로 sa.Enum이 아니라 String이다 (Event.type 주석 참고):
+        # sa.Enum은 CHECK 제약을 구워버려서 나중에 상태를 하나 추가하는 순간
+        # 기존 codetrace.db의 insert가 전부 IntegrityError로 죽는다.
+        sa_column=Column(String(16), nullable=False, index=True)
+    )
+    # FAILED일 때 학생/개발자에게 보여줄 이유. judge 검증 실패 사유가 여기 담긴다.
+    error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    completed_at: datetime | None = Field(default=None)

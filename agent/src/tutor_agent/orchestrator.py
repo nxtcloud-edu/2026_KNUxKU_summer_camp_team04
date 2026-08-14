@@ -19,6 +19,15 @@
 (지도 방식: 단계별 구조 안내/explain)" 같은 3인칭 분석 리포트를 읽었다.
 자세한 경위와 역할 분리 표는 `agents/tutor_message_agent.py` docstring 참고.
 
+**붙여넣기(이해도 확인) 분기만은 LLM을 아예 안 부른다** (`comprehension_check.py`).
+`state_agent`가 이미 규칙만으로 이 분기를 판정하는데도 뒤이어 판단·작문 LLM이
+따라붙고 있었다 — 시스템 프롬프트가 approach/hint_level/action_type을 전부
+못박아 둔 상태라 LLM에 남은 자유도는 문장 표현뿐이었는데, 그 때문에 학생이
+5~6초를 더 기다렸다. 그래서 이 분기의 LLM 호출은 **0번**이고, 판단
+(`GuidedAction`)과 작문(`TutorMessage`) 모두 `comprehension_check`가 규칙으로
+만든다. 아래 `_comprehension_check()`를 별도 메서드로 둔 이유가 그것이다 —
+분기 도중에 LLM 경로로 흘러 들어갈 여지를 구조적으로 없앤다.
+
 2. 응답 파이프라인 — **학생이 답을 보냈을** 때 (`respond_to_student()`)
 ----------------------------------------------------------------------
 
@@ -54,7 +63,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .agents import evaluation_agent, guided_action_agent, state_agent, tutor_message_agent
+from .agents import (
+    comprehension_check,
+    evaluation_agent,
+    guided_action_agent,
+    state_agent,
+    tutor_message_agent,
+)
 from .schemas import (
     ActionPlan,
     AnswerEvaluation,
@@ -121,6 +136,12 @@ class TutorPipeline:
         if not student_state.should_intervene:
             return PipelineResult(student_state=student_state)
 
+        # 붙여넣기 분기는 판단도 작문도 규칙으로 한다 (LLM 호출 0번, 위 docstring 참고).
+        # `state_agent`가 이 분기를 LLM 없이 판정해 놓고도 여기서 다시 LLM을 부르면,
+        # "규칙만으로 처리한다"는 설계가 파이프라인 전체로는 지켜지지 않는다.
+        if student_state.entry_branch == "paste":
+            return self._comprehension_check(ctx, student_state)
+
         guided = guided_action_agent.plan(
             ctx,
             student_state,
@@ -154,6 +175,32 @@ class TutorPipeline:
             guidance_plan=guidance_plan,
             action_plan=action_plan,
             tutor_message=tutor_message,
+        )
+
+    def _comprehension_check(
+        self, ctx: SessionContext, student_state: StudentState
+    ) -> PipelineResult:
+        """붙여넣기 분기. LLM을 한 번도 부르지 않고 `PipelineResult`를 완성한다.
+
+        LLM 경로와 **같은 모양**을 만든다 (`GuidancePlan` + `ActionPlan` +
+        `TutorMessage`) — 그래서 `backend_adapter` 이하 하류는 이 분기가 있었는지
+        조차 모른다.
+        """
+        guided = comprehension_check.plan(ctx)
+        return PipelineResult(
+            student_state=student_state,
+            guidance_plan=GuidancePlan(
+                approach=guided.approach,
+                hint_level=guided.hint_level,
+                focus=guided.focus,
+                talking_points=guided.talking_points,
+                avoid=guided.avoid,
+                expects_student_reply=guided.expects_student_reply,
+            ),
+            action_plan=ActionPlan(
+                action_type=guided.action_type, payload=guided.payload
+            ),
+            tutor_message=comprehension_check.write(ctx),
         )
 
     # --- 2. 응답 파이프라인 -------------------------------------------------

@@ -19,6 +19,13 @@ type AiTutorPanelProps = {
    * 폴링이 몇 초마다 도므로, 같은 개입을 매 폴링마다 다시 쌓으면 안 된다.
    */
   intervention?: AgentIntervention | null
+  /**
+   * 서버가 개입 트리거를 감지했고 아직 힌트가 안 온 상태.
+   *
+   * 여기서 타이핑 인디케이터를 띄우는 게 체감 지연을 줄이는 핵심이다 -- 실제
+   * 힌트까지는 LLM 왕복이 남아 있지만, 학생은 그때부터 "튜터가 반응했다" 를 본다.
+   */
+  tutorPending?: boolean
 }
 
 type ChatMessage = {
@@ -32,7 +39,12 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, intervention }: AiTutorPanelProps) {
+// `onHintRequest`는 사라졌다. 예전에는 SOS를 누를 때 프런트가 HINT_REQUEST를
+// 따로 기록했는데, 그러면 하트비트가 그 이벤트를 보고 agent를 한 번 더 불러
+// 같은 답이 두 번째 버블로 렌더됐다 (origin/main의 SOS 중복 응답 수정).
+// 지금은 `/agent/decide`에 trigger를 실어 보내고 backend가 개입을 한 번만 기록한다
+// (`backend/app/agent/router.py`).
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, intervention, tutorPending = false }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [acorns, setAcorns] = useState(() => loadAcorns())
@@ -60,7 +72,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const chatThread = chatThreadRef.current
     if (!chatThread) return
     chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
-  }, [messages, offerState, sosIntroVisible])
+  }, [messages, offerState, sosIntroVisible, tutorPending])
 
   /**
    * 채팅 메시지 추가.
@@ -235,7 +247,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
             </div>
           )}
 
-          {messages.length === 0 && offerState !== 'asking' && !sosIntroVisible ? (
+          {messages.length === 0 && offerState !== 'asking' && !sosIntroVisible && !tutorPending ? (
             <div className="tutor-empty-chat">
               <MessageCircle size={25} />
               <strong>다람쥐 튜터가 기다리고 있어요</strong>
@@ -248,6 +260,21 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
                 <p>{message.text}</p>
               </div>
             ))
+          )}
+
+          {/*
+            서버가 트리거를 감지한 순간부터 실제 힌트가 도착할 때까지의 공백을 메운다.
+            이 공백이 5~10초라 인디케이터가 없으면 학생은 시스템이 아무 반응도 안 한
+            것으로 읽는다 -- 실제 지연은 그대로여도 체감은 여기서 갈린다.
+          */}
+          {tutorPending && (
+            <div className="chat-message tutor tutor-typing">
+              <img src={squirrelTutor} alt="" />
+              <p>
+                <span className="tutor-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                코드를 살펴보고 있어요
+              </p>
+            </div>
           )}
 
           {sosIntroVisible && !sosConfirmOpen && renderTutorOffer()}

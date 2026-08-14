@@ -197,6 +197,31 @@ def _comprehension_check_state() -> StudentState:
     )
 
 
+def _help_requested_state() -> StudentState:
+    """명시적 도움 요청(SOS 등) 전용 StudentState.
+
+    `paste_detected`와 달리 **`should_intervene`을 LLM에게 다시 묻지 않는다.**
+    "학생이 직접 요청했다"는 사실 자체가 이미 "지금 개입해야 한다"는 결론이라서다
+    — 여기서 LLM이 "아직 막힌 신호가 부족하다"며 WAIT을 고를 여지를 주면, 학생
+    입장에서는 버튼을 눌렀는데 아무 반응이 없는 것으로 보인다(실제로 겪은 문제 —
+    `backend/app/agent/router.py`의 이 분기 도입 배경 참고).
+
+    문구/지도 방식까지 규칙으로 고정하지는 않는다 — paste 분기는 "정답을 주지
+    말고 이해도만 확인"이라는 목적이 이미 정해져 있어 템플릿으로 충분하지만,
+    "도와줘"는 그 학생의 실제 코드·에러·문맥을 봐야 쓸모 있는 답이 나온다.
+    그래서 `orchestrator`는 이 분기를 `guided_action_agent`(LLM)로 그대로
+    보낸다 — `entry_branch != "paste"`이기만 하면 되므로 오케스트레이터
+    자체는 고칠 필요가 없다.
+    """
+    return StudentState(
+        state_summary="학생이 직접 도움을 요청했습니다.",
+        struggle_signals=["help_requested"],
+        should_intervene=True,
+        urgency="high",
+        entry_branch="help_requested",
+    )
+
+
 # --- Agent 배선 ---------------------------------------------------------------
 
 
@@ -233,6 +258,12 @@ def assess(ctx: SessionContext, agent: Agent | None = None, *, skip_gate: bool =
             `edit_churn_count`)가 우연히 이 모듈의 임계값을 못 넘겨 Monitor의
             판단을 무시하고 조용히 WAIT 처리해버리는 걸 막기 위해서다.
     """
+    # help_requested가 paste_detected보다 먼저다: 드물게 둘 다 참이면(붙여넣은
+    # 직후 바로 SOS를 누른 경우) "학생이 방금 명시적으로 도와달라고 했다"가
+    # "붙여넣기니까 이해도부터 확인하자"보다 우선하는 요청이다.
+    if ctx.help_requested:
+        return _help_requested_state()
+
     if skip_gate:
         if ctx.paste_detected:
             return _comprehension_check_state()

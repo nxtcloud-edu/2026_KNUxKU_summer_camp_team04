@@ -20,6 +20,13 @@ venv/
 # macOS Finder metadata
 .DS_Store
 
+# 복습 문제 생성 agent가 런타임에 만드는 문제. 사람이 만든 judge/problems와
+# 달리 학생별로 계속 늘어나는 로컬 산출물이라 커밋 대상이 아니다.
+backend/generated_problems/
+
+# 로컬에서 서버를 띄울 때 남기는 로그 (uvicorn stdout/stderr 리다이렉트 등)
+*.log
+
 # SQLite (backend). WAL 모드 사이드카는 *.db 패턴에 안 걸린다
 *.db
 *.db-shm

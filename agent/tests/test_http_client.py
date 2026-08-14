@@ -190,6 +190,31 @@ def test_bad_timeout_env_falls_back_to_default(monkeypatch) -> None:
     assert HttpAgentClient()._read_timeout == DEFAULT_READ_TIMEOUT_SECONDS
 
 
+# --- generate_problem() -------------------------------------------------------
+#
+# `decide()`와 같은 원칙: 어떤 실패도 예외로 새지 않는다. 다만 폴백 모양이
+# 다르다 -- WAIT 결정이 아니라 `{"is_valid": False, ...}` 리포트다.
+
+
+def test_generate_problem_returns_the_service_report() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/generate-problem"
+        return httpx.Response(
+            200,
+            json={
+                "is_valid": True,
+                "problem_json": {"title": "새 문제"},
+                "error_message": None,
+                "failed_categories": [],
+            },
+        )
+
+    report = _client(handler).generate_problem({"student_id": "s1", "concept": "loop"})
+
+    assert report["is_valid"] is True
+    assert report["problem_json"]["title"] == "새 문제"
+
+
 # --- respond() (학생이 답을 보낸 경로) ---------------------------------------
 #
 # `decide()`와 계약이 하나 다르다: **침묵으로 폴백하지 않는다.** 학생이 직접
@@ -228,6 +253,60 @@ def test_respond_happy_path_returns_message_and_evaluation() -> None:
     assert reply.understanding == "partial"
     assert reply.misconceptions == ["초기화 위치를 오해"]
     assert reply.next_focus == "초기화 위치"
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        pytest.param(lambda r: httpx.Response(500), id="5xx"),
+        pytest.param(lambda r: httpx.Response(422), id="4xx"),
+        pytest.param(
+            lambda r: httpx.Response(200, content=b"not json"), id="broken-json"
+        ),
+        pytest.param(
+            lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")),
+            id="connection-refused",
+        ),
+        pytest.param(
+            lambda r: (_ for _ in ()).throw(httpx.ReadTimeout("too slow")),
+            id="timeout",
+        ),
+    ],
+)
+def test_generate_problem_never_raises(handler) -> None:
+    report = _client(handler).generate_problem({"student_id": "s1", "concept": "loop"})
+
+    assert report["is_valid"] is False
+    assert report["error_message"]
+
+
+def test_generate_problem_rejects_non_dict_response() -> None:
+    """리스트가 오면 호출자가 .get()을 부르다 터진다 -- 여기서 막는다."""
+    report = _client(lambda r: httpx.Response(200, json=[1, 2, 3])).generate_problem({})
+
+    assert report["is_valid"] is False
+
+
+def test_generate_problem_timeout_is_separate_from_decide(monkeypatch) -> None:
+    """생성은 LLM + 도커 실행이라 실측 ~25초다. decide()의 30초를 그대로 쓰면
+    정상 동작이 타임아웃으로 죽는다."""
+    from tutor_agent.http_client import (
+        DEFAULT_GENERATE_TIMEOUT_SECONDS,
+        DEFAULT_READ_TIMEOUT_SECONDS,
+    )
+
+    assert DEFAULT_GENERATE_TIMEOUT_SECONDS > DEFAULT_READ_TIMEOUT_SECONDS
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions.get("timeout", {}).get("read")
+        return httpx.Response(200, json={"is_valid": True})
+
+    monkeypatch.setenv("AGENT_GENERATE_TIMEOUT_SECONDS", "77")
+    _client(handler).generate_problem({})
+
+    assert seen["timeout"] == 77.0
 
 
 @pytest.mark.parametrize(

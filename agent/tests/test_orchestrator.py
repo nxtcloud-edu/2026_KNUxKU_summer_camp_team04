@@ -172,9 +172,21 @@ def test_pipeline_skips_writing_when_action_is_no_op(*_mocks) -> None:
 @patch.object(tutor_message_agent, "build_agent", return_value=None)
 @patch.object(guided_action_agent, "build_agent", return_value=None)
 @patch.object(state_agent, "build_agent", return_value=None)
-def test_pipeline_paste_branch_goes_straight_to_guided_action(*_mocks) -> None:
-    """paste 분기(state_agent.assess가 이미 처리)는 should_intervene=True로 넘어오므로
-    오케스트레이터는 그대로 guided_action_agent로 이어가면 된다."""
+def test_pipeline_paste_branch_never_calls_llm(*_mocks) -> None:
+    """paste 분기는 LLM을 **한 번도** 부르지 않는다.
+
+    예전에는 state_agent가 규칙만으로 판정해 놓고도 guided_action_agent(LLM)로
+    이어갔다. 그 호출이 붙여넣기->힌트 표시 지연의 5~6초를 차지했다.
+
+    판단/작문이 분리된 뒤에는 막아야 할 LLM 호출이 **둘**이다 — 판단
+    (`guided_action_agent.plan`)과 작문(`tutor_message_agent.write_intervention`).
+    둘 다 `comprehension_check`가 규칙으로 대신한다.
+    """
+    paste_ctx = SessionContext(
+        student_id="s1",
+        problem_id="p1",
+        code="def solution(nums):\n    for n in nums:\n        print(n)\n",
+    )
     with (
         patch.object(
             state_agent,
@@ -185,6 +197,51 @@ def test_pipeline_paste_branch_goes_straight_to_guided_action(*_mocks) -> None:
                 should_intervene=True,
                 urgency="medium",
                 entry_branch="paste",
+            ),
+        ),
+        patch.object(guided_action_agent, "plan") as mock_plan,
+        patch.object(tutor_message_agent, "write_intervention") as mock_write,
+    ):
+        result = TutorPipeline().run(paste_ctx)
+
+    mock_plan.assert_not_called()
+    mock_write.assert_not_called()
+    assert result.guidance_plan is not None
+    assert result.guidance_plan.approach == "이해도 확인"
+    assert result.guidance_plan.hint_level == "nudge"
+    # 이해도 확인은 답을 받아야 의미가 있다 -> 학생 답변 평가 루프로 이어진다.
+    assert result.guidance_plan.expects_student_reply is True
+    assert result.action_plan is not None
+    assert result.action_plan.action_type == "send_message"
+    # 문구는 코드에서 실제로 뽑은 구조를 가리켜야 한다 (일반론이 아니라).
+    assert result.tutor_message is not None
+    assert "for" in result.tutor_message.message
+    assert result.tutor_message.expects_reply is True
+    # payload는 backend_adapter의 폴백 경로다. 어긋나면 학생이 보는 문구가
+    # 경로에 따라 달라진다.
+    assert result.action_plan.payload["message"] == result.tutor_message.message
+
+
+@patch.object(guided_action_agent, "build_agent", return_value=None)
+@patch.object(state_agent, "build_agent", return_value=None)
+def test_pipeline_help_requested_branch_still_uses_llm(*_mocks) -> None:
+    """help_requested는 paste와 달리 **LLM을 그대로 부른다.**
+
+    should_intervene 여부는 state_agent가 이미 고정해서 넘기지만("직접
+    요청했으니 무조건 개입"), 실제로 뭘 어떻게 도와줄지는 학생의 실제
+    코드/문맥을 봐야 쓸모 있는 답이 나온다 — paste처럼 정해진 템플릿으로
+    대신할 수 없다.
+    """
+    with (
+        patch.object(
+            state_agent,
+            "assess",
+            return_value=StudentState(
+                state_summary="학생이 직접 도움을 요청했습니다.",
+                struggle_signals=["help_requested"],
+                should_intervene=True,
+                urgency="high",
+                entry_branch="help_requested",
             ),
         ),
         patch.object(
@@ -206,7 +263,8 @@ def test_pipeline_paste_branch_goes_straight_to_guided_action(*_mocks) -> None:
     ):
         result = TutorPipeline().run(_ctx())
 
-    assert mock_plan.call_args.args[1].entry_branch == "paste"
+    mock_plan.assert_called_once()
+    assert mock_plan.call_args.args[1].entry_branch == "help_requested"
     assert result.guidance_plan is not None
     assert result.guidance_plan.approach == "이해도 확인"
     assert result.guidance_plan.expects_student_reply is True

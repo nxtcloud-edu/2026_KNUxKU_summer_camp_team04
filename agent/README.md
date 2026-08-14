@@ -37,12 +37,29 @@
 
 붙여넣기(`paste_detected`)는 "막힘" 신호가 아니라 성격이 달라(외부에서 답을 그대로
 복사했을 수도 있음), 힌트 분기가 아닌 **"이해도 확인" 분기**로 별도 처리합니다.
-게이트가 이를 감지하면 `state_agent.assess()`는 LLM을 호출하지 않고 곧장
-`entry_branch="paste"`인 `StudentState`를 만들어 GuidedActionAgent로 넘깁니다.
-그러면 지도 계획이 `approach="이해도 확인"` + `expects_student_reply=true`로
-잡히고, 응답 생성 에이전트가 "이 코드가 왜 이렇게 동작하는지 설명해볼래요?"
-같은 질문을 씁니다. 학생이 답하면 그 답을 평가 에이전트가 채점해 이해했는지
-판단합니다 — 이 분기가 학생 답변 평가 루프를 실제로 쓰는 대표 경로입니다.
+이 분기는 **LLM을 한 번도 호출하지 않습니다.** `state_agent.assess()`가 규칙만으로
+`entry_branch="paste"`인 `StudentState`를 만들고, 지도 계획(`GuidedAction`)과 학생이
+읽을 질문(`TutorMessage`) 모두 `agents/comprehension_check.py`가 붙여넣은 코드를
+`ast`로 파싱해 만듭니다.
+
+예전에는 여기서도 판단·작문 LLM을 불렀는데, `guided_action_agent`의 시스템
+프롬프트가 approach/hint_level/action_type을 전부 값까지 못박아 둔 탓에 LLM에 남은
+자유도는 문장 표현뿐이었습니다. 그 한 줄 때문에 학생이 5~6초를 더 기다렸습니다.
+
+규칙으로 만들면서 질문도 오히려 구체해졌습니다 — 코드에서 **설명을 가장 요구할
+만한 구조**(재귀 > 컴프리헨션 > `while` > `for` > 분기 > 함수 정의 순)를 하나 골라
+지목합니다. "이 코드가 왜 이렇게 동작하는지 생각해볼래요?"는 코드를 안 읽고도
+얼버무릴 수 있지만, "3번째 줄 `for` 반복문이 한 바퀴 돌 때마다 어떤 값이 어떻게
+바뀌나요?"는 그럴 수 없습니다.
+
+문구는 학생을 **붙여넣기로 단정하지 않습니다.** 대규모 변경 탐지에는 오탐이 있고
+(빠르게 타이핑한 초안도 걸립니다), "복사했죠?"로 읽히면 정직하게 작성한 학생에게
+모욕이 됩니다. 그래서 도입부는 관측 사실("코드가 한 번에 많이 바뀌었네요")에 머뭅니다.
+
+지도 계획은 `expects_student_reply=true`로 잡습니다 — 이해도 확인은 답을 받아야
+의미가 있으므로, 학생이 답하면 그 답이 아래 **응답 파이프라인**으로 들어가
+평가 에이전트가 이해했는지 판단합니다. 이 분기가 학생 답변 평가 루프를 실제로
+쓰는 대표 경로입니다.
 
 ### 지금 구조 (커밋 기준)
 
@@ -54,7 +71,7 @@
 flowchart TD
     B["학생 상태 파악 에이전트<br/>StateAgent<br/>1) 규칙 기반 게이트부터 확인 (LLM 없음)<br/>2) 통과 시에만 LLM 평가"]
     B -->|"세션 종료 / 쿨다운 / 신호 부족<br/>(LLM 미호출)"| STOP1((종료))
-    B -->|"paste_detected<br/>(LLM 미호출)"| C
+    B -->|"paste_detected<br/>(LLM 미호출)"| P["이해도 확인 질문 생성<br/>comprehension_check<br/>(ast 파싱, LLM 미호출)"]
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=False"| STOP2((종료: 관찰만))
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 + 행동 결정 에이전트<br/>GuidedActionAgent<br/>(내부 지시문만 만든다)"]
     C -->|"action_type=no_op<br/>(작문 생략)"| STOP3((종료: 아무 말 안 함))
@@ -62,6 +79,10 @@ flowchart TD
     D --> E(["학생 화면<br/>activity.message"])
 ```
 
+<<<<<<< HEAD
+| 단계 | 모듈 | 역할 | 출력(Pydantic) |
+|---|---|---|---|
+| 1 | `agents/state_agent.py` | 규칙 기반 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` |
 #### 2. 응답 파이프라인 — 학생이 답을 보냈다 (`TutorPipeline.respond_to_student()`)
 
 ```mermaid
@@ -75,6 +96,7 @@ flowchart TD
 |---|---|---|---|---|
 | 1 | `agents/state_agent.py` | 규칙 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` | ✗ |
 | 2 | `agents/guided_action_agent.py` | 개입한다면 **어떻게 지도할지**와 시스템이 실행할 행동을 결정 | `GuidedAction` | ✗ |
+| 2·3 대체 | `agents/comprehension_check.py` | **붙여넣기 분기 전용.** 2단계와 3단계를 **LLM 없이** 대신한다 (`ast` 파싱) | `GuidedAction` + `TutorMessage` | **✓** |
 | 3 | `agents/tutor_message_agent.py` | 그 계획으로 **학생에게 실제로 건넬 문장**을 쓴다 | `TutorMessage` | **✓** |
 | (학생 답변 시) | `agents/evaluation_agent.py` | **학생의 답변**을 보고 이해했는지 평가 | `AnswerEvaluation` | ✗ |
 
@@ -308,6 +330,7 @@ LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 �
 | Monitor 발화 (초기 구조, LLM 4회 순차) | ~~32초~~ |
 | Monitor 발화 (guidance+action 병합 후, LLM 2회 순차) | 16 ~ 18초 |
 | Monitor 발화 (**지금**, LLM 3회 순차: state → guided_action → tutor_message) | 16 ~ 18초 + 작문 1회 |
+| 붙여넣기 분기 (`UNDERSTANDING_UNCERTAIN`, **LLM 0회**) | **즉시** (`comprehension_check`, 순수 `ast` 파싱) |
 
 경위: 처음엔 LLM을 4번 순차 호출(state → guidance → action → evaluation)해서
 28~30초가 걸렸다. 세 번 손댔다.

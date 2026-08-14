@@ -196,6 +196,50 @@ def test_agent_decide_returns_wait_today(client):
     assert r.json()["reason"]
 
 
+def test_agent_decide_forwards_help_requested_trigger_into_context(client):
+    """`body.trigger == "HELP_REQUESTED"`(SOS)면 ctx.trigger/process_status를
+    덮어써 agent에게 전달해야 한다.
+
+    이전에는 `AgentDecideRequest.trigger`를 받기만 하고 버렸다 -- ctx는
+    build_context() 내부 evaluate()가 계산한 Monitor 자체 판정만 반영했다.
+    신호가 없는 세션(이 테스트처럼 방금 만든 세션)에서는 evaluate()가 아무
+    trigger도 만들지 않으므로, 이 덮어쓰기가 없으면 agent는 "학생이 직접
+    요청했다"는 사실을 전혀 못 보고 판단하게 된다 -- state_agent 쪽에서
+    should_intervene을 LLM에게 다시 묻다가 WAIT을 고르면, 학생 눈에는 SOS
+    버튼을 눌러도 반응이 없는 것으로 보인다.
+    """
+    fake = FakeAgent(
+        AgentDecision(state="x", concept=None, action=AgentAction.HINT, reason="ok")
+    )
+    app.dependency_overrides[get_agent] = lambda: fake
+    try:
+        sid = create(client)
+        r = client.post("/agent/decide", json={"session_id": sid, "trigger": "HELP_REQUESTED"})
+    finally:
+        app.dependency_overrides.pop(get_agent, None)
+
+    assert r.status_code == 200
+    assert len(fake.calls) == 1
+    ctx = fake.calls[0]
+    assert ctx.trigger == "HELP_REQUESTED"
+    assert ctx.process_status == "HELP_REQUESTED"
+
+
+def test_agent_decide_without_help_requested_trigger_leaves_context_untouched(client):
+    """trigger가 없거나 다른 값이면 build_context()가 계산한 값을 그대로 둔다."""
+    fake = FakeAgent(
+        AgentDecision(state="x", concept=None, action=AgentAction.WAIT, reason="ok")
+    )
+    app.dependency_overrides[get_agent] = lambda: fake
+    try:
+        sid = create(client)
+        client.post("/agent/decide", json={"session_id": sid})
+    finally:
+        app.dependency_overrides.pop(get_agent, None)
+
+    assert fake.calls[0].trigger is None
+
+
 def test_agent_context_is_actually_buildable(client, db):
     """LLM이 없어도 context builder는 진짜로 동작해야 한다.
 
@@ -222,3 +266,116 @@ def test_agent_context_is_actually_buildable(client, db):
     assert "RUN 3/5" in ctx.recent_trace
     assert ctx.features["run_count"] == 1
     assert ctx.process_status
+
+
+# --------------------------------------------------------------------------
+# DockerJudge가 judge에 넘기는 문제 dict
+#
+# 여기가 회귀 지점이다: 예전 어댑터는 `run_judge(code, problem_id)`를 불러서
+# judge가 `judge/problems/{id}.json`을 **자기가** 읽었다. 그러면 backend의
+# GENERATED_PROBLEMS_DIR에만 있는 복습 문제는 judge에 존재하지 않아 제출이
+# 500이 됐다 (실 스택에서 실제로 재현했다). 이제 문제 dict를 직접 넘긴다.
+# --------------------------------------------------------------------------
+
+from app.judge.docker_judge import DockerJudge, to_judge_problem
+from app.problems.service import ProblemRecord
+
+# `TestCase`라는 이름 그대로 import하면 pytest가 테스트 클래스로 수집하려 들며
+# 경고를 낸다 (dataclass라 __init__이 있어서 수집도 실패한다). 별칭으로 피한다.
+from app.problems.service import TestCase as ProblemTestCase
+
+
+def _function_call_problem(**over) -> ProblemRecord:
+    base = dict(
+        problem_id="review_genp_abc",
+        title="리스트 곱 구하기",
+        description="...",
+        difficulty="BEGINNER",
+        concepts=["loop"],
+        check_type="function_call",
+        function_name="product_list",
+        code_template="def product_list(arr):\n    pass",
+        public_test_cases=[ProblemTestCase(category="public_basic", input=[[1, 2]], expected=2)],
+        hidden_test_cases=[ProblemTestCase(category="hidden_zero", input=[[0]], expected=0)],
+        time_limit_sec=1.0,
+        memory_limit_mb=128,
+    )
+    base.update(over)
+    return ProblemRecord(**base)
+
+
+def test_to_judge_problem_keeps_function_call_shape():
+    payload = to_judge_problem(_function_call_problem())
+
+    assert payload["check_type"] == "function_call"
+    assert payload["function_name"] == "product_list"
+    assert payload["public_test_cases"] == [
+        {"category": "public_basic", "input": [[1, 2]], "expected": 2}
+    ]
+    assert payload["hidden_test_cases"] == [
+        {"category": "hidden_zero", "input": [[0]], "expected": 0}
+    ]
+    assert payload["time_limit_sec"] == 1.0
+    assert payload["memory_limit_mb"] == 128
+    # problem_id는 넘기지 않는다 -- judge가 파일을 다시 찾을 여지를 아예 없앤다.
+    assert "problem_id" not in payload
+
+
+def test_to_judge_problem_keeps_stdout_match_shape():
+    """stdout_match는 stdin/expected_stdout으로 나가고 function_name은 없다.
+
+    judge 문제 26개 중 23개가 이 타입이라 여기가 어긋나면 거의 전부가 깨진다.
+    """
+    record = _function_call_problem(
+        check_type="stdout_match",
+        function_name=None,
+        public_test_cases=[
+            ProblemTestCase(category="basic", stdin="1 2\n", expected_stdout="3\n")
+        ],
+        hidden_test_cases=[],
+    )
+    payload = to_judge_problem(record)
+
+    assert payload["public_test_cases"] == [
+        {"category": "basic", "stdin": "1 2\n", "expected_stdout": "3\n"}
+    ]
+    assert "function_name" not in payload
+
+
+def test_to_judge_problem_omits_absent_limits():
+    """judge는 `problem.get("time_limit_sec", DEFAULT)`로 읽는다.
+
+    키를 None으로 실으면 기본값이 아니라 None이 들어가 컨테이너 타임아웃 계산이
+    깨진다. judge 문제 3개(function_call)가 이 값이 없다.
+    """
+    payload = to_judge_problem(
+        _function_call_problem(time_limit_sec=None, memory_limit_mb=None)
+    )
+    assert "time_limit_sec" not in payload
+    assert "memory_limit_mb" not in payload
+
+
+def test_docker_judge_passes_problem_dict_not_problem_id(monkeypatch):
+    """생성 문제도 채점된다: judge는 파일을 찾지 않고 넘겨받은 dict를 쓴다."""
+    import sys
+    import types
+
+    calls: list[tuple] = []
+    fake_module = types.ModuleType("judge_service")
+
+    def run_judge_for_problem(code, problem, mode="run"):
+        calls.append((code, problem, mode))
+        return {"status": "ACCEPTED", "passed": 2, "total": 2}
+
+    fake_module.run_judge_for_problem = run_judge_for_problem  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "judge_service", fake_module)
+
+    record = _function_call_problem()
+    result = DockerJudge().judge(code="def product_list(a): return 1", problem=record, mode="submit")
+
+    assert result.status is JudgeStatus.ACCEPTED
+    assert result.passed == 2 and result.total == 2
+    code, problem, mode = calls[0]
+    assert mode == "submit"
+    assert problem == to_judge_problem(record)
+    assert record.problem_id not in str(problem)
