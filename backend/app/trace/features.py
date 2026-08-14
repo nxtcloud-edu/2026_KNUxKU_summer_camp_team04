@@ -93,6 +93,20 @@ class ProcessFeatures:
     recent_error_types: list[str] = field(default_factory=list)
     consecutive_error_count: int = 0
     snapshot_count: int = 0
+    # 마지막 **편집** 이후 흐른 시간. seconds_without_progress와 다르다:
+    # 그건 "마지막 채점 개선 이후"라 학생이 활발히 타이핑하는 중에도 계속
+    # 증가하므로 "지금 손을 놓고 있는가"를 판정할 수 없다. 편집이 하나도 없으면
+    # 세션 시작을 기준으로 잰다.
+    seconds_since_last_edit: int = 0
+    # 마지막 AGENT_TRIGGER 이후의 편집 수. 편집만으로 발화하는 규칙(R7b/R7c)이
+    # "지난번에 찔렀는데 학생이 아무것도 안 했으면 또 찌르지 않는다"를 지키는 데 쓴다.
+    # 트리거 이력이 없으면 전체 편집 수와 같다.
+    edits_since_last_trigger: int = 0
+    # 마지막 채점 결과 이후의 편집 수 = "고쳐놓고 아직 안 돌려본 것"이 있는가.
+    edits_since_last_result: int = 0
+    # 그 미검증 편집 중에 대규모 변경(붙여넣기 의심)이 있는가.
+    # large_change_detected와 창이 다르다 -- 계산부 주석 참고.
+    large_change_unverified: bool = False
     last_result: ResultObservation | None = None
     # monitor가 쓰는 보조 상태 (feature라기보단 문맥)
     last_progress_at: datetime | None = None
@@ -299,6 +313,48 @@ def extract_features(
         for s in edits
     )
 
+    # ---- 편집 시계 -------------------------------------------------------
+    # "마지막 편집 이후"를 잰다. 편집이 없으면 세션 시작 기준 -- 문제를 열어놓고
+    # 아무것도 안 친 학생도 유휴로 잡히게 하려는 것이다.
+    # 여기서도 시계는 서버다(server_timestamp가 아니라 스냅샷의 created_at을 쓰는
+    # 이유: 스냅샷은 편집 그 자체이고, 이벤트 seq는 배치 전송 타이밍에 흔들린다).
+    last_edit_at = snapshots[-1].created_at if snapshots else session.started_at
+    seconds_since_last_edit = seconds_between(last_edit_at, now)
+
+    # 마지막 트리거 이후의 편집 수. 스냅샷에는 seq가 없으므로 CODE_SNAPSHOT
+    # **이벤트**의 seq로 센다.
+    edits_since_last_trigger = sum(
+        1
+        for e in events
+        if EventType(e.type) is EventType.CODE_SNAPSHOT
+        and (last_trigger_seq is None or e.seq > last_trigger_seq)
+    )
+
+    # ---- 아직 실행해보지 않은 편집 ----------------------------------------
+    # large_change_detected와 창이 다르다. 그건 "**현재 결과를 만든** 변경이
+    # 대규모였는가"(R2: 붙여넣고 통과했다)라서 결과 이전의 편집을 포함한다.
+    # 이쪽은 "결과 **이후에** 고쳐놓고 아직 안 돌려봤는가"다 -- R7b가 잡으려는
+    # '붙여넣고 실행조차 안 함'이 정확히 이것이고, 창을 구분하지 않으면
+    # 큰 편집 -> 실행(문법 오류) 한 번에도 R7b가 발화한다(실제로 겪었다).
+    last_result_version = results[-1].code_version if results else 0
+    unverified_edits = [s for s in edits if s.version > last_result_version]
+    # **학생의 첫 편집은 제외한다.** 템플릿(3줄 `pass`)에서 첫 초안으로 가는 변경은
+    # change_ratio/change_size 기준을 거의 항상 넘긴다 -- 붙여넣기가 아니라 정상적인
+    # 작성인데도 매번 붙잡히면 개입이 소음이 된다.
+    #
+    # 이걸 빼면 "첫 행동이 붙여넣기"인 학생을 R7b가 놓치지만, 그 학생은 붙여넣은
+    # 코드를 실행해서 통과하는 순간 R2(대규모 변경 직후 통과)가 잡는다. 정작
+    # R7b만 잡을 수 있는 건 "이미 쓰던 코드를 통째로 갈아치우고 실행조차 안 한"
+    # 경우이고, 거기엔 반드시 앞선 편집이 존재한다.
+    first_edit_version = edits[0].version if edits else 0
+    replaceable = [s for s in unverified_edits if s.version > first_edit_version]
+    large_change_unverified = any(
+        s.change_ratio >= cfg.large_change_ratio
+        and s.change_size >= cfg.large_change_min_lines
+        and s.seconds_since_parent <= cfg.large_change_window_seconds
+        for s in replaceable
+    )
+
     return ProcessFeatures(
         elapsed_seconds=seconds_between(session.started_at, now),
         run_count=run_count,
@@ -325,6 +381,10 @@ def extract_features(
         if observed and observed[-1].status in ERROR_STATUSES
         else 0,
         snapshot_count=len(snapshots),
+        seconds_since_last_edit=seconds_since_last_edit,
+        edits_since_last_trigger=edits_since_last_trigger,
+        edits_since_last_result=len(unverified_edits),
+        large_change_unverified=large_change_unverified,
         last_result=results[-1] if results else None,
         last_progress_at=last_progress_at,
         last_hint_seq=last_hint_seq,

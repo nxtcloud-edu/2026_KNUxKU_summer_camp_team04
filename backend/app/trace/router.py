@@ -74,6 +74,10 @@ def _state_response(session_id: str, state: monitor.ProcessState) -> ProcessStat
             recent_error_types=f.recent_error_types,
             consecutive_error_count=f.consecutive_error_count,
             snapshot_count=f.snapshot_count,
+            seconds_since_last_edit=f.seconds_since_last_edit,
+            edits_since_last_trigger=f.edits_since_last_trigger,
+            edits_since_last_result=f.edits_since_last_result,
+            large_change_unverified=f.large_change_unverified,
             last_result=None
             if last is None
             else JudgeResultRead(
