@@ -7,8 +7,15 @@
  *
  * 히어로의 다람쥐(assets/squirrel-tutor-v2.png)가 이 페이지의 주인공이고,
  * 말풍선이 코딩 튜터 말투로 몇 문장을 돌아가며 보여준다.
+ *
+ * 스크롤에 반응하는 두 가지 장치:
+ *  1. useReveal -- 섹션/카드가 뷰포트에 들어오면 한 번만 페이드+슬라이드업.
+ *     (다시 스크롤을 올려도 안 사라진다 -- 깜빡임은 세련돼 보이지 않는다.)
+ *  2. ScrollSquirrel -- 화면 오른쪽 가장자리를 다람쥐가 스크롤 진행률만큼 내려온다.
+ *     "스크롤할 때마다 뭔가 움직인다"는 인상을 페이지 전체에 걸쳐 준다.
+ * 둘 다 prefers-reduced-motion을 존중한다 (모션을 줄이기로 한 사용자에겐 그냥 보여준다).
  */
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { Activity, ArrowRight, GraduationCap, Lightbulb, LineChart, Waypoints } from 'lucide-react'
 import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
@@ -57,6 +64,197 @@ const STEPS = [
   { no: '03', title: '막히면 튜터가 먼저 옵니다', body: '정답이 아니라 다음 한 걸음을 짚어주는 힌트와 활동이 도착합니다.' },
 ]
 
+/** 교육자 대시보드 실제 화면(반 전체 진행률 + 막힌 학생 표시)의 축소 미리보기.
+ *  실제 지표가 아니라 연출용 예시다 -- 오른쪽을 비워두는 대신 "무엇이 보이는지"를
+ *  그림으로 먼저 보여준다. */
+const EDUCATOR_PREVIEW = [
+  { name: '이OO', tag: '순항 중', percent: 82, stuck: false },
+  { name: '박OO', tag: '같은 오류 3회째', percent: 34, stuck: true },
+  { name: '김OO', tag: '막 시작함', percent: 12, stuck: false },
+]
+
+/**
+ * 뷰포트에 한 번 들어오면 visible=true로 고정한다.
+ *
+ * 스크롤을 올렸다 내렸다 할 때마다 카드가 사라졌다 나타나면 산만하고 "리액트가
+ * 자꾸 리렌더한다"는 인상을 준다 -- observer.disconnect()로 최초 1회만 반응한다.
+ * 모션을 줄이기로 한 사용자(prefers-reduced-motion)에게는 애니메이션 없이 바로 보여준다.
+ */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null)
+  const [reduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [visible, setVisible] = useState(reduced)
+
+  useEffect(() => {
+    if (reduced) return
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return
+        setVisible(true)
+        observer.disconnect()
+      },
+      { threshold: 0.2, rootMargin: '0px 0px -10% 0px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [reduced])
+
+  return { ref, visible }
+}
+
+/** 스크롤 진행률(0~1)을 rAF로 쓰로틀링해서 준다. 넓은 화면에서만 쓰인다(CSS로 숨김). */
+function useScrollProgress() {
+  const [progress, setProgress] = useState(0)
+  useEffect(() => {
+    let raf = 0
+    const update = () => {
+      const max = document.documentElement.scrollHeight - window.innerHeight
+      setProgress(max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0)
+    }
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(update)
+    }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+      cancelAnimationFrame(raf)
+    }
+  }, [])
+  return progress
+}
+
+/** 화면 오른쪽 가장자리를 다람쥐가 스크롤한 만큼 내려온다 -- "스크롤할 때마다 움직임"을
+ *  페이지 전체에 걸쳐 준다. 모션을 줄이기로 한 사용자에게는 아예 렌더하지 않는다. */
+function ScrollSquirrel() {
+  const [reduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const progress = useScrollProgress()
+  if (reduced) return null
+  return (
+    <div className="lp-scroll-guide" aria-hidden>
+      <span className="lp-scroll-track">
+        <img
+          className="lp-scroll-marker"
+          src={squirrelTutor}
+          alt=""
+          style={{ '--progress': progress } as CSSProperties}
+        />
+      </span>
+    </div>
+  )
+}
+
+/** "결과가 아니라 과정을 봅니다"처럼, 문장을 한 단어씩 순서대로 떠오르게 한다
+ *  (Apple 스타일 스크롤 리빌). 뷰포트에 들어온 뒤에는 CSS transition-delay가
+ *  단어 인덱스만큼 밀려서 한 단어씩 나타나는 것처럼 보인다. */
+function RevealHeading({ text, id }: { text: string; id?: string }) {
+  const { ref, visible } = useReveal<HTMLHeadingElement>()
+  const words = text.split(' ')
+  return (
+    <h2 className="lp-h2 lp-word-heading" id={id} ref={ref}>
+      {words.map((word, i) => (
+        // 공백을 span **밖**에 형제 텍스트 노드로 둔다 -- inline-block 안쪽 끝에 오는
+        // 공백은 브라우저가 줄바꿈 트리밍 규칙으로 폭 0으로 접어버려서, span
+        // 안에 넣으면 단어가 전부 붙어 렌더된다.
+        <Fragment key={`${word}-${i}`}>
+          <span className="lp-word" data-visible={visible} style={{ '--i': i } as CSSProperties}>
+            {word}
+          </span>
+          {i < words.length - 1 ? ' ' : ''}
+        </Fragment>
+      ))}
+    </h2>
+  )
+}
+
+type Feature = (typeof FEATURES)[number]
+
+function RevealCard({ icon: Icon, title, body, index }: Feature & { index: number }) {
+  const { ref, visible } = useReveal<HTMLElement>()
+  return (
+    <article
+      className="lp-card lp-reveal"
+      data-visible={visible}
+      ref={ref}
+      style={{ '--reveal-i': index } as CSSProperties}
+    >
+      <span className="lp-card-icon" aria-hidden>
+        <Icon size={22} />
+      </span>
+      <h3 className="lp-card-title">{title}</h3>
+      <p className="lp-card-body">{body}</p>
+    </article>
+  )
+}
+
+type Step = (typeof STEPS)[number]
+
+function RevealStep({ no, title, body, index }: Step & { index: number }) {
+  const { ref, visible } = useReveal<HTMLLIElement>()
+  return (
+    <li
+      className="lp-step lp-reveal"
+      data-visible={visible}
+      ref={ref}
+      style={{ '--reveal-i': index } as CSSProperties}
+    >
+      <span className="lp-step-no">{no}</span>
+      <h3 className="lp-step-title">{title}</h3>
+      <p className="lp-step-body">{body}</p>
+    </li>
+  )
+}
+
+function RevealMockRow({ name, tag, percent, stuck, index }: (typeof EDUCATOR_PREVIEW)[number] & { index: number }) {
+  const { ref, visible } = useReveal<HTMLDivElement>()
+  return (
+    <div
+      className="lp-mock-row lp-reveal"
+      data-stuck={stuck}
+      data-visible={visible}
+      ref={ref}
+      style={{ '--reveal-i': index } as CSSProperties}
+    >
+      <span className="lp-mock-avatar">{name.charAt(0)}</span>
+      <div className="lp-mock-info">
+        <strong>{name}</strong>
+        <div className="lp-mock-progress">
+          <i style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+      <span className="lp-mock-tag">
+        {stuck && <span className="lp-mock-dot" aria-hidden />}
+        {tag}
+      </span>
+    </div>
+  )
+}
+
+/** 섹션 하나를 한 덩어리로 페이드+슬라이드업 시키고 싶을 때 쓰는 얕은 래퍼.
+ *  (단어 단위 RevealHeading, 카드 단위 RevealCard와 달리 "블록" 단위 리빌.)
+ *  div/section 둘 다 HTMLElement라 useReveal 하나로 충분하다. */
+function RevealBlock({
+  as: Tag = 'div',
+  className,
+  children,
+}: {
+  as?: 'div' | 'section'
+  className?: string
+  children: ReactNode
+}) {
+  const { ref, visible } = useReveal<HTMLElement>()
+  return (
+    <Tag className={`${className ?? ''} lp-reveal`.trim()} data-visible={visible} ref={ref as Ref<HTMLDivElement>}>
+      {children}
+    </Tag>
+  )
+}
+
 export default function LandingPage({
   onStart,
 }: {
@@ -79,6 +277,8 @@ export default function LandingPage({
 
   return (
     <main className="lp">
+      <ScrollSquirrel />
+
       <section className="lp-hero">
         <div className="lp-hero-copy">
           <p className="lp-eyebrow">AI CODING TUTOR</p>
@@ -122,18 +322,10 @@ export default function LandingPage({
 
       <section className="lp-section" aria-labelledby="lp-features-title">
         <p className="lp-kicker">왜 다른가</p>
-        <h2 className="lp-h2" id="lp-features-title">
-          결과가 아니라 과정을 봅니다
-        </h2>
+        <RevealHeading text="결과가 아니라 과정을 봅니다" id="lp-features-title" />
         <div className="lp-grid">
-          {FEATURES.map(({ icon: Icon, title, body }) => (
-            <article className="lp-card" key={title}>
-              <span className="lp-card-icon" aria-hidden>
-                <Icon size={22} />
-              </span>
-              <h3 className="lp-card-title">{title}</h3>
-              <p className="lp-card-body">{body}</p>
-            </article>
+          {FEATURES.map((feature, i) => (
+            <RevealCard key={feature.title} index={i} {...feature} />
           ))}
         </div>
       </section>
@@ -144,32 +336,39 @@ export default function LandingPage({
           세 단계면 충분합니다
         </h2>
         <ol className="lp-steps">
-          {STEPS.map(({ no, title, body }) => (
-            <li className="lp-step" key={no}>
-              <span className="lp-step-no">{no}</span>
-              <h3 className="lp-step-title">{title}</h3>
-              <p className="lp-step-body">{body}</p>
-            </li>
+          {STEPS.map((step, i) => (
+            <RevealStep key={step.no} index={i} {...step} />
           ))}
         </ol>
       </section>
 
       <section className="lp-section lp-educator" aria-labelledby="lp-educator-title">
-        <div className="lp-educator-inner">
-          <span className="lp-card-icon" aria-hidden>
-            <GraduationCap size={22} />
-          </span>
-          <h2 className="lp-h2" id="lp-educator-title">
-            가르치는 사람에게는 반 전체의 과정이 보입니다
-          </h2>
-          <p className="lp-lede">
-            누가 어디서 막혀 있는지, 어떤 개념에서 반복해서 넘어지는지 한 화면에 모입니다. 코드 열람 범위는
-            강의별로 교수자가 정합니다.
-          </p>
+        <div className="lp-educator-grid">
+          <RevealBlock className="lp-educator-inner">
+            <span className="lp-card-icon" aria-hidden>
+              <GraduationCap size={22} />
+            </span>
+            <h2 className="lp-h2" id="lp-educator-title">
+              가르치는 사람에게는 반 전체의 과정이 보입니다
+            </h2>
+            <p className="lp-lede">
+              누가 어디서 막혀 있는지, 어떤 개념에서 반복해서 넘어지는지 한 화면에 모입니다. 코드 열람 범위는
+              강의별로 교수자가 정합니다.
+            </p>
+          </RevealBlock>
+
+          <div className="lp-mock-panel" aria-hidden>
+            <div className="lp-mock-panel-head">
+              <span>Python 기초 01 · 오늘</span>
+            </div>
+            {EDUCATOR_PREVIEW.map((row, i) => (
+              <RevealMockRow key={row.name} index={i} {...row} />
+            ))}
+          </div>
         </div>
       </section>
 
-      <section className="lp-final">
+      <RevealBlock as="section" className="lp-final">
         <h2 className="lp-h2">오늘 한 문제부터 시작해볼까요?</h2>
         <div className="lp-cta-row lp-cta-center">
           <button className="lp-btn lp-btn-primary" type="button" onClick={onStart}>
@@ -177,7 +376,7 @@ export default function LandingPage({
             <ArrowRight size={18} aria-hidden />
           </button>
         </div>
-      </section>
+      </RevealBlock>
 
       <footer className="lp-footer">
         <p>TUTORY · 강원대 x 고려대 Summer Agentic AI 캠프 4팀</p>
