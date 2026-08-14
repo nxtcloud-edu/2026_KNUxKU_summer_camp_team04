@@ -13,13 +13,6 @@ type AiTutorPanelProps = {
   isAuthenticated: boolean
   onRequireLogin: () => void
   /**
-   * HINT_REQUEST 를 trace 큐에 남긴다.
-   *
-   * 이 패널이 직접 이벤트를 POST 하지 않는 이유: 큐를 소유한 쪽(App 의
-   * useCodingTrace)이 기록해야 다른 이벤트와의 순서가 보장되고 재시도도 얻는다.
-   */
-  onHintRequest?: () => void
-  /**
    * 학생이 제출 없이 가만히 있어서(유휴) 하트비트가 백그라운드로 받아온 개입.
    *
    * `seq` 가 바뀔 때만 새 채팅 메시지로 추가한다 -- useCodingTrace 의 하트비트
@@ -39,7 +32,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest, intervention }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, intervention }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [acorns, setAcorns] = useState(() => loadAcorns())
@@ -53,6 +46,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const nextMessageIdRef = useRef(1)
+  const sosInFlightRef = useRef(false)
 
   const shouldOfferHelp = Boolean(judgeError || (result && result.status !== 'ACCEPTED'))
   const tutorHint = useMemo(() => makeTutorHint(problem, result, judgeError), [problem, result, judgeError])
@@ -84,6 +78,9 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   // 유휴 하트비트가 받아온 개입을 튜터가 먼저 말 거는 것처럼 채팅에 얹는다.
   // seq 로 dedupe 한다 -- intervention 객체 참조는 폴링마다 새로 만들어지지만
   // 같은 개입이면 seq 가 같으므로, ref 로 "이미 보여준 seq"를 기억해 중복을 막는다.
+  // 같은 trace 개입을 즉시 응답과 이벤트 폴링 양쪽에서 받을 수 있다. 즉시
+  // 화면에 그린 문구만 기억해, 같은 이벤트가 도착했을 때 한 번 건너뛴다.
+  const immediateInterventionMessageRef = useRef<string | null>(null)
   const shownInterventionSeqRef = useRef<number | null>(null)
   useEffect(() => {
     if (!intervention) return
@@ -93,6 +90,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const message = studentFacingMessage(intervention)
     if (!message) return
     shownInterventionSeqRef.current = intervention.seq
+    if (immediateInterventionMessageRef.current === message) {
+      immediateInterventionMessageRef.current = null
+      return
+    }
     addMessage('tutor', message)
     setAwaitingAnswer(intervention.activity?.expects_reply === true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,6 +124,9 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     try {
       const reply = await sendTutorMessage(sessionId ?? '', answer)
       if (reply) {
+        // /agent/respond가 이 답장을 trace에도 남긴다. 폴링으로 받은 같은 문구는
+        // 여기서 이미 표시했으므로 한 번만 건너뛴다.
+        immediateInterventionMessageRef.current = reply.message
         addMessage('tutor', reply.message)
         setAwaitingAnswer(reply.expects_reply)
       } else {
@@ -160,6 +164,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   }
 
   const confirmSos = async () => {
+    if (sosInFlightRef.current) return
+
     const latestAcorns = loadAcorns()
     if (latestAcorns < SOS_COST) {
       setAcorns(latestAcorns)
@@ -167,17 +173,26 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
       return
     }
 
-    const nextAcorns = latestAcorns - SOS_COST
-    saveAcorns(nextAcorns)
-    setAcorns(nextAcorns)
-    setSosIntroVisible(true)
-    addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
-    // /agent/decide 보다 **먼저** 큐에 넣는다. Agent 는 이 이벤트까지 본 상태를 읽어야 한다.
-    onHintRequest?.()
-    addMessage('tutor', await getTutorHelpMessage(sessionId, tutorHint))
-    setOfferState('dismissed')
-    setSosConfirmOpen(false)
-    setSosError('')
+    sosInFlightRef.current = true
+    try {
+      const nextAcorns = latestAcorns - SOS_COST
+      saveAcorns(nextAcorns)
+      setAcorns(nextAcorns)
+      setSosIntroVisible(true)
+      addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
+
+      // /agent/decide가 실제 개입을 trace에 한 번 기록한다. 여기서 별도
+      // HINT_REQUEST를 큐에 넣으면 heartbeat가 agent를 다시 호출해 중복된다.
+      const help = await getTutorHelpMessage(sessionId, tutorHint)
+      if (help.interventionMessage) immediateInterventionMessageRef.current = help.interventionMessage
+      addMessage('tutor', help.message)
+      setAwaitingAnswer(help.expectsReply)
+      setOfferState('dismissed')
+      setSosConfirmOpen(false)
+      setSosError('')
+    } finally {
+      sosInFlightRef.current = false
+    }
   }
 
   const renderTutorOffer = () => offerState === 'asking' ? (
@@ -299,14 +314,21 @@ function makeTutorHint(problem: ProblemDetail | null, result: JudgeResult | null
 }
 
 async function getTutorHelpMessage(sessionId: string | undefined, fallback: string) {
-  if (!sessionId) return fallback
+  if (!sessionId) return { message: fallback, expectsReply: false, interventionMessage: null }
   try {
     const decision = await decideTutorHelp(sessionId)
-    if (!decision || decision.action === 'WAIT') return fallback
-    return studentFacingMessage(decision) ?? fallback
+    if (!decision || decision.action === 'WAIT') {
+      return { message: fallback, expectsReply: false, interventionMessage: null }
+    }
+    const interventionMessage = studentFacingMessage(decision)
+    return {
+      message: interventionMessage ?? fallback,
+      expectsReply: decision.activity?.expects_reply === true,
+      interventionMessage,
+    }
   } catch (error) {
     console.warn('Agent API unavailable. Using local tutor hint.', error)
-    return fallback
+    return { message: fallback, expectsReply: false, interventionMessage: null }
   }
 }
 

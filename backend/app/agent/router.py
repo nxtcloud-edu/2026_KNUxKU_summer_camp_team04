@@ -64,6 +64,23 @@ def decide(
     store.require_session(db, body.session_id, user_id=user.id)
     ctx = build_context(db, body.session_id, repo)
     d = agent.decide(ctx)
+
+    # 학생이 직접 요청한 결정도 실제 개입이면 trace에 남긴다. 이전에는 프런트가
+    # 같은 SOS를 HINT_REQUEST로 다시 기록했고, heartbeat가 agent를 한 번 더
+    # 호출해 폴링 결과를 두 번째 채팅 버블로 렌더했다.
+    intervention = None
+    if d.action is not AgentAction.WAIT:
+        intervention = trace_service.record_agent_intervention(
+            db,
+            body.session_id,
+            state=d.state,
+            concept=d.concept,
+            action=d.action.value,
+            reason=d.reason,
+            activity=d.activity,
+            trigger=body.trigger,
+        )
+
     return AgentDecisionRead(
         state=d.state,
         concept=d.concept,
