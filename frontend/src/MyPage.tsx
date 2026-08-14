@@ -77,6 +77,7 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
   const completedProblems = learningProgress.filter((item) => item.status === 'COMPLETED')
   const learningStreak = useMemo(() => calculateLearningStreak(learningProgress), [learningProgress])
   const recentWrongHint = useMemo(() => getRecentWrongHint(), [])
+  const recentWrongHintText = recentWrongHint ? naturalizeRecentWrongHint(recentWrongHint.hint) : ''
 
   const currentBadge = useMemo(
     () => [...BADGES].reverse().find((badge) => profile.totalAcorns >= badge.minAcorns) ?? BADGES[0],
@@ -252,7 +253,7 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
                   <img src={squirrelTutor} alt="" />
                   <div>
                     <span>{recentWrongHint.problemTitle}</span>
-                    <p>{recentWrongHint.hint}</p>
+                    <p>{recentWrongHintText}</p>
                   </div>
                 </div>
               ) : (
@@ -348,6 +349,20 @@ function formatLearningDate(value: string) {
   return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
+function naturalizeRecentWrongHint(hint: string) {
+  const text = hint.trim()
+  if (!text) return DEFAULT_WRONG_HINT_MESSAGE
+  const lower = text.toLowerCase()
+  const looksTechnical = lower.startsWith('expected ')
+    || lower.includes(', got ')
+    || lower.includes('traceback')
+    || lower.includes('syntaxerror')
+    || lower.includes('runtimeerror')
+    || lower.includes('time limit')
+    || lower.includes('internal error')
+  return looksTechnical ? DEFAULT_WRONG_HINT_MESSAGE : text
+}
+
 function calculateLearningStreak(progress: LearningProgress[]) {
   const dayTimes = Array.from(new Set(progress.map((item) => toLearningDayTime(item.updatedAt)).filter((value): value is number => value !== null))).sort((a, b) => a - b)
   if (!dayTimes.length) {
@@ -385,6 +400,7 @@ function calculateLearningStreak(progress: LearningProgress[]) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const DEFAULT_WRONG_HINT_MESSAGE = '문제를 작은 단계로 나눠볼게요. 입력, 처리, 출력 순서로 생각하면 훨씬 쉬워져요.'
 
 function startOfTodayTime() {
   const now = new Date()
