@@ -1244,9 +1244,10 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   font-weight: 700;
   color: var(--text);
 }
+.lp-card-title > span { display: block; }
 .lp-card-body {
   margin: 0;
-  font-size: 14.5px;
+  font-size: 13.5px;
   line-height: 1.68;
   color: var(--muted);
 }

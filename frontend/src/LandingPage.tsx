@@ -27,16 +27,20 @@ const BUBBLE_INTERVAL_MS = 4200
 const FEATURES = [
   {
     icon: Activity,
-    title: '막힌 순간을 먼저 알아챕니다',
+    title: [
+      '막힌 순간을',
+      '먼저 알아챕니다'
+    ],
     body: [
-      '편집·실행·제출을 초 단위로 기록해 풀이 과정을 신호로 바꿉니다.',
+      '편집·실행·제출을 초 단위로 기록해',
+      '풀이 과정을 신호로 바꿉니다.',
       '학생이 도움을 요청하지 않아도 개입 시점을 찾아냅니다.',
     ],
   },
   {
     icon: Lightbulb,
     title: [
-      '정답 대신\n',
+      '정답 대신',
       '다음 한 걸음',
     ],
     body: [
@@ -50,20 +54,20 @@ const FEATURES = [
     icon: Waypoints,
     title: '코드가 흘러가는 길을 눈으로',
     body: [
-      '한 줄씩 실행되는 순서와',
-      '변수 변화를 따라가는 트레이스 활동으로,',
+      '실행 순서와 변수 변화를 따라가는 트레이스 활동으로,',
       '왜 그 결과가 나왔는지 스스로 설명할 수 있게 만듭니다.',
     ],
   },
   {
     icon: LineChart,
     title: [
-      '결과가 아니라\n',
+      '결과가 아니라',
       '과정의 기록',
     ],
     body: [
-      '맞았는지 틀렸는지가 아니라 어떻게 도달했는지가 남습니다.',
-      '도토리와 배지로 꾸준함을 보상하고, 타임라인으로 성장을 되돌아봅니다.',
+      '맞았는지 틀렸는지가 아니라',
+      '어떻게 도달했는지가 남습니다.',
+      '도토리로 꾸준함을 보상하고, 타임라인으로 성장을 되돌아봅니다.',
     ],
   },
 ]
@@ -145,11 +149,13 @@ export default function LandingPage({
         </h2>
         <div className="lp-grid">
           {FEATURES.map(({ icon: Icon, title, body }) => (
-            <article className="lp-card" key={title}>
+            <article className="lp-card" key={Array.isArray(title) ? title.join(' ') : title}>
               <span className="lp-card-icon" aria-hidden>
                 <Icon size={22} />
               </span>
-              <h3 className="lp-card-title">{title}</h3>
+              <h3 className="lp-card-title">
+                {Array.isArray(title) ? title.map((line) => <span key={line}>{line}</span>) : title}
+              </h3>
               <p className="lp-card-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
             </article>
           ))}
