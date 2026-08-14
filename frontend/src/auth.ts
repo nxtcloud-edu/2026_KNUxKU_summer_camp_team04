@@ -53,7 +53,9 @@ export async function signupUser(
   role: UserRole,
   inviteCode = '',
 ): Promise<AuthUser> {
-  if (!isApiConfigured) throw new Error('API 서버가 연결되지 않았습니다. VITE_API_BASE_URL을 설정해 주세요.')
+  // 백엔드를 붙이지 않은 데모 모드. loginUser 와 같은 방식으로 로컬 사용자를
+  // 보관해야 새로고침 후에도 로그인 상태가 유지된다.
+  if (!isApiConfigured) return persistLocalUser(normalizeUser(undefined, email, role, name))
   const trimmedInviteCode = inviteCode.trim()
   const response = await apiRequest<AuthResponse>('/auth/signup', {
     method: 'POST',
