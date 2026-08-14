@@ -12,6 +12,7 @@ from app.trace import monitor
 from tests.factories import T0, TraceBuilder
 from tests.fixtures_code import (
     BIG_REWRITE,
+    BIG_REWRITE_TWEAK,
     LOOP_V2,
     LOOP_V3,
     LOOP_V4,
@@ -307,3 +308,123 @@ def test_evaluate_and_record_is_noop_without_trigger(db):
     monitor.evaluate_and_record(db, b.session, now=b.t)
     triggers = _trigger_events(db, b.session_id)
     assert triggers == []
+
+
+# ------------------------------------------- 편집만으로 발화하는 규칙 (R7b/R7c)
+#
+# R7까지의 규칙은 전부 TEST_RESULT를 요구한다 -- attempt_count조차 클라이언트의
+# RUN/SUBMIT 이벤트가 아니라 서버가 채점하며 쓴 결과만 센다. 그래서 실행을 한 번도
+# 누르지 않은 학생에게는 R0(도움 요청) 말고 어떤 규칙도 발화하지 못했다.
+
+
+def test_wholesale_replacement_without_running_triggers_comprehension_check(db):
+    """쓰던 코드를 통째로 갈아치우고 실행조차 안 한 채 멈추면 이해도 확인 (R7b).
+
+    실행/제출이 0회라 attempt_count 기반 규칙(R5~R7)은 전부 침묵한다.
+    """
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2)      # 학생이 직접 쓴 초안
+        .tick(10).edit(BIG_REWRITE)  # 그걸 통째로 대체
+        .tick(30)                    # 그리고 손을 놓았다
+    )
+    s = ev(b)
+    assert s.trigger is TriggerType.UNDERSTANDING_UNCERTAIN
+    assert s.status is ProcessStatus.UNDERSTANDING_UNCERTAIN
+    assert s.features.attempt_count == 0, "실행 없이 발화하는 것이 이 규칙의 존재 이유다"
+    assert s.features.large_change_unverified
+
+
+def test_first_draft_over_template_is_not_treated_as_paste(db):
+    """템플릿에서 첫 초안을 쓰는 것은 붙여넣기가 아니다.
+
+    3줄짜리 `pass` 템플릿에서 실제 코드로 가는 변경은 change_ratio/size 기준을
+    거의 항상 넘긴다. 이걸 붙잡으면 모든 학생이 첫 코드를 쓸 때마다 개입당한다.
+    (첫 행동이 진짜 붙여넣기인 학생은 그걸 실행해 통과하는 순간 R2가 잡는다.)
+    """
+    b = TraceBuilder.start(db).tick(10).edit(BIG_REWRITE).tick(60)
+    s = ev(b)
+    assert s.trigger is None
+    assert not s.features.large_change_unverified
+
+
+def test_paste_still_typing_does_not_trigger(db):
+    """대규모 변경만으로는 안 된다. '그리고 손을 놓았다'가 겹쳐야 한다.
+
+    신호 하나로 발화하면 빠르게 타이핑하는 학생이 매번 붙잡힌다.
+    """
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2)
+        .tick(10).edit(BIG_REWRITE)
+        .tick(2)  # 아직 손을 놓지 않았다
+    )
+    s = ev(b)
+    assert s.trigger is None
+
+
+def test_large_edit_that_was_actually_run_does_not_trigger_r7b(db):
+    """큰 편집을 하고 **실행해서 결과를 본** 학생은 R7b 대상이 아니다.
+
+    회귀 테스트: large_change_detected(창 = '현재 결과를 만든 변경')를 그대로
+    쓰면 '큰 편집 -> 실행(문법 오류)' 한 번에도 R7b가 발화한다. 실제로 겪었고,
+    그래서 창이 다른 large_change_unverified('결과 이후의 편집')를 따로 만들었다.
+    """
+    b = TraceBuilder.start(db).tick(30).edit(BIG_REWRITE).tick(30).error(JudgeStatus.SYNTAX_ERROR)
+    s = ev(b)
+    assert s.trigger is None
+    assert not s.features.large_change_unverified
+
+
+def test_churn_then_idle_triggers_no_progress(db):
+    """같은 영역을 반복해서 고치다 손을 놓으면 발화한다 (R7c). 실행은 0회다."""
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2)
+        .tick(10).edit(LOOP_V3)
+        .tick(10).edit(LOOP_V4)
+        .tick(60)
+    )
+    s = ev(b)
+    assert s.trigger is TriggerType.NO_PROGRESS
+    assert s.features.attempt_count == 0
+    assert s.features.same_region_edit_count >= 3
+
+
+def test_churn_while_still_editing_does_not_trigger(db):
+    """churn만으로는 안 된다 -- 아직 활발히 고치는 중이면 스스로 해결할 여지가 있다."""
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2)
+        .tick(10).edit(LOOP_V3)
+        .tick(10).edit(LOOP_V4)
+        .tick(3)
+    )
+    s = ev(b)
+    assert s.trigger is None
+
+
+def test_editing_rules_do_not_refire_without_new_edits(db):
+    """지난번에 찔렀는데 학생이 코드를 건드리지도 않았으면 또 찌르지 않는다.
+
+    cooldown(30초 **또는** 다음 Run)만으로는 못 막는다 -- 편집만 하는 세션에는
+    Run이 영영 오지 않아서 30초마다 같은 트리거가 반복된다.
+    """
+    b = (
+        TraceBuilder.start(db)
+        .tick(10).edit(LOOP_V2)
+        .tick(10).edit(BIG_REWRITE)
+        .tick(30)
+    )
+    first = monitor.evaluate_and_record(db, b.session, now=b.t)
+    assert first.trigger is TriggerType.UNDERSTANDING_UNCERTAIN
+
+    # cooldown이 풀릴 만큼 시간이 지나도, 편집이 없었으므로 다시 발화하지 않는다
+    b.tick(120)
+    again = ev(b)
+    assert again.features.edits_since_last_trigger == 0
+    assert again.trigger is None
+
+    # 학생이 다시 손대면 그때는 발화할 수 있다
+    b.edit(BIG_REWRITE_TWEAK).tick(60)
+    assert ev(b).features.edits_since_last_trigger >= 1

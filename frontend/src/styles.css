@@ -1275,13 +1275,97 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 }
 .lp-step-body { margin: 0; font-size: 14.5px; line-height: 1.66; color: var(--muted); }
 
-/* --- 교육자 --- */
+/* --- 교육자 ---
+   좁은 화면: 카피 위, 미리보기 패널 아래로 쌓인다.
+   넓은 화면(min-width: 760px 미디어쿼리): 히어로와 같은 2열 패턴 -- 카피 왼쪽,
+   "학급 현황" 미리보기가 오른쪽. 예전엔 카피 박스 하나만 두고 나머지를 그냥
+   비워뒀는데, 그 옆이 정확히 이 기능이 실제로 보여주는 화면이라 채웠다. */
+.lp-educator-grid {
+  display: grid;
+  gap: clamp(24px, 4vw, 40px);
+  align-items: center;
+}
 .lp-educator-inner {
-  max-width: 62ch;
   padding: clamp(24px, 4vw, 40px);
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(180deg, var(--brand-soft), var(--surface) 70%);
+}
+
+/* 실제 교육자 대시보드(student-table 등)와 같은 어휘 -- 아바타 원 + 진행률 바 + 태그.
+   장식이 아니라 "이 기능이 정확히 이렇게 보인다"는 미리보기라서 그렇다. */
+.lp-mock-panel {
+  padding: clamp(16px, 2.6vw, 22px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 20px 44px rgba(60, 45, 20, .08);
+}
+.lp-mock-panel-head {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--muted);
+}
+.lp-mock-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: 12px;
+}
+.lp-mock-row + .lp-mock-row { margin-top: 2px; }
+.lp-mock-row[data-stuck='true'] { background: var(--brand-soft); }
+.lp-mock-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 700;
+}
+.lp-mock-row[data-stuck='true'] .lp-mock-avatar { background: var(--surface); }
+.lp-mock-info { min-width: 0; display: grid; gap: 6px; }
+.lp-mock-info strong { font-size: 13.5px; color: var(--text); }
+.lp-mock-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.lp-mock-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+.lp-mock-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lp-mock-row[data-stuck='true'] .lp-mock-tag { color: var(--brand); }
+.lp-mock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  animation: lp-pulse 1.6s ease-in-out infinite;
+}
+@keyframes lp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .4; transform: scale(.7); }
 }
 
 /* --- 마지막 CTA + 푸터 --- */
@@ -1301,7 +1385,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 }
 .lp-footer p { margin: 0; }
 
-/* --- 태블릿 이상: 히어로 2열, 카드 다열 --- */
+/* --- 태블릿 이상: 히어로 2열, 카드 다열, 교육자 섹션도 카피+미리보기 2열 --- */
 @media (min-width: 760px) {
   .lp-hero {
     grid-template-areas: 'copy visual';
@@ -1310,6 +1394,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   .lp-hero-copy { text-align: left; }
   .lp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lp-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .lp-educator-grid { grid-template-columns: 1.1fr .9fr; }
 }
 @media (min-width: 1080px) {
   .lp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1323,10 +1408,74 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   .lp-btn { flex: 1 1 auto; justify-content: center; min-width: 46%; }
 }
 
+/* --- 스크롤 리빌: 뷰포트에 들어오면 한 번 페이드+슬라이드업.
+   --reveal-i(카드/스텝/미리보기 행의 인덱스)만큼 순서대로 밀려서 뜬다. */
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity .7s cubic-bezier(.16, .8, .24, 1), transform .7s cubic-bezier(.16, .8, .24, 1);
+  transition-delay: calc(var(--reveal-i, 0) * 90ms);
+}
+.lp-reveal[data-visible='true'] { opacity: 1; transform: none; }
+
+/* "결과가 아니라 과정을 봅니다" -- 한 단어씩 순서대로 떠오른다. */
+.lp-word-heading { overflow: clip; }
+.lp-word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(.5em);
+  filter: blur(6px);
+  transition: opacity .6s cubic-bezier(.16, .8, .24, 1), transform .6s cubic-bezier(.16, .8, .24, 1), filter .6s ease;
+  transition-delay: calc(var(--i, 0) * 70ms);
+}
+.lp-word[data-visible='true'] { opacity: 1; transform: none; filter: none; }
+
+/* --- 스크롤 진행률 다람쥐: 오른쪽 가장자리를 스크롤한 만큼 내려온다.
+   좁은 화면에서는 숨긴다 -- 엄지로 스크롤하는 손 근처에 장식을 얹을 이유가 없다. */
+.lp-scroll-guide {
+  display: none;
+  position: fixed;
+  right: clamp(10px, 2vw, 26px);
+  top: 14%;
+  bottom: 14%;
+  width: 40px;
+  z-index: 15;
+  pointer-events: none;
+}
+.lp-scroll-track {
+  position: relative;
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: var(--line);
+  opacity: .7;
+}
+.lp-scroll-marker {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--progress, 0) * 100%);
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid var(--brand-soft);
+  background: var(--surface);
+  box-shadow: 0 8px 18px rgba(60, 45, 20, .2);
+  transform: translate(-50%, -50%);
+  transition: top .1s linear;
+}
+@media (min-width: 900px) {
+  .lp-scroll-guide { display: block; }
+}
+
 /* 움직임 최소화 설정을 존중한다. */
 @media (prefers-reduced-motion: reduce) {
   .lp-squirrel { animation: none; }
   .lp-bubble-text { animation: none; }
   .lp-card { transition: none; }
   .lp-card:hover { transform: none; }
+  .lp-reveal, .lp-word { opacity: 1; transform: none; filter: none; transition: none; }
+  .lp-mock-dot { animation: none; }
 }
