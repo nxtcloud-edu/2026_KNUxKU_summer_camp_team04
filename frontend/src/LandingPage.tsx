@@ -29,9 +29,9 @@ const FEATURES = [
     icon: Activity,
     title: '막힌 순간을 먼저 알아챕니다',
     body: [
-      '편집·실행·제출을 초 단위로 기록해',
-      '같은 오류 반복, 같은 영역만 고치는 정체,',
-      '진전 없는 시간을 신호로 바꿉니다.',
+      '편집·실행·제출을 초 단위로 기록해 같은 오류 반복, ',
+      '같은 오류 반복, 같은 영역만 고치는 정체를,',
+      '신호로 바꿉니다.',
       '학생이 도움을 요청하지 않아도 개입 시점을 찾아냅니다.',
     ],
   },
@@ -153,20 +153,22 @@ export default function LandingPage({
         </div>
       </section>
 
-      <section className="lp-section lp-section-soft" aria-labelledby="lp-steps-title">
-        <p className="lp-kicker">어떻게 동작하나</p>
-        <h2 className="lp-h2" id="lp-steps-title">
-          세 단계면 충분합니다
-        </h2>
-        <ol className="lp-steps">
-          {STEPS.map(({ no, title, body }) => (
-            <li className="lp-step" key={no}>
-              <span className="lp-step-no">{no}</span>
-              <h3 className="lp-step-title">{title}</h3>
-              <p className="lp-step-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
-            </li>
-          ))}
-        </ol>
+      <section className="lp-section lp-section-soft lp-steps-section" aria-labelledby="lp-steps-title">
+        <div className="lp-steps-inner">
+          <p className="lp-kicker">어떻게 동작하나</p>
+          <h2 className="lp-h2" id="lp-steps-title">
+            세 단계면 충분합니다
+          </h2>
+          <ol className="lp-steps">
+            {STEPS.map(({ no, title, body }) => (
+              <li className="lp-step" key={no}>
+                <span className="lp-step-no">{no}</span>
+                <h3 className="lp-step-title">{title}</h3>
+                <p className="lp-step-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
       </section>
 
       <section className="lp-section lp-educator" aria-labelledby="lp-educator-title">

@@ -50,6 +50,8 @@ class ProblemSummary(BaseModel):
     difficulty: str
     check_type: str
     function_name: str | None = None
+    points: int
+    acorn_reward: int
 
     @classmethod
     def from_record(cls, r: ProblemRecord) -> "ProblemSummary":
@@ -60,6 +62,8 @@ class ProblemSummary(BaseModel):
             difficulty=r.difficulty,
             check_type=r.check_type,
             function_name=r.function_name,
+            points=r.points,
+            acorn_reward=r.acorn_reward,
         )
 
 
@@ -82,6 +86,8 @@ class ProblemDetail(ProblemSummary):
             difficulty=r.difficulty,
             check_type=r.check_type,
             function_name=r.function_name,
+            points=r.points,
+            acorn_reward=r.acorn_reward,
             description=r.description,
             code_template=r.code_template,
             public_test_cases=[

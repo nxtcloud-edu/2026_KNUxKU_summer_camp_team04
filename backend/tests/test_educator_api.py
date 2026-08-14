@@ -358,7 +358,7 @@ def test_acorns_awarded_once_even_with_multiple_course_rows(anon_client, educato
     ).json()["session_id"]
     anon_client.post(f"/sessions/{s}/submit", json={"code": LOOP_V2}, headers=h(stok))
 
-    assert anon_client.get("/users/me/acorns", headers=h(stok)).json()["balance"] == 10
+    assert anon_client.get("/users/me/acorns", headers=h(stok)).json()["balance"] == 3
 
 
 def test_seeded_emails_are_actually_loginable():

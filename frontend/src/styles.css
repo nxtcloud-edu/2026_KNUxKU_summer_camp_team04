@@ -485,6 +485,9 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 .recommendation-icon svg { width: 18px; }
 .recommended-problem strong { font-size: 14px; font-weight: 600; }
 .recommended-problem small { margin-top: 6px; color: var(--muted); font-size: 9px; font-weight: 400; }
+.problem-reward { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--brand-dark); font-size: 10px; font-weight: 650; }
+.problem-reward svg { width: 14px; height: 14px; }
+.problem-reward.row { margin: 0; padding: 5px 8px; border-radius: 999px; background: var(--brand-soft); white-space: nowrap; }
 .recommendation-action { display: flex; align-items: center; gap: 5px; margin-top: auto; padding-top: 17px; color: var(--brand); font-size: 10px; font-weight: 600; }
 .problem-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
 .problem-search { min-width: 250px; flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 11px; color: var(--muted); }
@@ -499,7 +502,8 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 .data-source::before { width: 6px; height: 6px; content: ''; border-radius: 50%; background: #aaa39b; }
 .data-source.api::before { background: var(--success); }
 .problem-rows { overflow: hidden; border-top: 1px solid var(--line); }
-.problem-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 42px 1fr auto auto; align-items: center; gap: 14px; padding: 15px 10px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; transition: background .15s; }
+.problem-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 42px 1fr auto auto auto; align-items: center; gap: 14px; padding: 15px 10px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; transition: background .15s; }
+.problem-row .problem-arrow { grid-column: 5; }
 .problem-row:hover { background: var(--surface); }
 .problem-row-number { color: #b9b1a8; font-size: 10px; font-weight: 500; text-align: center; }
 .problem-row .problem-card-content { gap: 5px; }
@@ -715,6 +719,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 .submission-success-copy h2 { margin: 13px 0 0; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -.025em; }
 .submission-success-copy p { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
 .submission-success-copy p strong { color: var(--brand-dark); font-weight: 650; }
+.submission-reward { display: inline-flex; align-items: center; gap: 7px; margin-top: 13px; padding: 8px 12px; border: 1px solid #ead4b3; border-radius: 999px; background: var(--brand-soft); color: var(--brand-dark); font-size: 11px; }
 .submission-success-actions { width: 100%; display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; margin-top: 22px; animation: tutor-bubble-in .3s ease-out 1.05s both; }
 .submission-success-actions button { height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; font-size: 11px; font-weight: 650; }
 .submission-success-actions button:disabled { cursor: wait; opacity: .65; }
@@ -975,7 +980,8 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   .recommended-grid { grid-template-columns: 1fr; }
   .recommended-problem { min-height: 180px; }
   .home-section-title { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .problem-row { grid-template-columns: 34px 1fr auto; gap: 8px; padding: 14px 5px; }
+  .problem-row { grid-template-columns: 34px 1fr auto auto; gap: 8px; padding: 14px 5px; }
+  .problem-row .problem-arrow { grid-column: 4; }
   .checkpoint-state { display: none; }
   .mypage { padding: 24px 14px 45px; }
   .mypage-hero { align-items: flex-start; flex-direction: column; padding: 18px; }
@@ -1184,6 +1190,8 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
   border-bottom: 1px solid var(--line);
 }
 .lp-section-soft > * { max-width: var(--lp-max); margin-left: auto; margin-right: auto; }
+.lp-steps-section { padding-inline: var(--lp-pad); }
+.lp-steps-inner { width: min(100%, calc(var(--lp-max) - (var(--lp-pad) * 2))); margin-inline: auto; }
 
 .lp-kicker {
   margin: 0 0 10px;
@@ -1278,6 +1286,7 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 /* --- 교육자 --- */
 .lp-educator-inner {
   max-width: 62ch;
+  margin-inline: auto;
   padding: clamp(24px, 4vw, 40px);
   border: 1px solid var(--line);
   border-radius: 22px;

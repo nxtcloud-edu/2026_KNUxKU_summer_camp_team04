@@ -8,11 +8,14 @@
 import localProblems from '../../judge/problems-index.json'
 import localProblemDetails from '../../judge/problems-detail.json'
 import { API_BASE_URL, apiRequest } from './api'
+import { getProblemReward } from './problemRewards'
 
 export type ProblemSummary = {
   problem_id: string
   title: string
   concept: string[]
+  points: number
+  acorn_reward: number
 }
 
 export type ProblemListSource = 'api' | 'local'
@@ -59,6 +62,7 @@ export type JudgeResult = {
   message?: string
   failed_categories?: string[]
   agent_decision?: AgentDecision | null
+  awarded_acorns?: number
 }
 
 /**
@@ -137,6 +141,8 @@ function normalizeProblemList(payload: unknown): ProblemSummary[] {
       problem_id: item.problem_id,
       title: item.title,
       concept: normalizeConcepts(item),
+      points: typeof item.points === 'number' ? item.points : getProblemReward(item.problem_id).points,
+      acorn_reward: typeof item.acorn_reward === 'number' ? item.acorn_reward : getProblemReward(item.problem_id).acorns,
     }]
   })
 }
@@ -153,6 +159,8 @@ function normalizeProblemDetail(payload: unknown): ProblemDetail {
     title: payload.title,
     description: payload.description,
     concept: normalizeConcepts(payload),
+    points: typeof payload.points === 'number' ? payload.points : getProblemReward(payload.problem_id).points,
+    acorn_reward: typeof payload.acorn_reward === 'number' ? payload.acorn_reward : getProblemReward(payload.problem_id).acorns,
     check_type: payload.check_type,
     function_name: typeof payload.function_name === 'string' ? payload.function_name : undefined,
     code_template: payload.code_template,
@@ -196,6 +204,7 @@ export function normalizeJudgeResponse(payload: unknown): JudgeResult {
       ? judgePayload.failed_categories.filter((value): value is string => typeof value === 'string')
       : undefined,
     agent_decision: isObject(payload) ? normalizeAgentDecision(payload.agent_decision) : null,
+    awarded_acorns: isObject(payload) && typeof payload.awarded_acorns === 'number' ? payload.awarded_acorns : undefined,
   }
 }
 

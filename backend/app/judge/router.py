@@ -97,7 +97,7 @@ def _execute(
     # **여기가 유일한 지급 지점이다.** 이 경로의 result 는 서버가 실행한 judge 에서
     # 왔으므로 클라이언트가 조작할 수 없다.
     course_ids = educator_service.course_ids_assigned(db, user.id, problem.problem_id, repo)
-    progress_service.record_judge_result(
+    _, awarded_acorns = progress_service.record_judge_result(
         db,
         user_id=user.id,
         problem=problem,
@@ -156,6 +156,7 @@ def _execute(
         event=EventRead.from_row(event),
         process_state=_state_response(session_id, state),
         agent_decision=decision,
+        awarded_acorns=awarded_acorns,
     )
 
 

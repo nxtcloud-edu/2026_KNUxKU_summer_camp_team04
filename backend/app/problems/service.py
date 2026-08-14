@@ -18,6 +18,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.errors import ProblemNotFound
+from app.problems.rewards import acorns_for, points_for
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,14 @@ class ProblemRecord:
     # judge 문제 26개 중 23개(stdout_match)에 있다. 문제 화면의 제한 표기에 쓰인다.
     time_limit_sec: float | None = None
     memory_limit_mb: int | None = None
+
+    @property
+    def points(self) -> int:
+        return points_for(self.problem_id)
+
+    @property
+    def acorn_reward(self) -> int:
+        return acorns_for(self.problem_id)
 
     @property
     def hidden_test_categories(self) -> list[str]:
