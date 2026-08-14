@@ -150,6 +150,13 @@ export async function runJudge(sessionId: string, code: string, mode: 'run' | 's
   }))
 }
 
+export async function syncLocalJudgeResult(problemId: string, code: string, mode: 'run' | 'submit', result: JudgeResult): Promise<void> {
+  await apiRequest<unknown>(`/users/me/progress/${encodeURIComponent(problemId)}/local-result`, {
+    method: 'POST',
+    body: JSON.stringify({ student_code: code, mode, status: result.status, passed: result.passed, total: result.total }),
+  })
+}
+
 /** 서버 judge 가 미구성이라 채점을 수행할 수 없다는 뜻인가? */
 export function isJudgeUnavailable(error: unknown): boolean {
   return error instanceof ApiError && error.status === 503

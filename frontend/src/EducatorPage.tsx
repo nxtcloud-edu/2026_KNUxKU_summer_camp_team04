@@ -16,7 +16,8 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react'
-import { createEducatorCourse, getEducatorCourses, getEducatorDashboard, type EducatorCourse, type EducatorDashboardData, type EducatorStudent, type StudentStatus } from './educatorService'
+import { createAssignment, createEducatorCourse, getEducatorCourses, getEducatorDashboard, getStudentProblemActivity, type EducatorCourse, type EducatorDashboardData, type EducatorStudent, type StudentProblemActivity, type StudentStatus } from './educatorService'
+import { getProblems, type ProblemSummary } from './problemService'
 
 export default function EducatorPage() {
   const [query, setQuery] = useState('')
@@ -29,6 +30,12 @@ export default function EducatorPage() {
   const [courseTitle, setCourseTitle] = useState('')
   const [courseTerm, setCourseTerm] = useState('')
   const [message, setMessage] = useState('')
+  const [problems, setProblems] = useState<ProblemSummary[]>([])
+  const [assignmentOpen, setAssignmentOpen] = useState(false)
+  const [assignmentTitle, setAssignmentTitle] = useState('')
+  const [assignmentDescription, setAssignmentDescription] = useState('')
+  const [assignmentDue, setAssignmentDue] = useState('')
+  const [assignmentProblems, setAssignmentProblems] = useState<string[]>([])
 
   useEffect(() => {
     getEducatorCourses().then((items) => {
@@ -37,9 +44,12 @@ export default function EducatorPage() {
     }).catch((error) => setMessage(error instanceof Error ? error.message : '강의를 불러오지 못했습니다.'))
   }, [])
 
+  useEffect(() => { getProblems().then((result) => setProblems(result.problems)).catch(() => undefined) }, [])
+
   useEffect(() => {
     const course = courses.find((item) => item.id === selectedCourseId)
     if (!course) { setDashboard(null); return }
+    setMessage('')
     getEducatorDashboard(course).then(setDashboard).catch((error) => setMessage(error instanceof Error ? error.message : '대시보드를 불러오지 못했습니다.'))
   }, [courses, selectedCourseId])
 
@@ -59,6 +69,17 @@ export default function EducatorPage() {
     return (status === '전체' || student.status === status)
       && (!keyword || `${student.name} ${student.email} ${student.weakConcept}`.toLowerCase().includes(keyword))
   }), [dashboard?.students, query, status])
+
+  const submitAssignment = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!dashboard || !assignmentProblems.length) return
+    try {
+      const assignment = await createAssignment(dashboard.courseId, { title: assignmentTitle, description: assignmentDescription, problemIds: assignmentProblems, dueAt: assignmentDue })
+      setDashboard({ ...dashboard, assignments: [assignment, ...dashboard.assignments] })
+      setAssignmentOpen(false); setAssignmentTitle(''); setAssignmentDescription(''); setAssignmentDue(''); setAssignmentProblems([])
+      setMessage('과제를 학생들에게 배정했습니다.')
+    } catch (error) { setMessage(error instanceof Error ? error.message : '과제를 만들지 못했습니다.') }
+  }
 
   return (
     <main className="educator-page">
@@ -108,11 +129,12 @@ export default function EducatorPage() {
 
           <section className="educator-panel assignment-overview">
             <PanelTitle icon={<BookOpenCheck />} title="과제 현황" caption="마감일과 평균 성취도를 확인하세요" />
+            <button type="button" className="educator-primary assignment-create-button" onClick={() => setAssignmentOpen(true)}><Plus size={15} /> 새 과제</button>
             <div className="assignment-list">
               {dashboard.assignments.length === 0 && <p className="panel-empty">과제 데이터가 아직 없습니다.</p>}
               {dashboard.assignments.map((assignment) => (
                 <div key={assignment.title}>
-                  <div><strong>{assignment.title}</strong><small><Clock3 size={11} /> {assignment.due} 마감</small></div>
+                  <div><strong>{assignment.title}</strong><small><Clock3 size={11} /> {assignment.due === '-' ? '마감 없음' : `${new Date(assignment.due).toLocaleString('ko-KR')} 마감`}</small></div>
                   <div className="assignment-progress"><span><i style={{ width: `${assignment.total ? (assignment.completed / assignment.total) * 100 : 0}%` }} /></span><small>{assignment.completed}/{assignment.total}명</small></div>
                   <strong className="assignment-score">{assignment.average}점</strong>
                 </div>
@@ -152,7 +174,8 @@ export default function EducatorPage() {
         </>}
       </div>
 
-      {selectedStudent && <StudentDrawer student={selectedStudent} onClose={() => setSelectedStudent(null)} />}
+      {selectedStudent && dashboard && <StudentDrawer courseId={dashboard.courseId} student={selectedStudent} onClose={() => setSelectedStudent(null)} />}
+      {assignmentOpen && <div className="student-drawer-backdrop" onMouseDown={() => setAssignmentOpen(false)}><form className="assignment-modal" onSubmit={submitAssignment} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="drawer-close" onClick={() => setAssignmentOpen(false)}>닫기</button><h2>새 과제 만들기</h2><p>학생들이 해결할 문제와 마감일을 지정하세요.</p><label>과제명<input required value={assignmentTitle} onChange={(event) => setAssignmentTitle(event.target.value)} placeholder="예: 반복문 기초 연습" /></label><label>설명<textarea value={assignmentDescription} onChange={(event) => setAssignmentDescription(event.target.value)} placeholder="학습 목표나 안내를 적어주세요." /></label><label>마감일<input type="datetime-local" value={assignmentDue} onChange={(event) => setAssignmentDue(event.target.value)} /></label><fieldset><legend>문제 선택 ({assignmentProblems.length}개)</legend>{problems.map((problem) => <label key={problem.problem_id}><input type="checkbox" checked={assignmentProblems.includes(problem.problem_id)} onChange={() => setAssignmentProblems((items) => items.includes(problem.problem_id) ? items.filter((id) => id !== problem.problem_id) : [...items, problem.problem_id])} /><span>{problem.title}</span></label>)}</fieldset><button className="educator-primary full" disabled={!assignmentProblems.length}><Send size={15} /> 과제 배정하기</button></form></div>}
     </main>
   )
 }
@@ -165,6 +188,10 @@ function PanelTitle({ icon, title, caption }: { icon: ReactNode; title: string; 
   return <div className="educator-panel-title"><span>{icon}</span><div><strong>{title}</strong><small>{caption}</small></div></div>
 }
 
-function StudentDrawer({ student, onClose }: { student: EducatorStudent; onClose: () => void }) {
-  return <div className="student-drawer-backdrop" onMouseDown={onClose}><aside className="student-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose}>닫기</button><span className="student-avatar large">{student.name.slice(-1)}</span><h2>{student.name}</h2><p>{student.email}</p><div className="drawer-summary"><div><span>진도율</span><strong>{student.progress}%</strong></div><div><span>완료 문제</span><strong>{student.solved}개</strong></div><div><span>총 시도</span><strong>{student.attempts}회</strong></div></div><div className="drawer-insight"><Sparkles size={17} /><div><strong>학습 분석</strong><p><b>{student.weakConcept}</b> 개념에서 반복 실패가 관찰됩니다. 관련 기초 문제를 배정하거나 힌트를 보내보세요.</p></div></div><button className="educator-primary full"><Send size={15} /> 개별 메시지 보내기</button></aside></div>
+function StudentDrawer({ courseId, student, onClose }: { courseId: string; student: EducatorStudent; onClose: () => void }) {
+  const [activity, setActivity] = useState<StudentProblemActivity[]>([])
+  useEffect(() => { getStudentProblemActivity(courseId, student.id).then(setActivity).catch(() => setActivity([])) }, [courseId, student.id])
+  const solved = activity.filter((item) => item.status.includes('SOLVED')).length
+  const inProgress = activity.filter((item) => !item.status.includes('SOLVED') && !item.status.includes('NOT_STARTED')).length
+  return <div className="student-drawer-backdrop" onMouseDown={onClose}><aside className="student-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose}>닫기</button><span className="student-avatar large">{student.name.slice(-1)}</span><h2>{student.name}</h2><p>{student.email}</p><div className="drawer-summary"><div><span>진도율</span><strong>{student.progress}%</strong></div><div><span>해결 완료</span><strong>{solved}개</strong></div><div><span>해결 중</span><strong>{inProgress}개</strong></div></div><div className="student-problem-activity"><strong>문제별 학습 현황</strong>{activity.length === 0 ? <p>배정된 문제가 없습니다.</p> : activity.map((item) => { const isSolved = item.status.includes('SOLVED'); const notStarted = item.status.includes('NOT_STARTED'); return <div key={item.problemId}><span><b>{item.title}</b><small>{notStarted ? '아직 시도하지 않음' : `${item.attempts}회 시도 · ${item.bestPassed}/${item.totalTests} 통과`}</small></span><em className={isSolved ? 'solved' : notStarted ? 'not-started' : 'in-progress'}>{isSolved ? '해결 완료' : notStarted ? '시작 전' : '해결 중'}</em></div> })}</div><div className="drawer-insight"><Sparkles size={17} /><div><strong>학습 분석</strong><p><b>{student.weakConcept}</b> 개념에서 반복 실패가 관찰됩니다. 관련 기초 문제를 배정하거나 힌트를 보내보세요.</p></div></div></aside></div>
 }

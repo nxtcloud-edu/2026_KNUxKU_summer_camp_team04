@@ -34,7 +34,7 @@ import { ProblemList } from './problemList'
 import { getLearningProgress, saveCompleted, saveInProgress, saveRecentWrongHint } from './learningProgress'
 import { getProblemDetail, getProblems, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
 import { awardLocalProblemReward } from './problemRewards'
-import { isJudgeUnavailable, runJudge } from './traceClient'
+import { isJudgeUnavailable, runJudge, syncLocalJudgeResult } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
 import { getCurrentUser, logoutUser, type UserRole } from './auth'
@@ -258,7 +258,13 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
     // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
     const judgeInBrowser = async () => {
-      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode), true)
+      const localResult = toJudgePayload(await runPython(code, problem), nextMode)
+      applyJudgeResult(localResult, true)
+      // 로컬 개발 서버는 judge가 꺼져 있어 Pyodide로 폴백한다. 그 경우에도
+      // 교수자 대시보드가 같은 진도를 보도록 개발 전용 API에 결과를 동기화한다.
+      if (isJudgeApiConfigured && userRole) {
+        await syncLocalJudgeResult(problem.problem_id, code, nextMode, localResult)
+      }
     }
 
     try {

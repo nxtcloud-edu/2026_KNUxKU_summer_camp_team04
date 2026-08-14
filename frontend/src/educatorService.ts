@@ -15,11 +15,24 @@ export type EducatorStudent = {
 }
 
 export type EducatorAssignment = {
+  id: string
+  courseId: string
+  courseTitle: string
   title: string
+  description: string
   due: string
   completed: number
   total: number
   average: number
+  problems: AssignmentProblem[]
+  completedProblems: number
+  totalProblems: number
+}
+
+export type AssignmentProblem = { problemId: string; title: string; status: string }
+
+export type StudentProblemActivity = {
+  problemId: string; title: string; status: string; attempts: number; bestPassed: number; totalTests: number
 }
 
 export type EducatorDashboardData = {
@@ -111,10 +124,13 @@ export async function getEducatorDashboard(course: EducatorCourse): Promise<Educ
   if (!isApiConfigured) return null
   const courseId = course.id
 
-  const [dashboard, students, attention] = await Promise.all([
+  const [dashboard, students, attention, assignments] = await Promise.all([
     apiRequest<Record<string, unknown>>(`/educator/courses/${encodeURIComponent(courseId)}/dashboard`),
     apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/students`),
     apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/attention`).catch(() => null),
+    // 백엔드가 순차 배포되거나 개발 서버가 재시작되기 전이어도 기존
+    // 강의 대시보드는 숨기지 않는다. 과제 영역만 빈 상태로 낮춰 표시한다.
+    apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/assignments`).catch(() => []),
   ])
 
   const normalizedStudents = normalizeStudents(students)
@@ -132,8 +148,44 @@ export async function getEducatorDashboard(course: EducatorCourse): Promise<Educ
     needsHelp: numberOr(metrics.needs_attention_count, attentionStudents.filter((student) => student.status === '도움 필요').length),
     students: normalizedStudents,
     attentionStudents,
-    assignments: normalizeAssignments(dashboard.assignments),
+    assignments: normalizeAssignments(assignments),
   }
+}
+
+export async function createAssignment(courseId: string, input: { title: string; description: string; problemIds: string[]; dueAt: string }): Promise<EducatorAssignment> {
+  const payload = await apiRequest<unknown>(`/educator/courses/${encodeURIComponent(courseId)}/assignments`, {
+    method: 'POST', body: JSON.stringify({
+      title: input.title, description: input.description, problem_ids: input.problemIds,
+      due_at: input.dueAt ? new Date(input.dueAt).toISOString() : null,
+    }),
+  })
+  return normalizeAssignments([payload])[0]
+}
+
+export async function getStudentAssignments(): Promise<EducatorAssignment[]> {
+  if (!isApiConfigured) return []
+  return normalizeAssignments(await apiRequest<unknown>('/student/assignments'))
+}
+
+export async function syncStoredStudentProgress(problemId: string, code: string, completed: boolean): Promise<void> {
+  if (completed) {
+    await apiRequest<unknown>(`/users/me/progress/${encodeURIComponent(problemId)}/local-result`, {
+      method: 'POST', body: JSON.stringify({ student_code: code, status: 'ACCEPTED', passed: 1, total: 1, mode: 'submit' }),
+    })
+    return
+  }
+  await apiRequest<unknown>(`/users/me/progress/${encodeURIComponent(problemId)}/checkpoint`, {
+    method: 'PUT', body: JSON.stringify({ student_code: code }),
+  })
+}
+
+export async function getStudentProblemActivity(courseId: string, studentId: string): Promise<StudentProblemActivity[]> {
+  const payload = await apiRequest<Record<string, unknown>>(`/educator/courses/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`)
+  const rows = Array.isArray(payload.recent_activity) ? payload.recent_activity : []
+  return rows.flatMap((item) => isObject(item) ? [{
+    problemId: stringOr(item.problem_id), title: stringOr(item.title) || '문제', status: stringOr(item.status),
+    attempts: numberOr(item.attempt_count, 0), bestPassed: numberOr(item.best_passed, 0), totalTests: numberOr(item.total_tests, 0),
+  }] : [])
 }
 
 function normalizeStudents(payload: unknown): EducatorStudent[] {
@@ -166,11 +218,18 @@ function normalizeAssignments(payload: unknown): EducatorAssignment[] {
   return payload.flatMap((item) => {
     if (!isObject(item)) return []
     return [{
+      id: stringOr(item.id) || stringOr(item.title),
+      courseId: stringOr(item.course_id),
+      courseTitle: stringOr(item.course_title),
       title: stringOr(item.title, item.name) || '과제',
+      description: stringOr(item.description),
       due: stringOr(item.due, item.due_at, item.deadline) || '-',
       completed: numberOr(item.completed, item.completed_count, 0),
       total: numberOr(item.total, item.total_count, 0),
       average: numberOr(item.average, item.average_score, 0),
+      problems: Array.isArray(item.problems) ? item.problems.flatMap((problem) => isObject(problem) ? [{ problemId: stringOr(problem.problem_id), title: stringOr(problem.title), status: stringOr(problem.status) }] : []) : [],
+      completedProblems: numberOr(item.completed_problems, 0),
+      totalProblems: numberOr(item.total_problems, Array.isArray(item.problems) ? item.problems.length : 0),
     }]
   })
 }

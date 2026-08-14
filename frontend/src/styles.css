@@ -22,6 +22,41 @@
   --text: #27231f;
 }
 
+.assignment-create-button {
+  width: max-content;
+  margin: 18px 0 20px;
+  display: inline-flex;
+}
+.assignment-modal { width: min(560px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; background: var(--surface, #fff); border-radius: 22px; padding: 30px; box-shadow: 0 24px 70px rgba(60, 42, 20, .18); position: relative; }
+.assignment-modal h2 { margin: 0 0 6px; }
+.assignment-modal > p { color: #81796f; margin: 0 0 22px; }
+.assignment-modal > label { display: grid; gap: 7px; margin: 14px 0; font-weight: 600; }
+.assignment-modal input:not([type="checkbox"]), .assignment-modal textarea { border: 1px solid #ded7ce; border-radius: 12px; padding: 12px 14px; font: inherit; background: #fffdf9; }
+.assignment-modal textarea { min-height: 76px; resize: vertical; }
+.assignment-modal fieldset { border: 1px solid #e6dfd5; border-radius: 14px; padding: 12px; margin: 18px 0; max-height: 230px; overflow: auto; }
+.assignment-modal fieldset label { display: flex; gap: 9px; align-items: center; padding: 8px; border-radius: 8px; font-weight: 500; }
+.assignment-modal fieldset label:hover { background: #fbf4e8; }
+.student-problem-activity { margin: 22px 0; }
+.student-problem-activity > strong { display: block; margin-bottom: 10px; }
+.student-problem-activity > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 11px 0; border-bottom: 1px solid #eee7df; }
+.student-problem-activity span { display: grid; gap: 3px; }
+.student-problem-activity small { color: #8a8178; }
+.student-problem-activity em, .assignment-problem-links em { font-style: normal; font-size: 12px; color: #a76400; white-space: nowrap; }
+.student-problem-activity em.solved, .assignment-problem-links em.solved { color: #32805a; }
+.student-problem-activity em.in-progress { color: #b56c00; }
+.student-problem-activity em.not-started { color: #928a81; }
+.student-assignment-section { margin: 42px 0; }
+.student-assignment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+.student-assignment-grid article { background: #fff; border: 1px solid #e5ded5; border-radius: 18px; padding: 20px; }
+.student-assignment-grid article > div:first-child { display: flex; gap: 10px; color: #a76100; }
+.student-assignment-grid article > div:first-child span { display: grid; gap: 4px; color: #292521; }
+.student-assignment-grid article small, .student-assignment-grid article > p { color: #81796f; }
+.assignment-problem-links { display: grid; margin-top: 14px; border-top: 1px solid #eee7df; }
+.assignment-problem-links button { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 9px; border: 0; border-bottom: 1px solid #eee7df; background: transparent; padding: 12px 2px; text-align: left; cursor: pointer; }
+.assignment-problem-links button > span { font-size: 11px; font-weight: 550; line-height: 1.45; }
+.assignment-problem-links em.in-progress { color: #b56c00; }
+.student-assignment-grid footer { margin-top: 13px; color: #a76100; font-size: 13px; font-weight: 650; }
+
 :root[data-theme='dark'] {
   color: #eee8e1;
   background: #1c1917;
@@ -552,9 +587,25 @@ code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
 .student-course-heading strong { color: var(--text); font-size: 12px; }
 .student-course-heading > span { color: var(--muted); font-size: 9px; }
 .student-course-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
-.student-course-chips > span { display: flex; flex-direction: column; gap: 2px; padding: 8px 11px; border-radius: 9px; background: var(--brand-soft); }
+.student-course-chips > button { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border: 1px solid transparent; border-radius: 9px; background: var(--brand-soft); text-align: left; cursor: pointer; }
+.student-course-chips > button:hover, .student-course-chips > button.active { border-color: #d6a75f; background: #fff7ea; }
 .student-course-chips strong { color: var(--brand-dark); font-size: 10px; }
 .student-course-chips small { color: var(--muted); font-size: 8px; }
+.course-task-dot { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border: 2px solid var(--surface); border-radius: 50%; background: #d34f45; box-shadow: 0 1px 3px rgba(120, 30, 20, .25); }
+.course-assignment-detail { margin-top: 13px; padding: 16px; border: 1px solid #eadfce; border-radius: 12px; background: #fffdf9; }
+.course-assignment-title { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; }
+.course-assignment-title > strong { font-size: 12px; }
+.course-assignment-title > button { border: 0; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; }
+.course-assignment-detail article { padding: 14px 0 4px; border-top: 1px solid var(--line); }
+.course-assignment-detail article header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.course-assignment-detail article header > span { display: grid; gap: 4px; }
+.course-assignment-detail article header strong { font-size: 12px; }
+.course-assignment-detail article header small, .course-assignment-detail article > p, .course-assignment-empty { color: var(--muted); font-size: 9px; }
+.course-assignment-detail article header > b { color: var(--brand); font-size: 9px; white-space: nowrap; }
+.course-assignment-detail article header > b.complete { padding: 5px 8px; border-radius: 99px; background: var(--success-soft); color: var(--success); }
+.course-assignment-detail article.completed { opacity: .88; }
+.course-assignment-detail article > p { margin: 10px 0 0; }
+.course-assignment-empty { margin: 7px 0 2px; }
 .student-course-section form { display: flex; gap: 7px; margin-top: 13px; }
 .student-course-section input { min-width: 0; height: 36px; flex: 1; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); color: var(--text); font-size: 10px; }
 .student-course-section form button { height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 13px; border: 1px solid var(--brand); border-radius: 8px; background: var(--brand); color: #fff; font-size: 10px; font-weight: 650; }

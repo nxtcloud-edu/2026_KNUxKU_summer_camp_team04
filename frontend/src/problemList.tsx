@@ -3,7 +3,7 @@ import { ArrowRight, BookOpenCheck, Braces, CheckCircle2, ChevronLeft, ChevronRi
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 import AcornIcon from './AcornIcon'
-import { getStudentCourses, joinStudentCourse, type StudentCourse } from './educatorService'
+import { getStudentAssignments, getStudentCourses, joinStudentCourse, syncStoredStudentProgress, type EducatorAssignment, type StudentCourse } from './educatorService'
 import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
@@ -21,6 +21,8 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
   const [inviteCode, setInviteCode] = useState('')
   const [courseMessage, setCourseMessage] = useState('')
   const [joiningCourse, setJoiningCourse] = useState(false)
+  const [assignments, setAssignments] = useState<EducatorAssignment[]>([])
+  const [selectedCourseId, setSelectedCourseId] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -35,8 +37,20 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
 
   useEffect(() => {
     if (!canJoinCourse) return
-    getStudentCourses().then(setCourses).catch((caught) => setCourseMessage(caught instanceof Error ? caught.message : '참여 강의를 불러오지 못했습니다.'))
+    Promise.all([getStudentCourses(), getStudentAssignments().catch(() => [])]).then(([courseItems, assignmentItems]) => { setCourses(courseItems); setAssignments(assignmentItems) }).catch((caught) => setCourseMessage(caught instanceof Error ? caught.message : '참여 강의를 불러오지 못했습니다.'))
   }, [canJoinCourse])
+
+  useEffect(() => {
+    if (!canJoinCourse || problems.length === 0) return
+    const stored = problems.flatMap((problem) => {
+      const progress = getLearningProgress(problem.problem_id)
+      return progress ? [{ problem, progress }] : []
+    })
+    if (!stored.length) return
+    Promise.allSettled(stored.map(({ problem, progress }) => syncStoredStudentProgress(
+      problem.problem_id, progress.code, progress.status === 'COMPLETED',
+    ))).then(() => getStudentAssignments().then(setAssignments).catch(() => undefined))
+  }, [canJoinCourse, problems])
 
   const joinCourse = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -90,6 +104,16 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
     return beginnerFirst.slice(0, 3)
   }, [problems])
 
+  const selectedAssignments = assignments.filter((assignment) => assignment.courseId === selectedCourseId)
+  const problemState = (problemId: string, serverStatus: string) => {
+    if (serverStatus.includes('SOLVED')) return 'completed' as const
+    const local = getLearningProgress(problemId)?.status
+    if (local === 'COMPLETED') return 'completed' as const
+    if (serverStatus.includes('IN_PROGRESS') || local === 'IN_PROGRESS') return 'in-progress' as const
+    return 'not-started' as const
+  }
+  const completedCount = (assignment: EducatorAssignment) => assignment.problems.filter((item) => problemState(item.problemId, item.status) === 'completed').length
+
   return (
     <main className="problem-list-page">
       <div className="problem-list-container">
@@ -108,7 +132,22 @@ export function ProblemList({ onSelect, canJoinCourse = false }: { onSelect: (pr
 
         {canJoinCourse && <section className="student-course-section">
           <div className="student-course-heading"><div><BookOpenCheck size={17} /><strong>내 강의</strong></div><span>교수자에게 받은 코드로 다른 강의에도 참여할 수 있어요.</span></div>
-          {courses.length > 0 && <div className="student-course-chips">{courses.map((course) => <span key={course.id}><strong>{course.title}</strong><small>{course.term || '학기 미정'} · {course.educatorName}</small></span>)}</div>}
+          {courses.length > 0 && <div className="student-course-chips">{courses.map((course) => {
+            const courseAssignments = assignments.filter((assignment) => assignment.courseId === course.id)
+            const hasRemaining = courseAssignments.some((assignment) => completedCount(assignment) < assignment.totalProblems)
+            return <button type="button" key={course.id} className={selectedCourseId === course.id ? 'active' : ''} onClick={() => setSelectedCourseId((current) => current === course.id ? '' : course.id)}>{hasRemaining && <i className="course-task-dot" aria-label="미완료 과제 있음" />}<strong>{course.title}</strong><small>{course.term || '학기 미정'} · {course.educatorName}</small></button>
+          })}</div>}
+          {selectedCourseId && <div className="course-assignment-detail">
+            <div className="course-assignment-title"><strong>{courses.find((course) => course.id === selectedCourseId)?.title} 과제</strong><button type="button" onClick={() => setSelectedCourseId('')}>접기</button></div>
+            {selectedAssignments.length === 0 ? <p className="course-assignment-empty">아직 배정된 과제가 없습니다.</p> : selectedAssignments.map((assignment) => {
+              const done = completedCount(assignment)
+              const assignmentComplete = assignment.totalProblems > 0 && done === assignment.totalProblems
+              return <article key={assignment.id} className={assignmentComplete ? 'completed' : ''}><header><span><strong>{assignment.title}</strong><small>{assignment.due === '-' ? '마감 없음' : `${new Date(assignment.due).toLocaleString('ko-KR')} 마감`}</small></span><b className={assignmentComplete ? 'complete' : ''}>{assignmentComplete ? '과제 완료' : `${done}/${assignment.totalProblems}문제 완료`}</b></header>{assignment.description && <p>{assignment.description}</p>}<div className="assignment-problem-links">{assignment.problems.map((item) => {
+                const state = problemState(item.problemId, item.status)
+                return <button key={item.problemId} type="button" onClick={() => { const target = problems.find((problem) => problem.problem_id === item.problemId); if (target) onSelect(target) }}><span>{item.title}</span><em className={state === 'completed' ? 'solved' : state === 'in-progress' ? 'in-progress' : ''}>{state === 'completed' ? '해결 완료' : state === 'in-progress' ? '해결 중' : '시작하기'}</em><ArrowRight size={14} /></button>
+              })}</div></article>
+            })}
+          </div>}
           <form onSubmit={joinCourse}><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="강의 초대 코드 입력" aria-label="강의 초대 코드" /><button type="submit" disabled={joiningCourse || !inviteCode.trim()}>{joiningCourse ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} 강의 참여</button></form>
           {courseMessage && <p>{courseMessage}</p>}
         </section>}

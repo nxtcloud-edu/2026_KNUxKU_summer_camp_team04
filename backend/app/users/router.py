@@ -1,7 +1,7 @@
 """프로필 · 도토리 · 진행 상태 API. 전부 로그인 필요."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session as DbSession
 
 from app.acorns import service as acorns
@@ -11,7 +11,8 @@ from app.auth.schemas import NicknameUpdateRequest, NicknameUpdateResponse, Prof
 from app.clock import utcnow
 from app.config import get_settings
 from app.db import get_db
-from app.enums import AcornTransactionType
+from app.enums import AcornTransactionType, JudgeStatus
+from app.educator import service as educator_service
 from app.errors import ProblemNotFound
 from app.models import User
 from app.problems.service import ProblemRepository, get_problem_repository
@@ -21,6 +22,7 @@ from app.users.schemas import (
     AcornTransactionListRead,
     AcornTransactionRead,
     CheckpointRequest,
+    LocalJudgeResultRequest,
     ProgressListRead,
     ProgressRead,
     SolvedProblemListRead,
@@ -149,6 +151,43 @@ def save_checkpoint(
     if not repo.exists(problem_id):
         raise ProblemNotFound(problem_id)
     row = progress_service.save_checkpoint(db, user.id, problem_id, body.student_code)
+    for course_id in educator_service.course_ids_assigned(db, user.id, problem_id, repo):
+        progress_service.save_checkpoint(db, user.id, problem_id, body.student_code, course_id)
+    educator_service.recalculate_for_student(db, student=user, problem_id=problem_id, repo=repo)
+    db.commit()
+    db.refresh(row)
+    return ProgressRead.from_row(row, include_code=True)
+
+
+@router.post("/users/me/progress/{problem_id}/local-result", response_model=ProgressRead)
+def sync_local_result(
+    problem_id: str,
+    body: LocalJudgeResultRequest,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> ProgressRead:
+    """개발 모드의 Pyodide 폴백 결과를 강의 진도에도 반영한다.
+
+    운영 환경에서는 클라이언트 채점 결과를 절대 신뢰하지 않는다. 서버 judge가
+    없는 로컬 데모에서만 학생/교수자 화면의 진도를 일치시키기 위한 경로다.
+    """
+    settings = get_settings()
+    if settings.app_env != "dev" or settings.judge_backend != "none":
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not repo.exists(problem_id):
+        raise ProblemNotFound(problem_id)
+    problem = repo.get(problem_id)
+    existing = progress_service.get(db, user.id, problem_id)
+    if existing is not None and existing.status == progress_service.ProgressStatus.SOLVED:
+        return ProgressRead.from_row(existing, include_code=True)
+    course_ids = educator_service.course_ids_assigned(db, user.id, problem_id, repo)
+    row, _ = progress_service.record_judge_result(
+        db, user_id=user.id, problem=problem, status=JudgeStatus(body.status),
+        passed=body.passed, total=body.total, code=body.student_code,
+        mode=body.mode, course_ids=course_ids,
+    )
+    educator_service.recalculate_for_student(db, student=user, problem_id=problem_id, repo=repo)
     db.commit()
     db.refresh(row)
     return ProgressRead.from_row(row, include_code=True)
