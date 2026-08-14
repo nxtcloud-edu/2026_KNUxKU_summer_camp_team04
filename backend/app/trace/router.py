@@ -10,6 +10,7 @@ from sqlmodel import Session as DbSession
 from app.agent import AgentProtocol, get_agent
 from app.agent.context import build_context
 from app.clock import to_naive_utc, utcnow
+from app.config import get_settings
 from app.auth.deps import get_current_user
 from app.db import get_db, get_engine
 from app.enums import AgentAction, SessionStatus
@@ -150,7 +151,9 @@ def heartbeat(
     """
     session = store.require_session(db, session_id, user_id=user.id)
     now = utcnow()
-    state = monitor.evaluate_and_record(db, session, now=now)
+    # cfg를 반드시 넘긴다 (judge/router.py의 같은 호출 참고). 생략하면
+    # MONITOR_NO_PROGRESS_SECONDS 같은 환경변수가 조용히 무시된다.
+    state = monitor.evaluate_and_record(db, session, now=now, cfg=get_settings().monitor)
     db.commit()
 
     if state.triggered:
@@ -258,7 +261,9 @@ def get_process_state(
     # 여기서 먼저 막지 않으면 남의 session_id로 그 사람의 학습 상태(막힘 여부,
     # 근거 문자열, feature 전체)를 읽을 수 있다.
     store.require_session(db, session_id, user_id=user.id)
-    return _state_response(session_id, monitor.evaluate(db, session_id))
+    return _state_response(
+        session_id, monitor.evaluate(db, session_id, cfg=get_settings().monitor)
+    )
 
 
 # ------------------------------------------------------------------ Timeline
