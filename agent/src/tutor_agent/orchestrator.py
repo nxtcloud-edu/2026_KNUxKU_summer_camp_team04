@@ -15,6 +15,12 @@ StateAgent와 사실상 같은 질문("지금 뭔가 해야 하나?")을 LLM 호
 호출해 실측 28~30초가 걸리는 문제(agent/README.md "지연 시간" 절)의 직접적인
 원인이었다. 지금은 2번(state, guided_action)이라 절반으로 준다.
 
+**붙여넣기(이해도 확인) 분기는 LLM을 아예 안 부른다** (`comprehension_check.py`).
+`state_agent`가 이미 규칙만으로 이 분기를 판정하는데도 뒤이어 `guided_action_agent`가
+LLM을 부르고 있었다 — 시스템 프롬프트가 approach/hint_level/action_type을 전부
+못박아 둔 상태라 LLM에 남은 자유도는 문장 표현뿐이었는데, 그 한 줄 때문에
+학생이 5~6초를 더 기다렸다. 그래서 이 분기의 LLM 호출은 **0번**이다.
+
 **evaluation_agent는 더 이상 이 파이프라인이 동기로 호출하지 않는다.**
 `PipelineResult.evaluation`은 이제 항상 `None`이다 (필드는 하류 호환을 위해
 남겨둠 — `backend_adapter.to_agent_decision()`이 `None`을 이미 정상 처리한다).
@@ -37,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .agents import guided_action_agent, state_agent
+from .agents import comprehension_check, guided_action_agent, state_agent
 from .schemas import ActionPlan, Evaluation, GuidancePlan, SessionContext, StudentState
 
 
@@ -62,7 +68,13 @@ class TutorPipeline:
         if not student_state.should_intervene:
             return PipelineResult(student_state=student_state)
 
-        guided = guided_action_agent.plan(ctx, student_state, self._guided_action)
+        # 붙여넣기 분기는 규칙만으로 문구를 만든다 (LLM 호출 0번, 위 docstring 참고).
+        # `state_agent`가 이 분기를 LLM 없이 판정해 놓고도 여기서 다시 LLM을 부르면,
+        # "규칙만으로 처리한다"는 설계가 파이프라인 전체로는 지켜지지 않는다.
+        if student_state.entry_branch == "paste":
+            guided = comprehension_check.plan(ctx)
+        else:
+            guided = guided_action_agent.plan(ctx, student_state, self._guided_action)
 
         return PipelineResult(
             student_state=student_state,

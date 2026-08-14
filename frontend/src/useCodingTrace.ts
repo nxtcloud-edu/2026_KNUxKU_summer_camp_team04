@@ -55,6 +55,17 @@ const HEARTBEAT_INTERVAL_MS = 5000
  * GET 이라 아무것도 기록하지 않으므로 촘촘해도 cooldown 을 소진하지 않는다.
  */
 const EVENT_POLL_INTERVAL_MS = 2500
+/**
+ * 트리거를 본 뒤 힌트를 기다리는 최대 시간. 넘으면 인디케이터를 스스로 끈다.
+ *
+ * **이 안전장치가 없으면 인디케이터가 영영 켜져 있는다.** agent 가 WAIT 를
+ * 반환하면 서버는 `AGENT_INTERVENTION` 을 아예 기록하지 않으므로(trace/router.py
+ * `_run_agent_in_background`), 폴링이 끌 계기를 영원히 못 받는다.
+ *
+ * 값은 agent HTTP 클라이언트의 read timeout(30초, http_client.py)보다 커야 한다 --
+ * 그보다 짧으면 느리지만 결국 도착할 힌트를 두고 먼저 포기해버린다.
+ */
+const TUTOR_PENDING_TIMEOUT_MS = 35000
 
 const sessionKey = (problemId: string) => `codetrace:session:${problemId}`
 
@@ -102,6 +113,14 @@ export type CodingTrace = {
    * 스스로 발견한 힌트다 -- 아직 안 왔거나 새로 볼 게 없으면 null.
    */
   intervention: AgentIntervention | null
+  /**
+   * 하트비트가 트리거를 봤고 아직 힌트가 안 온 상태 = "튜터가 지금 코드를 보는 중".
+   *
+   * 힌트 자체는 LLM 왕복 뒤에야 오지만(붙여넣기 기준 실측 5~6초), 트리거 여부는
+   * 하트비트 응답에 즉시 실려 온다. 그 사이를 침묵으로 두면 학생은 시스템이
+   * 아무것도 안 하는 줄 안다 -- 실제 지연은 그대로여도 체감은 그때 갈린다.
+   */
+  tutorPending: boolean
 }
 
 export type CodingTraceOptions = {
@@ -122,6 +141,8 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
   const sessionIdRef = useRef('')
   const inFlightSessionRef = useRef<Promise<string> | null>(null)
   const [intervention, setIntervention] = useState<AgentIntervention | null>(null)
+  const [tutorPending, setTutorPending] = useState(false)
+  const tutorPendingTimerRef = useRef<number | null>(null)
   // 폴링이 마지막으로 본 이벤트 seq. 세션이 바뀌면 리셋한다 -- 남의(또는 이전) 세션의
   // seq 를 기준으로 두면 새 세션의 이벤트를 전부 "새 것"으로 오인하거나 놓친다.
   const lastSeenEventSeqRef = useRef(0)
@@ -306,6 +327,27 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
     }
   }, [send])
 
+  // 튜터 인디케이터 on/off.
+  //
+  // 타이머는 **하나만** 유지한다. 트리거가 연달아 오면(cooldown 이 풀린 뒤 또 발화)
+  // 만료 시각이 마지막 트리거 기준으로 밀려야지, 첫 트리거 기준으로 꺼지면 안 된다.
+  const beginTutorPending = useCallback(() => {
+    if (tutorPendingTimerRef.current !== null) window.clearTimeout(tutorPendingTimerRef.current)
+    setTutorPending(true)
+    tutorPendingTimerRef.current = window.setTimeout(() => {
+      tutorPendingTimerRef.current = null
+      setTutorPending(false)
+    }, TUTOR_PENDING_TIMEOUT_MS)
+  }, [])
+
+  const endTutorPending = useCallback(() => {
+    if (tutorPendingTimerRef.current !== null) {
+      window.clearTimeout(tutorPendingTimerRef.current)
+      tutorPendingTimerRef.current = null
+    }
+    setTutorPending(false)
+  }, [])
+
   // 실시간 유휴 감지 하트비트 + 개입 폴링 (backend PR #16 "실시간 유휴 감지 하트비트").
   //
   // 세션이 아직 없으면 아무것도 하지 않는다 -- 하트비트가 세션을 만들지는 않는다
@@ -315,6 +357,8 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
 
     lastSeenEventSeqRef.current = 0
     primedRef.current = false
+    // 세션이 바뀌면 이전 세션의 대기 상태를 끌고 오지 않는다.
+    endTutorPending()
     let cancelled = false
 
     const pollEvents = async () => {
@@ -336,6 +380,8 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
                   ? (latest.payload.activity as Record<string, unknown>)
                   : null,
             })
+            // 힌트가 도착했으니 "보고 있어요" 는 끝. 말풍선으로 교체된다.
+            endTutorPending()
           }
         }
         primedRef.current = true
@@ -347,7 +393,11 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
 
     const beat = async () => {
       try {
-        await postHeartbeat(sessionId)
+        const { triggered } = await postHeartbeat(sessionId)
+        if (cancelled) return
+        // 서버가 방금 백그라운드로 agent 를 불렀다. 힌트는 LLM 왕복 뒤에 오지만
+        // 학생에게는 지금부터 "보고 있어요" 를 보여줄 수 있다.
+        if (triggered) beginTutorPending()
       } catch (error) {
         // 하트비트 실패는 학생 작업에 영향이 없다 -- 다음 틱에 다시 시도한다.
         console.warn('하트비트 전송 실패.', error)
@@ -371,8 +421,10 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
       cancelled = true
       window.clearInterval(beatTimer)
       window.clearInterval(pollTimer)
+      // 언마운트/세션 전환 후에 인디케이터만 살아남지 않게 타이머까지 정리한다.
+      endTutorPending()
     }
-  }, [active, sessionId])
+  }, [active, sessionId, beginTutorPending, endTutorPending])
 
   const recordEdit = useCallback(
     (code: string) => {
@@ -426,5 +478,5 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
 
   const getSessionId = useCallback(() => sessionIdRef.current, [])
 
-  return { recordEdit, recordEvent, flush, ensureSession, resume, sessionId, getSessionId, intervention }
+  return { recordEdit, recordEvent, flush, ensureSession, resume, sessionId, getSessionId, intervention, tutorPending }
 }

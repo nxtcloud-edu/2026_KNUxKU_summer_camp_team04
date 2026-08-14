@@ -38,14 +38,15 @@ SYSTEM_PROMPT = """\
 
 정답을 그대로 알려주지 말고, 학생이 스스로 다음 단계를 밟도록 유도하는 것을
 우선하세요.
-
-예외: struggle_signals에 'paste_detected'가 있으면 이것은 "막힘"이 아니라
-외부에서 코드를 그대로 붙여넣었을 수 있다는 신호입니다. 이 경우 힌트를 주지
-말고, approach를 "이해도 확인"으로 하고 hint_level은 nudge로 두되,
-message_draft는 학생이 방금 작성/붙여넣은 코드가 왜 그렇게 동작하는지
-스스로 생각해보도록 작성하세요 (예: "이 코드가 왜 이렇게 동작하는지
-생각해볼래요?"). action_type은 send_message로 하세요.
 """
+
+# 프롬프트에 있던 'paste_detected' 예외 절은 **일부러 지웠다.**
+#
+# 그 절은 approach/hint_level/action_type을 전부 값까지 지정하고 있어서 LLM에
+# 남는 자유도가 문장 표현뿐이었는데, 그 한 줄 때문에 학생이 5~6초를 더 기다렸다.
+# 지금은 `orchestrator`가 그 분기를 아예 여기로 보내지 않고 `comprehension_check`
+# (LLM 없음)가 처리한다. 남겨두면 영영 발화하지 않을 지시가 프롬프트에 쌓여
+# "이 분기는 어디서 처리되나"를 헷갈리게 만든다.
 
 
 def build_agent() -> Agent:

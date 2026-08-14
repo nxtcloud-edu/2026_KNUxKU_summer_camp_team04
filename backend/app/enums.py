@@ -220,3 +220,16 @@ class AgentAction(str, Enum):
     PREDICT = "PREDICT"
     DEBUG = "DEBUG"
     VERIFY = "VERIFY"
+
+
+class GeneratedProblemStatus(str, Enum):
+    """복습 문제 생성 요청의 진행 상태.
+
+    생성은 LLM + judge 샌드박스라 실측 ~25초이므로 학생을 기다리게 할 수 없다.
+    요청 즉시 PENDING 행을 만들고 백그라운드로 넘긴 뒤, 프런트가 폴링해서
+    READY/FAILED로 바뀌는 걸 본다 (실시간 개입의 AGENT_INTERVENTION 폴링과 같은 패턴).
+    """
+
+    PENDING = "PENDING"
+    READY = "READY"
+    FAILED = "FAILED"

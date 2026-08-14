@@ -37,10 +37,23 @@
 
 붙여넣기(`paste_detected`)는 "막힘" 신호가 아니라 성격이 달라(외부에서 답을 그대로
 복사했을 수도 있음), 힌트 분기가 아닌 **"이해도 확인" 분기**로 별도 처리합니다.
-게이트가 이를 감지하면 `state_agent.assess()`는 LLM을 호출하지 않고 곧장
-`entry_branch="paste"`인 `StudentState`를 만들어 GuidanceAgent로 넘기고,
-GuidanceAgent가 "이 코드가 왜 이렇게 동작하는지 생각해볼래요?" 같은 질문을
-만들게 합니다.
+이 분기는 **LLM을 한 번도 호출하지 않습니다.** `state_agent.assess()`가 규칙만으로
+`entry_branch="paste"`인 `StudentState`를 만들고, 질문 문구는
+`agents/comprehension_check.py`가 붙여넣은 코드를 `ast`로 파싱해 만듭니다.
+
+예전에는 여기서도 `guided_action_agent`(LLM)를 불렀는데, 시스템 프롬프트가
+approach/hint_level/action_type을 전부 값까지 못박아 둔 탓에 LLM에 남은 자유도는
+문장 표현뿐이었습니다. 그 한 줄 때문에 학생이 5~6초를 더 기다렸습니다.
+
+규칙으로 만들면서 질문도 오히려 구체해졌습니다 — 코드에서 **설명을 가장 요구할
+만한 구조**(재귀 > 컴프리헨션 > `while` > `for` > 분기 > 함수 정의 순)를 하나 골라
+지목합니다. "이 코드가 왜 이렇게 동작하는지 생각해볼래요?"는 코드를 안 읽고도
+얼버무릴 수 있지만, "3번째 줄 `for` 반복문이 한 바퀴 돌 때마다 어떤 값이 어떻게
+바뀌나요?"는 그럴 수 없습니다.
+
+문구는 학생을 **붙여넣기로 단정하지 않습니다.** 대규모 변경 탐지에는 오탐이 있고
+(빠르게 타이핑한 초안도 걸립니다), "복사했죠?"로 읽히면 정직하게 작성한 학생에게
+모욕이 됩니다. 그래서 도입부는 관측 사실("코드가 한 번에 많이 바뀌었네요")에 머뭅니다.
 
 ### 지금 구조 (커밋 기준)
 
@@ -48,7 +61,7 @@ GuidanceAgent가 "이 코드가 왜 이렇게 동작하는지 생각해볼래요
 flowchart TD
     B["학생 상태 파악 에이전트<br/>StateAgent<br/>1) 규칙 기반 게이트부터 확인 (LLM 없음)<br/>2) 통과 시에만 LLM 평가"]
     B -->|"세션 종료 / 쿨다운 / 신호 부족<br/>(LLM 미호출)"| STOP1((종료))
-    B -->|"paste_detected<br/>(LLM 미호출)"| C
+    B -->|"paste_detected<br/>(LLM 미호출)"| P["이해도 확인 질문 생성<br/>comprehension_check<br/>(ast 파싱, LLM 미호출)"]
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=False"| STOP2((종료: 관찰만))
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 + 행동 결정 에이전트<br/>GuidedActionAgent"]
     C -.응답 반환 후 백그라운드.-> F["평가 에이전트<br/>EvaluationAgent<br/>(로그만, 응답 안 기다림)"]
@@ -57,8 +70,12 @@ flowchart TD
 | 단계 | 모듈 | 역할 | 출력(Pydantic) |
 |---|---|---|---|
 | 1 | `agents/state_agent.py` | 규칙 기반 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` |
-| 2 | `agents/guided_action_agent.py` | 개입한다면 어떻게 지도할지 + 구체적으로 뭘 할지를 한 번에 결정 | `GuidedAction` |
+| 2a | `agents/comprehension_check.py` | **붙여넣기 분기 전용.** 코드를 `ast`로 파싱해 이해도 확인 질문 생성 (LLM 미호출) | `GuidedAction` |
+| 2b | `agents/guided_action_agent.py` | 그 외 개입: 어떻게 지도할지 + 구체적으로 뭘 할지를 한 번에 결정 | `GuidedAction` |
 | (백그라운드) | `agents/evaluation_agent.py` | 방금 결정이 적절했는지 평가 (응답 반환 후, `service.py`가 `BackgroundTasks`로 호출) | `Evaluation` |
+
+2a와 2b는 **같은 타입(`GuidedAction`)을 반환합니다** — 그래서 `backend_adapter.py`
+이하 하류는 어느 쪽이 돌았는지 몰라도 됩니다.
 
 원래는 `guidance_agent.py`(어떻게 가르칠지) → `action_agent.py`(뭘 할지)를
 LLM 호출 2번으로 나눠 물었는데, 강하게 결합된 하나의 판단이라 합쳤습니다
@@ -190,6 +207,7 @@ LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 �
 | 평범한 제출 (Monitor 미발화) | **3.3 ~ 3.5초** (agent 호출 없음) |
 | Monitor 발화 → agent 호출 (개선 전, LLM 4회 순차) | ~~32초~~ |
 | Monitor 발화 → agent 호출 (지금, LLM 2회 순차) | **16 ~ 18초** |
+| 붙여넣기 분기 (`UNDERSTANDING_UNCERTAIN`, LLM 0회) | **즉시** (`comprehension_check`, 순수 `ast` 파싱) |
 
 처음엔 파이프라인이 LLM을 4번 순차 호출(state → guidance → action →
 evaluation)해서 28~30초가 걸렸다. 두 가지를 고쳤다:

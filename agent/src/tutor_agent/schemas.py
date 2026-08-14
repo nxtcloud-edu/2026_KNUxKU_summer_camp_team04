@@ -46,6 +46,17 @@ class SessionContext(BaseModel):
     paste_detected: bool = Field(
         default=False, description="최근 편집이 붙여넣기였는지 여부. 막힘 신호가 아니라 별도 분기로 처리한다.",
     )
+    help_requested: bool = Field(
+        default=False,
+        description=(
+            "학생이 SOS 등으로 직접 도움을 요청했는지 여부. paste_detected와 달리 "
+            "'막혔는가'를 LLM에게 다시 묻지 않고 should_intervene을 무조건 True로 "
+            "고정한다 — 명시적 요청에 LLM이 '아직 신호가 부족하다'며 WAIT으로 답하면 "
+            "학생 눈에는 버튼을 눌러도 반응이 없는 것으로 보이기 때문이다. 지도 "
+            "방식/문구 자체는 여전히 LLM(guided_action_agent)이 실제 코드·문맥을 "
+            "보고 정한다 — paste 분기처럼 정해진 템플릿으로 대신하지 않는다.",
+        ),
+    )
 
     # --- backend 연동에서만 채워지는 부가 신호 ---
     backend_signals: dict = Field(
@@ -72,11 +83,12 @@ class StudentState(BaseModel):
     struggle_signals: list[str] = Field(default_factory=list)
     should_intervene: bool
     urgency: Literal["low", "medium", "high"] = "low"
-    entry_branch: Literal["struggle", "paste", "skip"] = Field(
+    entry_branch: Literal["struggle", "paste", "help_requested", "skip"] = Field(
         default="struggle",
         description=(
             "이 판단이 어떤 경로로 나왔는지: struggle(규칙 게이트 통과 후 LLM 평가) / "
             "paste(붙여넣기 감지, 규칙만으로 판단·LLM 미사용) / "
+            "help_requested(학생이 직접 요청, should_intervene 고정·지도 방법은 LLM) / "
             "skip(규칙 게이트에서 조기 종료, LLM 미사용)"
         ),
     )
@@ -148,6 +160,27 @@ class Evaluation(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SourceProblem(BaseModel):
+    """복습의 바탕이 되는 원본 문제의 **실제 내용**.
+
+    `missed_problem_ids`만으로는 부족해서 추가했다. agent는 backend의 문제
+    뱅크에 접근할 수 없으므로 id만 받으면 그게 무슨 문제였는지 알 방법이
+    없다 — 그 상태로 "이전에 틀린 문제와 똑같이 만들지 말라"는 시스템
+    프롬프트의 지시는 애초에 지킬 수가 없었다(뭘 피해야 하는지 모르니까).
+    같은 유형의 새 문제를 만들려면 원본의 형식(check_type/function_name)과
+    내용이 그대로 필요하다.
+    """
+
+    problem_id: str = ""
+    title: str = ""
+    description: str = ""
+    concepts: list[str] = Field(default_factory=list)
+    #: "function_call" | "stdout_match". 새 문제도 **같은 형식**이어야 한다 —
+    #: 형식이 바뀌면 학생이 방금 익힌 입출력 방식을 다시 배워야 한다.
+    check_type: str = ""
+    function_name: str | None = None
+
+
 class ReviewRequest(BaseModel):
     """오답/복습 기반 새 문제 생성 요청.
 
@@ -160,6 +193,9 @@ class ReviewRequest(BaseModel):
     concept: str = Field(description="복습 대상 개념 (예: 'loop', 'recursion')")
     missed_problem_ids: list[str] = Field(default_factory=list)
     difficulty_hint: Literal["easier", "same", "harder"] = "same"
+    #: 원본 문제들의 실제 내용. 비어 있으면 `concept` 문자열만 보고 만든다
+    #: (그 경우 "비슷한 문제"가 아니라 "그 개념의 아무 문제"가 된다).
+    source_problems: list[SourceProblem] = Field(default_factory=list)
 
 
 class TestCaseInput(BaseModel):

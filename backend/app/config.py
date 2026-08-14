@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
     problems_dir: str = "app/problems/data"
+    # 복습 문제 생성 결과가 떨어지는 곳. **큐레이션 문제와 섞지 않는다** —
+    # 같은 폴더에 쓰면 사람이 만든 26개와 LLM 생성분을 구별할 수 없게 되고,
+    # judge 저장소를 PROBLEMS_DIR로 쓰는 지금 구성에서는 git 작업 트리가 더러워진다.
+    generated_problems_dir: str = "generated_problems"
 
     # Seam
     judge_backend: str = "none"  # none | docker
@@ -126,6 +130,11 @@ class Settings(BaseSettings):
     @property
     def problems_path(self) -> Path:
         p = Path(self.problems_dir)
+        return p if p.is_absolute() else (BACKEND_ROOT / p)
+
+    @property
+    def generated_problems_path(self) -> Path:
+        p = Path(self.generated_problems_dir)
         return p if p.is_absolute() else (BACKEND_ROOT / p)
 
     @property

@@ -122,15 +122,27 @@ export async function getEvents(sessionId: string, sinceSeq: number): Promise<Ev
   )
 }
 
+export type HeartbeatResult = {
+  /**
+   * Monitor 가 이번 틱에 실제로 트리거했는가.
+   *
+   * `true` 면 서버가 **지금 백그라운드로 agent 를 부르는 중**이다. 힌트 자체는
+   * 아직 없지만, 이 한 비트만으로 "튜터가 코드를 보고 있어요" 를 즉시 띄울 수
+   * 있다 -- 그게 체감 지연을 15초에서 5초 아래로 내리는 유일하게 싼 방법이다.
+   */
+  triggered: boolean
+}
+
 /**
  * 실시간 유휴 감지용 하트비트. 활동 여부와 무관하게 몇 초마다 호출한다.
  *
  * 응답에 agent 의 힌트는 안 실린다(트리거되면 서버가 백그라운드로 넘긴다) --
  * 힌트는 이후의 `getEvents` 폴링이 `AGENT_INTERVENTION` 이벤트로 받아온다.
- * 그래서 여기서는 성공 여부만 신경 쓰면 되고, 실패해도 학생 작업에 영향이 없다.
+ * 실패해도 학생 작업에 영향이 없다.
  */
-export async function postHeartbeat(sessionId: string): Promise<void> {
-  await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/heartbeat`, { method: 'POST' })
+export async function postHeartbeat(sessionId: string): Promise<HeartbeatResult> {
+  const payload = await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/heartbeat`, { method: 'POST' })
+  return { triggered: isObject(payload) && payload.triggered === true }
 }
 
 /**

@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlmodel import Session as DbSession
 
 from app.agent.interface import AgentContext
+from app.config import get_settings
 from app.enums import EventType
 from app.problems.service import ProblemRepository
 from app.sessions import store
@@ -47,7 +48,12 @@ def build_context(
     problem = repo.get(session.problem_id)
     events = trace_service.all_events(db, session_id)
     snapshot = store.latest_snapshot(db, session_id)
-    state = state or evaluate(db, session_id, now=now)
+    # cfg를 반드시 넘긴다. 생략하면 monitor가 DEFAULT_MONITOR_CONFIG(코드에 박힌
+    # 기본값)로 떨어져서 MONITOR_* 환경변수가 통째로 무시된다 (judge/router.py,
+    # trace/router.py의 같은 호출들과 동일한 이유 — CLAUDE.md "설정" 절 참고).
+    # `/agent/decide`(SOS 경로)가 이 함수를 state 없이 부르므로, 여기서 빠뜨리면
+    # SOS로 보는 evidence/status가 하트비트·submit 경로와 다른 임계값으로 계산된다.
+    state = state or evaluate(db, session_id, now=now, cfg=get_settings().monitor)
 
     f = state.features
     last = f.last_result

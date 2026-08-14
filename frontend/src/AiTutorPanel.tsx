@@ -26,6 +26,13 @@ type AiTutorPanelProps = {
    * 폴링이 몇 초마다 도므로, 같은 개입을 매 폴링마다 다시 쌓으면 안 된다.
    */
   intervention?: AgentIntervention | null
+  /**
+   * 서버가 개입 트리거를 감지했고 아직 힌트가 안 온 상태.
+   *
+   * 여기서 타이핑 인디케이터를 띄우는 게 체감 지연을 줄이는 핵심이다 -- 실제
+   * 힌트까지는 LLM 왕복이 남아 있지만, 학생은 그때부터 "튜터가 반응했다" 를 본다.
+   */
+  tutorPending?: boolean
 }
 
 type ChatMessage = {
@@ -39,7 +46,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest, intervention }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest, intervention, tutorPending = false }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [nextMessageId, setNextMessageId] = useState(1)
@@ -61,7 +68,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const chatThread = chatThreadRef.current
     if (!chatThread) return
     chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
-  }, [messages, offerState, sosIntroVisible])
+  }, [messages, offerState, sosIntroVisible, tutorPending])
 
   const addMessage = (sender: ChatMessage['sender'], text: string) => {
     setMessages((current) => [...current, { id: nextMessageId, sender, text }])
@@ -160,7 +167,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
             </div>
           )}
 
-          {messages.length === 0 && offerState !== 'asking' && !sosIntroVisible ? (
+          {messages.length === 0 && offerState !== 'asking' && !sosIntroVisible && !tutorPending ? (
             <div className="tutor-empty-chat">
               <MessageCircle size={25} />
               <strong>다람쥐 튜터가 기다리고 있어요</strong>
@@ -173,6 +180,21 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
                 <p>{message.text}</p>
               </div>
             ))
+          )}
+
+          {/*
+            서버가 트리거를 감지한 순간부터 실제 힌트가 도착할 때까지의 공백을 메운다.
+            이 공백이 5~10초라 인디케이터가 없으면 학생은 시스템이 아무 반응도 안 한
+            것으로 읽는다 -- 실제 지연은 그대로여도 체감은 여기서 갈린다.
+          */}
+          {tutorPending && (
+            <div className="chat-message tutor tutor-typing">
+              <img src={squirrelTutor} alt="" />
+              <p>
+                <span className="tutor-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                코드를 살펴보고 있어요
+              </p>
+            </div>
           )}
         </div>
 
@@ -235,7 +257,26 @@ async function getTutorHelpMessage(sessionId: string | undefined, fallback: stri
   }
 }
 
+/**
+ * 학생에게 보여줄 문구를 고른다.
+ *
+ * **`reason`을 먼저 쓰면 안 된다.** 그건 교육자/타임라인용 판정 근거이지 학생에게
+ * 할 말이 아니다 -- backend_adapter 가 `state_summary + " (지도 방식: {approach}/{hint_level})"`
+ * 로 조립하는 내부 문자열이라, 그대로 띄우면 학생이 아래 같은 걸 읽게 된다:
+ *
+ *   "loop 부분을 같이 보면 좋겠어요. 붙여넣기가 감지되어, 막힘이 아닌 이해도 확인이
+ *    필요한 상황입니다. (지도 방식: 이해도 확인/nudge)"
+ *
+ * 앞부분은 concept 템플릿, 가운데는 state_agent 의 하드코딩된 내부 요약, 괄호는
+ * 디버그 꼬리표다. 정작 LLM 이 학생용으로 쓴 문장(`message_draft`)은
+ * `activity.message` 에 담겨 오는데 화면에 한 번도 안 나왔다.
+ *
+ * `reason` 폴백은 남긴다 -- backend `WaitAgent` 처럼 activity 없이 오는 경로가 있다.
+ */
 function formatAgentDecision(decision: AgentDecision) {
+  const message = decision.activity?.message
+  if (typeof message === 'string' && message.trim()) return message.trim()
+
   const concept = decision.concept ? `${decision.concept} 부분을 같이 보면 좋겠어요. ` : ''
   return `${concept}${decision.reason}`
 }

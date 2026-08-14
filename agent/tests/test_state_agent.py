@@ -158,3 +158,48 @@ def test_skip_gate_still_routes_paste_to_comprehension_check_without_llm() -> No
 
     mock_agent.structured_output.assert_not_called()
     assert result.entry_branch == "paste"
+
+
+# --- help_requested (SOS) ----------------------------------------------------
+#
+# `paste_detected`와 달리 이 분기는 should_intervene을 LLM에게 다시 묻지
+# 않는다 — "학생이 직접 요청했다"가 이미 "지금 개입해야 한다"는 결론이다.
+# (배경: backend `app/agent/router.py`의 SOS 라우트가 body.trigger를 실제로
+# 쓰기 전까지, 신호가 적은 세션에서 LLM이 WAIT을 골라 SOS 버튼이 눌러도
+# 반응 없는 것처럼 보이는 문제가 실제로 있었다.)
+
+
+def test_help_requested_bypasses_llm_and_forces_intervention() -> None:
+    """LLM을 부르지 않고 should_intervene=True로 고정한다."""
+    mock_agent = MagicMock()
+    ctx = _ctx(help_requested=True)
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=True)
+
+    mock_agent.structured_output.assert_not_called()
+    assert result.should_intervene is True
+    assert result.entry_branch == "help_requested"
+    assert result.urgency == "high"
+
+
+def test_help_requested_ignores_the_struggle_gate_too() -> None:
+    """skip_gate=False(게이트 경로)에서도 동일하게 우선한다 — 신호가 하나도
+    없어도(=게이트라면 skip으로 떨어질 상황) 개입을 강제해야 한다."""
+    mock_agent = MagicMock()
+    ctx = _ctx(help_requested=True)  # idle/churn 등 다른 신호 전혀 없음
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=False)
+
+    mock_agent.structured_output.assert_not_called()
+    assert result.should_intervene is True
+    assert result.entry_branch == "help_requested"
+
+
+def test_help_requested_takes_priority_over_paste_detected() -> None:
+    """드물게 둘 다 참이면(붙여넣은 직후 바로 SOS) 명시적 요청이 우선한다."""
+    mock_agent = MagicMock()
+    ctx = _ctx(help_requested=True, paste_detected=True)
+
+    result = state_agent.assess(ctx, mock_agent, skip_gate=True)
+
+    assert result.entry_branch == "help_requested"
