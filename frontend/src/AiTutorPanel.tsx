@@ -32,6 +32,7 @@ type ChatMessage = {
   id: number
   sender: 'tutor' | 'student'
   text: string
+  entrance?: 'auto'
 }
 
 type TutorOffer = 'idle' | 'asking' | 'dismissed'
@@ -42,12 +43,15 @@ const SOS_COST = 3
 function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest, intervention }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
-  const [nextMessageId, setNextMessageId] = useState(1)
   const [acorns, setAcorns] = useState(() => loadAcorns())
   const [sosConfirmOpen, setSosConfirmOpen] = useState(false)
   const [sosError, setSosError] = useState('')
   const [sosIntroVisible, setSosIntroVisible] = useState(false)
+  const [sosIntroEntrance, setSosIntroEntrance] = useState(false)
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
+  const nextMessageIdRef = useRef(1)
+  const sosIntroAnimatedRef = useRef(false)
+  const autoTutorAnimatedRef = useRef(false)
 
   const shouldOfferHelp = Boolean(judgeError || (result && result.status !== 'ACCEPTED'))
   const tutorHint = useMemo(() => makeTutorHint(problem, result, judgeError), [problem, result, judgeError])
@@ -63,9 +67,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
   }, [messages, offerState, sosIntroVisible])
 
-  const addMessage = (sender: ChatMessage['sender'], text: string) => {
-    setMessages((current) => [...current, { id: nextMessageId, sender, text }])
-    setNextMessageId((current) => current + 1)
+  const addMessage = (sender: ChatMessage['sender'], text: string, entrance?: ChatMessage['entrance']) => {
+    const id = nextMessageIdRef.current
+    nextMessageIdRef.current += 1
+    setMessages((current) => [...current, { id, sender, text, entrance }])
   }
 
   // 유휴 하트비트가 받아온 개입을 튜터가 먼저 말 거는 것처럼 채팅에 얹는다.
@@ -76,7 +81,9 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     if (!intervention) return
     if (shownInterventionSeqRef.current === intervention.seq) return
     shownInterventionSeqRef.current = intervention.seq
-    addMessage('tutor', formatAgentDecision(intervention))
+    const entrance = autoTutorAnimatedRef.current ? undefined : 'auto'
+    autoTutorAnimatedRef.current = true
+    addMessage('tutor', formatAgentDecision(intervention), entrance)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervention])
 
@@ -112,6 +119,8 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     const nextAcorns = latestAcorns - SOS_COST
     saveAcorns(nextAcorns)
     setAcorns(nextAcorns)
+    setSosIntroEntrance(!sosIntroAnimatedRef.current)
+    sosIntroAnimatedRef.current = true
     setSosIntroVisible(true)
     addMessage('student', 'SOS! 다람쥐 튜터의 도움이 필요해요.')
     // /agent/decide 보다 **먼저** 큐에 넣는다. Agent 는 이 이벤트까지 본 상태를 읽어야 한다.
@@ -121,6 +130,19 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     setSosConfirmOpen(false)
     setSosError('')
   }
+
+  const renderTutorOffer = (placement: 'chat' | 'modal' = 'chat') => offerState === 'asking' ? (
+    <div className={`tutor-help-offer${placement === 'modal' ? ' in-modal' : ''}`}>
+      <img src={squirrelTutor} alt="" />
+      <div>
+        <p>도움이 필요한가요?</p>
+        <div>
+          <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
+          <button type="button" onClick={declineOffer}>아니요</button>
+        </div>
+      </div>
+    </div>
+  ) : null
 
   return (
     <aside className="tutor-panel panel">
@@ -137,21 +159,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
 
       <div className="tutor-chat">
         <div className="chat-thread" aria-live="polite" ref={chatThreadRef}>
-          {offerState === 'asking' && (
-            <div className="tutor-help-offer">
-              <img src={squirrelTutor} alt="" />
-              <div>
-                <p>도움이 필요한가요?</p>
-                <div>
-                  <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
-                  <button type="button" onClick={declineOffer}>아니요</button>
-                </div>
-              </div>
-            </div>
-          )}
+          {!sosIntroVisible && !sosConfirmOpen && renderTutorOffer()}
 
           {sosIntroVisible && (
-            <div className="tutor-help-offer sos-intro">
+            <div className={`tutor-help-offer sos-intro${sosIntroEntrance ? ' first-entrance' : ''}`}>
               <img src={squirrelTutor} alt="" />
               <div>
                 <p>다람쥐 튜터가 도착했어요!</p>
@@ -168,12 +179,14 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
             </div>
           ) : (
             messages.map((message) => (
-              <div className={`chat-message ${message.sender}`} key={message.id}>
+              <div className={`chat-message ${message.sender}${message.entrance === 'auto' ? ' first-entrance' : ''}`} key={message.id}>
                 {message.sender === 'tutor' && <img src={squirrelTutor} alt="" />}
                 <p>{message.text}</p>
               </div>
             ))
           )}
+
+          {sosIntroVisible && !sosConfirmOpen && renderTutorOffer()}
         </div>
 
         <div className="tutor-compose">
@@ -186,27 +199,30 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
 
       {sosConfirmOpen && (
         <div className="tutor-modal-backdrop" role="presentation">
-          <div className="tutor-modal" role="dialog" aria-modal="true" aria-labelledby="sos-dialog-title">
-            <div className="tutor-modal-character">
-              <img src={squirrelTutor} alt="" />
-              <div className="tutor-modal-bubble">
-                <strong id="sos-dialog-title">다람쥐 튜터를 부를까요?</strong>
-                <p>도토리 {SOS_COST}개를 사용해 다람쥐 튜터의 도움을 받겠습니까?</p>
+          <div className="tutor-modal-stack">
+            <div className="tutor-modal" role="dialog" aria-modal="true" aria-labelledby="sos-dialog-title">
+              <div className="tutor-modal-character">
+                <img src={squirrelTutor} alt="" />
+                <div className="tutor-modal-bubble">
+                  <strong id="sos-dialog-title">다람쥐 튜터를 부를까요?</strong>
+                  <p>도토리 {SOS_COST}개를 사용해 다람쥐 튜터의 도움을 받겠습니까?</p>
+                </div>
+              </div>
+              <div className="tutor-modal-wallet">
+                <AcornIcon size={16} />
+                <span>현재 보유 도토리 {acorns}개</span>
+              </div>
+              {sosError && <p className="tutor-modal-error">{sosError}</p>}
+              <div className="tutor-modal-actions">
+                <button className="modal-secondary-button" type="button" onClick={() => setSosConfirmOpen(false)}>
+                  아니요
+                </button>
+                <button className="modal-primary-button" type="button" onClick={confirmSos}>
+                  예
+                </button>
               </div>
             </div>
-            <div className="tutor-modal-wallet">
-              <AcornIcon size={16} />
-              <span>현재 보유 도토리 {acorns}개</span>
-            </div>
-            {sosError && <p className="tutor-modal-error">{sosError}</p>}
-            <div className="tutor-modal-actions">
-              <button className="modal-secondary-button" type="button" onClick={() => setSosConfirmOpen(false)}>
-                아니요
-              </button>
-              <button className="modal-primary-button" type="button" onClick={confirmSos}>
-                예
-              </button>
-            </div>
+            {renderTutorOffer('modal')}
           </div>
         </div>
       )}
