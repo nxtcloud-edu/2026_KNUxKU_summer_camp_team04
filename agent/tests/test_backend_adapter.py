@@ -23,18 +23,21 @@ from tutor_agent.backend_adapter import (  # noqa: E402
     AgentAction,
     AgentContext,
     AgentDecision,
+    AgentReply,
     TutorAgentAdapter,
     get_backend_agent,
     to_agent_decision,
     to_session_context,
 )
-from tutor_agent.orchestrator import PipelineResult  # noqa: E402
+from tutor_agent.orchestrator import PipelineResult, ReplyResult  # noqa: E402
 from tutor_agent.schemas import (  # noqa: E402
     ActionPlan,
-    Evaluation,
+    AnswerEvaluation,
     GuidancePlan,
     SessionContext,
+    StudentReply,
     StudentState,
+    TutorMessage,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -93,11 +96,17 @@ def _intervening_result() -> PipelineResult:
         guidance_plan=GuidancePlan(
             approach="소크라테스식 질문",
             hint_level="hint",
-            message_draft="합을 담는 변수는 언제 초기화해야 할까요?",
+            focus="합 변수 초기화",
+            talking_points=["초기값을 스스로 떠올리게 할 것"],
+            avoid=["완성된 for문 코드"],
+            expects_student_reply=True,
         ),
         action_plan=ActionPlan(action_type="send_message", payload={"line_start": 2}),
-        evaluation=Evaluation(
-            effectiveness_score=0.8, notes="적절함", follow_up_needed=False
+        # 학생이 읽는 문장은 응답 생성 에이전트가 만든 이것 하나뿐이다.
+        tutor_message=TutorMessage(
+            message="합을 담는 변수는 언제 초기화해야 할까요?",
+            question="합을 담는 변수는 언제 초기화해야 할까요?",
+            expects_reply=True,
         ),
     )
 
@@ -213,8 +222,59 @@ def test_hint_activity_carries_message_and_agent_vocabulary() -> None:
     assert decision.activity["action_type"] == "send_message"  # 원본 어휘 보존
     assert decision.activity["payload"] == {"line_start": 2}
     assert decision.activity["urgency"] == "high"
-    assert decision.activity["evaluation"]["effectiveness_score"] == 0.8
+    # 학생 답을 기다리는 질문인지. frontend가 입력창 안내를 바꾸고, backend가
+    # 학생 답변을 평가할 때 "무엇을 물었는지"로 쓴다.
+    assert decision.activity["expects_reply"] is True
+    assert decision.activity["question"] == "합을 담는 변수는 언제 초기화해야 할까요?"
     assert "소크라테스식 질문" in decision.reason
+
+
+def test_student_facing_message_comes_from_the_message_agent_not_the_state_summary() -> None:
+    """회귀 테스트: 학생에게 가는 문구는 응답 생성 에이전트의 문장 하나뿐이다.
+
+    예전에는 `activity["message"]`가 비면 `reason`(= `state_summary` + 지도 방식)이
+    학생에게 보여줄 유일한 문구가 되어, "학생은 ... 31분 넘게 막혀 있습니다
+    (지도 방식: .../explain)" 같은 3인칭 내부 분석문이 채팅에 떴다.
+    """
+    decision = to_agent_decision(_intervening_result(), _backend_ctx())
+
+    assert decision.activity is not None
+    student_text = decision.activity["message"]
+    # 내부 분석문 조각이 학생용 문구에 섞이지 않는다.
+    assert "같은 오류를 반복하고 있습니다." not in student_text
+    assert "지도 방식" not in student_text
+    assert "소크라테스식 질문" not in student_text
+    # 내부 근거는 사라지지 않고 내부 필드에 남아 있다 (교육자 화면/분석용).
+    assert decision.activity["state_summary"] == "같은 오류를 반복하고 있습니다."
+    assert "지도 방식" in decision.reason
+
+
+def test_missing_student_message_yields_wait_instead_of_leaking_internal_text() -> None:
+    """작문 단계가 실패해 보낼 문장이 없으면 침묵한다 (내부 판단문으로 폴백 금지)."""
+    result = _intervening_result()
+    result.tutor_message = TutorMessage(message="   ")  # 공백만
+    result.action_plan = ActionPlan(action_type="send_message", payload={})
+
+    decision = to_agent_decision(result, _backend_ctx())
+
+    assert decision.action is AgentAction.WAIT
+    assert decision.activity is None
+    assert "같은 오류를 반복하고 있습니다." not in decision.reason
+
+
+def test_payload_message_is_used_when_the_writer_put_it_there() -> None:
+    """action payload에 문장이 들어온 경우도 학생용 문구로 인정한다."""
+    result = _intervening_result()
+    result.tutor_message = None
+    result.action_plan = ActionPlan(
+        action_type="send_message", payload={"message": "어디까지 해봤어요?"}
+    )
+
+    decision = to_agent_decision(result, _backend_ctx())
+
+    assert decision.action is AgentAction.HINT
+    assert decision.activity is not None
+    assert decision.activity["message"] == "어디까지 해봤어요?"
 
 
 @pytest.mark.parametrize(
@@ -398,6 +458,95 @@ def test_adapter_never_raises_on_empty_context() -> None:
     assert decision.state == ""
 
 
+# --- TutorAgentAdapter.respond() (학생이 답을 보낸 경로) ---------------------
+
+
+def _reply_result() -> ReplyResult:
+    return ReplyResult(
+        evaluation=AnswerEvaluation(
+            understanding="partial",
+            is_correct=False,
+            evidence="초기값은 맞혔지만 위치를 반복문 안이라고 답했습니다.",
+            misconceptions=["초기화를 반복문 안에서 해도 된다고 생각함"],
+            follow_up_needed=True,
+            next_focus="초기화 위치",
+        ),
+        tutor_message=TutorMessage(
+            message="0으로 두는 건 맞아요! 그 줄이 반복문 안에 있으면 어떻게 될까요?",
+            question="그 줄이 반복문 안에 있으면 어떻게 될까요?",
+            expects_reply=True,
+        ),
+    )
+
+
+def test_respond_returns_the_generated_message_and_the_evaluation() -> None:
+    pipeline = MagicMock()
+    pipeline.respond_to_student.return_value = _reply_result()
+
+    reply = TutorAgentAdapter(pipeline=pipeline).respond(
+        _backend_ctx(), answer="0으로요. 반복문 안에서요.", question="언제 초기화해야 할까요?"
+    )
+
+    assert isinstance(reply, AgentReply)
+    assert reply.message.startswith("0으로 두는 건 맞아요")
+    assert reply.expects_reply is True
+    # 평가 결과는 내부 판단으로 함께 실려 온다 (backend가 trace에만 남긴다).
+    assert reply.understanding == "partial"
+    assert reply.is_correct is False
+    assert reply.follow_up_needed is True
+    assert reply.misconceptions == ["초기화를 반복문 안에서 해도 된다고 생각함"]
+    assert reply.next_focus == "초기화 위치"
+
+
+def test_respond_passes_the_question_and_answer_to_the_pipeline() -> None:
+    """평가하려면 "무엇을 물었는지"가 파이프라인까지 가야 한다."""
+    pipeline = MagicMock()
+    pipeline.respond_to_student.return_value = _reply_result()
+
+    TutorAgentAdapter(pipeline=pipeline).respond(
+        _backend_ctx(), answer="0으로요", question="언제 초기화해야 할까요?"
+    )
+
+    session_ctx, student_reply = pipeline.respond_to_student.call_args.args
+    assert isinstance(session_ctx, SessionContext)
+    assert isinstance(student_reply, StudentReply)
+    assert student_reply.answer == "0으로요"
+    assert student_reply.question == "언제 초기화해야 할까요?"
+
+
+def test_respond_never_goes_silent_when_the_pipeline_raises() -> None:
+    """학생이 말을 걸었으면 실패해도 말은 걸어준다 (WAIT=침묵으로 떨어지지 않는다)."""
+    pipeline = MagicMock()
+    pipeline.respond_to_student.side_effect = RuntimeError("Anthropic API 500")
+
+    reply = TutorAgentAdapter(pipeline=pipeline).respond(_backend_ctx(), answer="모르겠어요")
+
+    assert reply.message.strip()  # 빈 문자열이 아니다
+    assert reply.understanding == ""  # 판정하지 못했음을 빈 값으로 표현
+    assert reply.follow_up_needed is True
+
+
+def test_respond_rejects_an_empty_answer_without_calling_the_pipeline() -> None:
+    pipeline = MagicMock()
+
+    reply = TutorAgentAdapter(pipeline=pipeline).respond(_backend_ctx(), answer="   ")
+
+    assert reply.message.strip()
+    pipeline.respond_to_student.assert_not_called()
+
+
+def test_respond_falls_back_when_the_message_is_empty() -> None:
+    pipeline = MagicMock()
+    pipeline.respond_to_student.return_value = ReplyResult(
+        evaluation=AnswerEvaluation(understanding="solid", is_correct=True),
+        tutor_message=TutorMessage(message="  "),
+    )
+
+    reply = TutorAgentAdapter(pipeline=pipeline).respond(_backend_ctx(), answer="0으로요")
+
+    assert reply.message.strip()
+
+
 # --- backend 계약 미러 드리프트 검사 (backend를 import하지 않고 소스만 읽는다) ----
 
 
@@ -442,3 +591,23 @@ def test_agent_decision_mirror_matches_backend_fields() -> None:
     ]
 
     assert backend_fields == [f.name for f in AgentDecision.__dataclass_fields__.values()]
+
+
+def test_agent_reply_mirror_matches_backend_fields() -> None:
+    """학생 답변 응답 계약(`AgentReply`)도 미러가 어긋나면 조용히 깨진다."""
+    cls = _class_def(_parse_backend("agent/interface.py"), "AgentReply")
+    backend_fields = [
+        node.target.id for node in cls.body if isinstance(node, ast.AnnAssign)
+    ]
+
+    assert backend_fields == [f.name for f in AgentReply.__dataclass_fields__.values()]
+
+
+def test_backend_protocol_declares_respond() -> None:
+    """backend가 `respond`를 계약에서 빼면 어댑터의 그 메서드는 죽은 코드가 된다."""
+    cls = _class_def(_parse_backend("agent/interface.py"), "AgentProtocol")
+    methods = {
+        node.name for node in cls.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    assert {"decide", "respond"} <= methods

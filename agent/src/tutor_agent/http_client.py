@@ -53,8 +53,11 @@ from typing import Any
 import httpx
 
 from .backend_adapter import (
+    REPLY_FALLBACK_MESSAGE,
     AgentAction,
     AgentDecision,
+    AgentReply,
+    _fallback_reply,
     _field_of,
     _wait_decision,
 )
@@ -218,6 +221,48 @@ class HttpAgentClient:
         except Exception:
             log.warning("Agent 서비스 응답 해석 실패: %r", body, exc_info=True)
             return _wait_decision(ctx, WAIT_REASON_BAD_RESPONSE)
+
+    def respond(self, ctx: Any, answer: str, question: str = "") -> AgentReply:
+        """학생이 보낸 답변에 대한 튜터 응답을 받아온다. **예외를 던지지 않는다.**
+
+        `decide()`가 실패하면 WAIT(침묵)으로 떨어지는 게 맞지만, 이 경로는
+        학생이 직접 말을 건 상황이라 침묵하면 안 된다 — 실패해도 사람이 읽을
+        수 있는 문구를 돌려준다 (`backend_adapter.REPLY_FALLBACK_MESSAGE`).
+        """
+        try:
+            payload = to_payload(ctx)
+            payload["answer"] = answer
+            payload["question"] = question
+        except Exception:
+            log.exception("AgentContext 직렬화 실패 (학생 답변 경로).")
+            return _fallback_reply(REPLY_FALLBACK_MESSAGE)
+
+        try:
+            response = self._get_client().post("/respond", json=payload)
+            response.raise_for_status()
+            body = response.json()
+        except Exception:
+            log.warning(
+                "Agent 서비스(%s) /respond 호출 실패.", self.base_url, exc_info=True
+            )
+            return _fallback_reply(REPLY_FALLBACK_MESSAGE)
+
+        if not isinstance(body, dict) or not str(body.get("message", "") or "").strip():
+            log.warning("Agent 서비스 /respond 응답 해석 실패: %r", body)
+            return _fallback_reply(REPLY_FALLBACK_MESSAGE)
+
+        # 서비스가 필드를 빠뜨리거나 늘려도 안 깨지게, 아는 필드만 골라 담는다.
+        return AgentReply(
+            message=str(body["message"]),
+            expects_reply=bool(body.get("expects_reply", False)),
+            question=str(body.get("question", "") or ""),
+            understanding=str(body.get("understanding", "") or ""),
+            is_correct=bool(body.get("is_correct", False)),
+            follow_up_needed=bool(body.get("follow_up_needed", True)),
+            misconceptions=[str(m) for m in body.get("misconceptions") or []],
+            evidence=str(body.get("evidence", "") or ""),
+            next_focus=str(body.get("next_focus", "") or ""),
+        )
 
     def is_available(self) -> bool:
         """`GET /health`로 서비스가 떠 있는지 확인한다 (진단/기동 로그용).

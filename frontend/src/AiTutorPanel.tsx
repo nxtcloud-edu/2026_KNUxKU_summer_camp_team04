@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { MessageCircle, Send, Sparkles } from 'lucide-react'
 import AcornIcon from './AcornIcon'
 import squirrelTutor from './assets/squirrel-tutor-v2.png'
-import { decideTutorHelp, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
+import { decideTutorHelp, sendTutorMessage, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
 import type { AgentIntervention } from './useCodingTrace'
 
 type AiTutorPanelProps = {
@@ -46,6 +46,11 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const [sosConfirmOpen, setSosConfirmOpen] = useState(false)
   const [sosError, setSosError] = useState('')
   const [sosIntroVisible, setSosIntroVisible] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  // 튜터가 질문을 던져 답을 기다리는 중인지. 입력창 placeholder 만 바꾼다 --
+  // 입력 자체는 항상 열어 둔다 (학생이 먼저 묻고 싶을 수도 있다).
+  const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const nextMessageIdRef = useRef(1)
 
@@ -63,6 +68,13 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     chatThread.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' })
   }, [messages, offerState, sosIntroVisible])
 
+  /**
+   * 채팅 메시지 추가.
+   *
+   * id 를 state 가 아니라 ref 로 센다. state 로 세면 한 tick 안에서 두 번 부를 때
+   * (예: 학생 메시지 + 튜터 답장을 연달아 얹을 때) 두 메시지가 같은 id 를 받아
+   * React key 가 중복된다 -- 그러면 리렌더에서 메시지가 뒤섞이거나 사라진다.
+   */
   const addMessage = (sender: ChatMessage['sender'], text: string) => {
     const id = nextMessageIdRef.current
     nextMessageIdRef.current += 1
@@ -76,10 +88,55 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   useEffect(() => {
     if (!intervention) return
     if (shownInterventionSeqRef.current === intervention.seq) return
+    // 학생용 문구가 없는 개입은 채팅에 얹지 않는다. 내부 근거(reason)로 폴백하면
+    // 학생이 자기 분석 리포트를 읽게 된다 (studentFacingMessage 참고).
+    const message = studentFacingMessage(intervention)
+    if (!message) return
     shownInterventionSeqRef.current = intervention.seq
-    addMessage('tutor', formatAgentDecision(intervention))
+    addMessage('tutor', message)
+    setAwaitingAnswer(intervention.activity?.expects_reply === true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervention])
+
+  /**
+   * 학생이 입력창에서 보낸 말을 튜터에게 전달하고 답장을 채팅에 얹는다.
+   *
+   * 낙관적으로 학생 메시지를 먼저 그린다 -- 응답에 LLM 두 번(답변 평가 → 응답
+   * 생성)이 걸려 몇 초가 지나므로, 그동안 자기가 보낸 말이 안 보이면 전송이
+   * 안 된 것처럼 느껴진다.
+   */
+  const submitDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const answer = draft.trim()
+    if (!answer || isSending) return
+
+    if (!isAuthenticated) {
+      onRequireLogin()
+      return
+    }
+
+    setDraft('')
+    setIsSending(true)
+    addMessage('student', answer)
+    setOfferState('dismissed')
+
+    try {
+      const reply = await sendTutorMessage(sessionId ?? '', answer)
+      if (reply) {
+        addMessage('tutor', reply.message)
+        setAwaitingAnswer(reply.expects_reply)
+      } else {
+        // 서버/agent 미연결. 학생이 말을 걸었으니 침묵하지는 않는다.
+        addMessage('tutor', '지금은 튜터가 답할 수 없어요. 잠시 뒤에 다시 물어봐 줄래요?')
+        setAwaitingAnswer(false)
+      }
+    } catch (error) {
+      console.warn('튜터 응답을 받지 못했습니다.', error)
+      addMessage('tutor', '답을 가져오지 못했어요. 잠시 뒤에 다시 보내줄래요?')
+    } finally {
+      setIsSending(false)
+    }
+  }
 
   const acceptOffer = () => {
     addMessage('student', '네, 도움이 필요해요.')
@@ -181,12 +238,19 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
           {sosIntroVisible && !sosConfirmOpen && renderTutorOffer()}
         </div>
 
-        <div className="tutor-compose">
-          <span>대화 입력은 준비 중이에요</span>
-          <button type="button" disabled>
+        <form className="tutor-compose" onSubmit={submitDraft}>
+          <input
+            type="text"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={awaitingAnswer ? '답을 적어보세요' : '무엇이든 물어보세요'}
+            aria-label="튜터에게 보낼 메시지"
+            disabled={isSending}
+          />
+          <button type="submit" disabled={isSending || !draft.trim()} aria-label="보내기">
             <Send size={14} />
           </button>
-        </div>
+        </form>
       </div>
 
       {sosConfirmOpen && (
@@ -222,7 +286,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
 }
 
 function makeTutorHint(problem: ProblemDetail | null, result: JudgeResult | null, judgeError: string) {
-  if (result?.agent_decision && result.agent_decision.action !== 'WAIT') return formatAgentDecision(result.agent_decision)
+  if (result?.agent_decision && result.agent_decision.action !== 'WAIT') {
+    const message = studentFacingMessage(result.agent_decision)
+    if (message) return message
+  }
   if (judgeError) return '채점 서버 연결부터 확인해볼까요? 지금은 코드보다 실행 환경 문제일 수 있어요.'
   if (result?.status === 'SYNTAX_ERROR') return '문법 오류가 있어 보여요. 괄호, 콜론(:), 들여쓰기를 먼저 차근차근 확인해봐요.'
   if (result?.status === 'RUNTIME_ERROR') return '실행 중 오류가 났어요. 변수 이름이 맞는지, 리스트 인덱스를 벗어나지 않았는지 확인해봐요.'
@@ -235,16 +302,39 @@ async function getTutorHelpMessage(sessionId: string | undefined, fallback: stri
   if (!sessionId) return fallback
   try {
     const decision = await decideTutorHelp(sessionId)
-    return decision && decision.action !== 'WAIT' ? formatAgentDecision(decision) : fallback
+    if (!decision || decision.action === 'WAIT') return fallback
+    return studentFacingMessage(decision) ?? fallback
   } catch (error) {
     console.warn('Agent API unavailable. Using local tutor hint.', error)
     return fallback
   }
 }
 
-function formatAgentDecision(decision: AgentDecision) {
-  const concept = decision.concept ? `${decision.concept} 부분을 같이 보면 좋겠어요. ` : ''
-  return `${concept}${decision.reason}`
+/**
+ * 학생에게 보여줄 문구를 고른다.
+ *
+ * **`activity.message` 가 유일한 학생용 텍스트다.** agent 파이프라인의 응답 생성
+ * 에이전트(`tutor_message_agent`)가 2인칭으로 쓴 문장이고, 그것만 여기로 온다.
+ *
+ * `decision.reason` 은 학생용이 아니다 -- 교육자 타임라인용 내부 근거
+ * (`StudentState.state_summary` + 지도 방식)다. 예전에는 이 함수가 `reason` 을
+ * 그대로 렌더해서 학생이 자기 분석 리포트를 읽었다:
+ *
+ *   "loop 부분을 같이 보면 좋겠어요. 학생은 함수의 기본 구조를 이해하지 못한 채
+ *    31분 넘게 완전히 막혀 있습니다. ... 힌트를 6회 요청했지만 ...
+ *    (지도 방식: 단계별 구조 안내 + 구체적 예시 제공/explain)"
+ *
+ * concept 접두사("loop 부분을 같이 보면 좋겠어요.")도 붙이지 않는다. 응답 생성
+ * 에이전트가 이미 완결된 인사/도입을 포함한 문장을 쓰므로, 접두사를 덧대면
+ * 위처럼 두 문장이 어색하게 겹친다.
+ *
+ * `activity.message` 가 없으면(= agent 미연결이거나 구버전 응답) `reason` 으로
+ * 폴백하지 않고 `null` 을 돌려준다. 내부 판단문을 보여주는 것보다 아무 말도
+ * 하지 않는 게 낫다 -- 호출부가 로컬 폴백 힌트로 대체한다.
+ */
+function studentFacingMessage(decision: AgentDecision | AgentIntervention): string | null {
+  const message = decision.activity?.message
+  return typeof message === 'string' && message.trim() ? message : null
 }
 
 function loadAcorns() {
