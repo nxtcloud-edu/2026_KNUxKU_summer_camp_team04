@@ -3,6 +3,7 @@ import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCirc
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
 import AcornIcon from './AcornIcon'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 const PROBLEMS_PER_PAGE = 10
@@ -61,7 +62,14 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
       <div className="problem-list-container">
         <div className="home-utility"><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
         <div className="problem-list-heading home-heading">
-          <div><span>GOOD TO SEE YOU</span><h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1><p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p></div>
+          <div className="home-squirrel-message">
+            <img src={squirrelTutor} alt="" />
+            <div className="home-speech-bubble">
+              <span>GOOD TO SEE YOU</span>
+              <h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1>
+              <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
+            </div>
+          </div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>
         </div>
 
@@ -124,9 +132,9 @@ function RecommendedProblem({ problem, rank, onClick }: { problem: ProblemSummar
       <span className="recommendation-label">{rank === 1 ? '지금 풀기 좋아요' : rank === 2 ? '이어서 도전' : '기초 다지기'}</span>
       <span className="recommendation-icon">{functionType ? <Braces /> : <Terminal />}</span>
       <strong>{problem.title}</strong>
-      <small>{functionType ? '함수와 반복문을 함께 연습해요' : '입력과 출력의 흐름을 익혀요'}</small>
+      <small>{rank === 1 ? '최근 학습 흐름과 딱 맞아요' : functionType ? '함수와 반복문을 함께 연습해요' : '입력과 출력의 흐름을 익혀요'}</small>
       <span className="problem-reward"><AcornIcon /> 도토리 {problem.acorn_reward}개</span>
-      <span className="recommendation-action">문제 풀기 <ArrowRight size={15} /></span>
+      <span className="recommendation-action">{rank === 1 ? '지금 풀기' : '문제 풀기'} <ArrowRight size={15} /></span>
     </button>
   )
 }
