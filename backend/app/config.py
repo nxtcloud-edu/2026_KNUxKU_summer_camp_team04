@@ -28,6 +28,24 @@ class MonitorConfig:
     large_change_window_seconds: int = 60
     recent_score_window: int = 5
 
+    # --- 편집만으로 발화하는 규칙(R7b/R7c)의 임계값 ---
+    # 위 임계값들이 전부 채점 결과(TEST_RESULT)를 요구하기 때문에, 학생이 실행/제출을
+    # 한 번도 누르지 않으면 R0(도움 요청) 말고는 발화할 수 있는 규칙이 없었다.
+    # 아래 둘은 편집 이벤트만으로 판정한다.
+    #
+    # no_progress_seconds(90초)와 다른 시계를 쓴다: 그건 "마지막 채점 개선 이후"라
+    # 학생이 활발히 타이핑하는 중에도 계속 증가한다. 이쪽은 "마지막 편집 이후"다.
+    idle_edit_seconds: int = 45
+    # 같은 영역을 이만큼 반복 수정하면 churn으로 본다.
+    edit_churn_threshold: int = 3
+    # 붙여넣기 직후 이만큼 손을 떼고 있으면 "이해도 확인" 분기로 보낸다.
+    # 신호 하나(붙여넣기)만으로 개입하지 않기 위한 두 번째 조건이다.
+    #
+    # 이 값이 곧 학생이 체감하는 지연의 절반 이상이다(실측: 붙여넣기 -> 힌트까지
+    # 서버가 쓰는 13.7초 중 8초가 여기, 나머지 5.6초가 LLM). 붙여넣고 5초를 그대로
+    # 쳐다보고 있으면 "직접 친 게 아니다"라는 판단에 충분하다.
+    paste_settle_seconds: int = 5
+
 
 DEFAULT_MONITOR_CONFIG = MonitorConfig()
 
@@ -84,16 +102,22 @@ class Settings(BaseSettings):
             "ADVANCED": self.acorn_reward_advanced,
         }.get((difficulty or "").upper(), self.acorn_reward_beginner)
 
-    # Monitor
-    monitor_no_progress_seconds: int = 90
-    monitor_same_result_threshold: int = 3
-    monitor_same_region_threshold: int = 2
-    monitor_consecutive_error_threshold: int = 3
-    monitor_cooldown_seconds: int = 30
-    monitor_large_change_ratio: float = 0.5
-    monitor_large_change_min_lines: int = 5
-    monitor_large_change_window_seconds: int = 60
-    monitor_recent_score_window: int = 5
+    # Monitor.
+    # **기본값을 여기 다시 적지 않는다.** MonitorConfig의 필드 기본값을 그대로
+    # 끌어온다 -- 두 곳에 숫자를 쓰면 조용히 어긋난다(실제로 paste_settle을
+    # MonitorConfig에서만 5로 낮췄더니 여기 10이 이겨서 아무 변화가 없었다).
+    monitor_no_progress_seconds: int = DEFAULT_MONITOR_CONFIG.no_progress_seconds
+    monitor_same_result_threshold: int = DEFAULT_MONITOR_CONFIG.same_result_threshold
+    monitor_same_region_threshold: int = DEFAULT_MONITOR_CONFIG.same_region_threshold
+    monitor_consecutive_error_threshold: int = DEFAULT_MONITOR_CONFIG.consecutive_error_threshold
+    monitor_cooldown_seconds: int = DEFAULT_MONITOR_CONFIG.cooldown_seconds
+    monitor_large_change_ratio: float = DEFAULT_MONITOR_CONFIG.large_change_ratio
+    monitor_large_change_min_lines: int = DEFAULT_MONITOR_CONFIG.large_change_min_lines
+    monitor_large_change_window_seconds: int = DEFAULT_MONITOR_CONFIG.large_change_window_seconds
+    monitor_recent_score_window: int = DEFAULT_MONITOR_CONFIG.recent_score_window
+    monitor_idle_edit_seconds: int = DEFAULT_MONITOR_CONFIG.idle_edit_seconds
+    monitor_edit_churn_threshold: int = DEFAULT_MONITOR_CONFIG.edit_churn_threshold
+    monitor_paste_settle_seconds: int = DEFAULT_MONITOR_CONFIG.paste_settle_seconds
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -116,6 +140,9 @@ class Settings(BaseSettings):
             large_change_min_lines=self.monitor_large_change_min_lines,
             large_change_window_seconds=self.monitor_large_change_window_seconds,
             recent_score_window=self.monitor_recent_score_window,
+            idle_edit_seconds=self.monitor_idle_edit_seconds,
+            edit_churn_threshold=self.monitor_edit_churn_threshold,
+            paste_settle_seconds=self.monitor_paste_settle_seconds,
         )
 
 

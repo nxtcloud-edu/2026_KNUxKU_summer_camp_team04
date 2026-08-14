@@ -28,8 +28,16 @@ cooldown 상태가 AGENT_TRIGGER 이벤트에 살기 때문이다. 데모의 Pro
   R5b REPEATED_FAILURE same_result>=3 and streak 내 편집 0
   R6  REPEATED_ERROR   consecutive_error>=3
   R7  NO_PROGRESS      90초 무진전 and attempt>=2
+  --- 이하 채점 결과 없이 편집만으로 발화한다 ---
+  R7b UNDERSTANDING_UNCERTAIN  대규모 변경 and 그 후 멈춤
+  R7c NO_PROGRESS      같은 영역 churn and 편집 멈춤
   R8  PRODUCTIVE_STRUGGLE  attempt>=2
   R9  기본             PROGRESSING
+
+R7까지는 전부 TEST_RESULT를 요구한다는 점이 중요하다 -- attempt_count조차
+클라이언트의 RUN/SUBMIT 이벤트가 아니라 **서버가 채점하며 쓴 결과**만 센다.
+그래서 R7b/R7c가 없으면 "실행을 한 번도 안 누른 학생"에게는 R0(도움 요청)
+말고 어떤 규칙도 발화할 수 없다.
 """
 from __future__ import annotations
 
@@ -121,7 +129,16 @@ def _evidence(f: ProcessFeatures, cfg: MonitorConfig) -> list[str]:
     if f.consecutive_error_count >= 2 and f.recent_error_types:
         out.append(f"{f.recent_error_types[-1]} ×{f.consecutive_error_count} 연속")
     if f.large_change_detected:
-        out.append("직전 실행 전 대규모 코드 변경")
+        # 실행이 한 번도 없었으면 "직전 실행 전"이라는 말이 거짓이 된다
+        # (R7b는 실행 없이 붙여넣기만 한 세션에서 발화한다).
+        out.append(
+            "직전 실행 전 대규모 코드 변경"
+            if f.attempt_count >= 1
+            else "실행 없이 대규모 코드 변경"
+        )
+    # 편집 시계는 "손을 놓았을 때"만 근거로 의미가 있다. 타이핑 중에는 노이즈다.
+    if f.snapshot_count >= 1 and f.seconds_since_last_edit >= cfg.paste_settle_seconds:
+        out.append(f"{f.seconds_since_last_edit}초째 편집 없음")
     if f.progress_delta > 0:
         out.append(f"직전 실행 대비 +{f.progress_delta} 테스트 통과")
     if f.recent_scores:
@@ -232,6 +249,57 @@ def _classify(
             ProcessStatus.POSSIBLE_STUCK,
             TriggerType.NO_PROGRESS,
             f"{f.seconds_without_progress}초 동안 테스트 결과에 진전이 없습니다.",
+        )
+
+    # ------------------------------------------------------------------
+    # R7b/R7c: **편집만으로** 발화하는 규칙.
+    #
+    # 여기 위의 규칙(R1s~R7)은 전부 TEST_RESULT를 요구한다 -- attempt_count도
+    # RUN/SUBMIT 이벤트가 아니라 서버가 채점하며 쓰는 결과만 센다. 그래서 학생이
+    # 실행/제출을 한 번도 누르지 않으면 R0(도움 요청) 말고는 발화할 수 있는 규칙이
+    # 없었다. 붙여넣기도 churn도 feature로는 이미 잡히는데 쓰는 규칙이 없었다.
+    #
+    # 두 규칙 모두 **신호 2개**를 요구한다. 하나만으로는 오탐이 많다 --
+    # "유휴 45초"는 그냥 문제를 읽는 중일 수도 있고, "큰 변경"은 빠르게 타이핑한
+    # 것일 수도 있다. 여기에 "그리고 손을 놓았다"가 겹쳐야 개입할 만한 상황이 된다.
+    #
+    # 그리고 둘 다 edits_since_last_trigger >= 1을 요구한다: 지난번에 찔렀는데
+    # 학생이 코드를 건드리지도 않았으면 또 찌를 이유가 없다. cooldown(30초 또는
+    # 다음 Run)만으로는 이걸 막을 수 없다 -- 편집만 하는 세션에는 Run이 영영
+    # 오지 않아서 30초마다 같은 트리거가 반복된다.
+    edited_since_last_nudge = f.edits_since_last_trigger >= 1
+
+    # R7b 붙여넣기 후 검증 없음 -> 이해도 확인 분기.
+    # R2와 같은 trigger를 쓴다: R2는 "붙여넣고 **통과**했다", 이건 "붙여넣고
+    # 실행조차 안 했다"로 상황은 다르지만, agent가 받아야 할 지시는 같다
+    # ("정답을 주지 말고 왜 이렇게 동작하는지 설명하게 하라").
+    # 새 TriggerType을 만들면 agent 쪽 분기(backend_adapter의 이해도 확인 매핑)를
+    # 같이 고쳐야 하는데, 그럴 만큼 다른 상황이 아니다.
+    if (
+        f.large_change_unverified
+        and f.seconds_since_last_edit >= cfg.paste_settle_seconds
+        and edited_since_last_nudge
+    ):
+        return (
+            ProcessStatus.UNDERSTANDING_UNCERTAIN,
+            TriggerType.UNDERSTANDING_UNCERTAIN,
+            "대규모 코드 변경 후 실행 없이 멈춰 있어 이해 여부를 확인해야 합니다.",
+        )
+
+    # R7c 편집 정체: 같은 영역만 반복해서 고치다가 손을 놓았다.
+    # 여기서도 "아직 안 돌려본 편집"을 요구한다 -- 고친 뒤 실행해서 결과를 본
+    # 학생은 R5/R6가 다룰 문제이지 편집 정체가 아니다.
+    if (
+        f.same_region_edit_count >= cfg.edit_churn_threshold
+        and f.seconds_since_last_edit >= cfg.idle_edit_seconds
+        and f.edits_since_last_result >= 1
+        and edited_since_last_nudge
+    ):
+        return (
+            ProcessStatus.POSSIBLE_STUCK,
+            TriggerType.NO_PROGRESS,
+            f"같은 영역을 {f.same_region_edit_count}번 고치다가 "
+            f"{f.seconds_since_last_edit}초째 멈춰 있습니다.",
         )
 
     # R8 생산적 고전.
@@ -402,6 +470,10 @@ def features_to_dict(f: ProcessFeatures) -> dict:
         "recent_error_types": f.recent_error_types,
         "consecutive_error_count": f.consecutive_error_count,
         "snapshot_count": f.snapshot_count,
+        "seconds_since_last_edit": f.seconds_since_last_edit,
+        "edits_since_last_trigger": f.edits_since_last_trigger,
+        "edits_since_last_result": f.edits_since_last_result,
+        "large_change_unverified": f.large_change_unverified,
         "last_result": None
         if last is None
         else {

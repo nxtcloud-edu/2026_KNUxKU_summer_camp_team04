@@ -150,6 +150,12 @@ class ProcessFeaturesRead(BaseModel):
     recent_error_types: list[str]
     consecutive_error_count: int
     snapshot_count: int
+    # 편집만으로 발화하는 규칙(monitor R7b/R7c)이 읽는 값. 데모의 Process State
+    # 패널이 "왜 지금 불렸는지"를 설명하려면 이 둘도 보여야 한다.
+    seconds_since_last_edit: int = 0
+    edits_since_last_trigger: int = 0
+    edits_since_last_result: int = 0
+    large_change_unverified: bool = False
     last_result: JudgeResultRead | None
 
 
