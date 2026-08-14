@@ -41,8 +41,20 @@ const RETRY_DELAYS_MS = [1000, 2000, 4000]
  * 유휴 감지 하트비트 주기. backend monitor.py 의 cooldown(30초)보다 짧아야 한다 --
  * 안 그러면 트리거 하나를 하트비트 두 틱이 나눠 쓰는 게 아니라, 한 틱이 통째로
  * 놓치는 경우가 생긴다 (agent/README.md, backend PR #16 "실시간 유휴 감지" 참고).
+ *
+ * POST 라 서버가 evaluate_and_record() 로 실제 기록한다 -- 그래서 폴링만큼
+ * 촘촘하게 두지 않는다. 트리거가 발화한 뒤에는 cooldown 이 중복 발화를 막는다.
  */
-const HEARTBEAT_INTERVAL_MS = 12000
+const HEARTBEAT_INTERVAL_MS = 5000
+/**
+ * 개입 이벤트 폴링 주기. 하트비트와 **분리해서** 더 촘촘하게 돈다.
+ *
+ * 하트비트가 트리거를 만들면 서버는 agent 를 백그라운드로 부르고, 결과는 몇 초 뒤
+ * AGENT_INTERVENTION 으로 저장된다. 폴링이 하트비트에 묶여 있으면 그 힌트가 이미
+ * 저장돼 있는데도 다음 하트비트 틱까지 화면에 안 뜬다.
+ * GET 이라 아무것도 기록하지 않으므로 촘촘해도 cooldown 을 소진하지 않는다.
+ */
+const EVENT_POLL_INTERVAL_MS = 2500
 
 const sessionKey = (problemId: string) => `codetrace:session:${problemId}`
 
@@ -340,15 +352,25 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
         // 하트비트 실패는 학생 작업에 영향이 없다 -- 다음 틱에 다시 시도한다.
         console.warn('하트비트 전송 실패.', error)
       }
-      if (!cancelled) await pollEvents()
     }
 
-    // baseline 을 즉시 잡는다 -- 첫 하트비트까지 12초를 그냥 흘려보내지 않는다.
+    // baseline 을 즉시 잡는다 -- 첫 폴링까지 기다리며 흘려보내지 않는다.
     void pollEvents()
-    const timer = window.setInterval(() => void beat(), HEARTBEAT_INTERVAL_MS)
+
+    // **두 타이머를 분리한다.** 예전에는 폴링이 하트비트 뒤에 붙어 같은 주기로
+    // 돌았는데, 그러면 힌트가 서버에 저장된 뒤에도 다음 하트비트 틱까지 화면에
+    // 안 나타나서 대기가 두 번(트리거될 때까지 + 힌트를 가져올 때까지) 쌓였다.
+    // 실측: 서버가 실제로 쓰는 시간은 13.7초(settle 8.1 + LLM 5.6)인데 타이머
+    // 대기만 최대 24초가 얹혀 최악 40초였다.
+    //
+    // 폴링은 하트비트보다 촘촘해도 안전하다 -- GET 이라 아무것도 기록하지 않는다.
+    // 반면 하트비트는 POST 라 evaluate_and_record() 로 실제 기록하므로 더 아낀다.
+    const beatTimer = window.setInterval(() => void beat(), HEARTBEAT_INTERVAL_MS)
+    const pollTimer = window.setInterval(() => void pollEvents(), EVENT_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      window.clearInterval(beatTimer)
+      window.clearInterval(pollTimer)
     }
   }, [active, sessionId])
 
