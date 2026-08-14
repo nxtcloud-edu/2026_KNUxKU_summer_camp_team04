@@ -115,8 +115,9 @@ export async function getProblemDetail(problemId: string, signal?: AbortSignal):
 /**
  * 학생이 직접 도움을 요청했을 때의 개입 판단.
  *
- * `HINT_REQUEST` 이벤트 기록은 **여기서 하지 않는다.** trace 큐를 소유한 쪽
- * (App 의 useCodingTrace)이 기록해야 순서가 보장되고 재시도도 얻는다.
+ * 실제 개입이면 서버가 같은 요청 안에서 `AGENT_INTERVENTION`으로 기록한다.
+ * 따라서 호출부가 별도 `HINT_REQUEST`를 큐에 넣으면 heartbeat가 agent를 다시
+ * 호출하게 되므로, SOS 경로에서는 이 요청만 사용한다.
  */
 export async function decideTutorHelp(sessionId: string): Promise<AgentDecision | null> {
   if (!API_BASE_URL || !sessionId) return null
