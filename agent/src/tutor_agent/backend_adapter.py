@@ -103,6 +103,25 @@ class AgentDecision:
     activity: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class AgentReply:
+    """`backend/app/agent/interface.py::AgentReply` 미러.
+
+    학생이 튜터에게 보낸 말에 대한 응답. `message`만 학생에게 보여주고, 나머지
+    (학생 답변 평가 결과)는 backend가 trace에만 남긴다.
+    """
+
+    message: str
+    expects_reply: bool = False
+    question: str = ""
+    understanding: str = ""
+    is_correct: bool = False
+    follow_up_needed: bool = True
+    misconceptions: list[str] = field(default_factory=list)
+    evidence: str = ""
+    next_focus: str = ""
+
+
 # ---------------------------------------------------------------------------
 # 어휘 매핑
 # ---------------------------------------------------------------------------
@@ -139,6 +158,21 @@ JUDGE_ERROR_STATUSES = frozenset(
 WAIT_REASON_FALLBACK = (
     "Agent 파이프라인을 신뢰할 수 있게 실행하지 못해 개입하지 않고 기다립니다."
 )
+
+#: 학생이 말을 걸었는데 파이프라인이 실패했을 때 보내는 문구.
+#:
+#: 자동 개입 경로는 실패하면 WAIT(=침묵)으로 떨어지는 게 맞다 — 학생은 애초에
+#: 무언가를 기대하고 있지 않았다. 반면 학생이 직접 질문/답변을 보낸 경로에서
+#: 침묵하면 "튜터가 내 말을 씹었다"가 된다. 그래서 이쪽은 항상 문장을 돌려준다.
+REPLY_FALLBACK_MESSAGE = (
+    "지금 답을 정리하지 못했어요. 잠시 뒤에 다시 물어봐 줄래요? "
+    "그동안 코드를 한 줄씩 소리 내어 읽어보면 걸리는 지점이 보일 수 있어요."
+)
+
+
+def _fallback_reply(message: str) -> "AgentReply":
+    """`respond()`의 실패 응답. 평가 결과 자리는 비워 둔다 (판정하지 못했으므로)."""
+    return AgentReply(message=message, follow_up_needed=True)
 
 
 # ---------------------------------------------------------------------------
@@ -336,13 +370,33 @@ def to_agent_decision(result: "PipelineResult", ctx: Any) -> AgentDecision:
 
     - 파이프라인이 개입하지 않기로 했으면(`should_intervene=False`) WAIT.
     - `action_type == "no_op"`도 WAIT.
+    - 학생에게 보낼 메시지가 비어 있으면 WAIT (아래 "무엇이 학생에게 가는가").
     - 그 밖의 실제 개입(`send_message`/`highlight_code`/`show_example`)은 HINT로
       모은다 (`ACTION_TYPE_TO_AGENT_ACTION`).
+
+    무엇이 학생에게 가는가
+    ----------------------
+    **`activity["message"]` 하나뿐이다.** 그 값은 응답 생성
+    에이전트(`agents/tutor_message_agent.py`)가 만든 문장이고, 프런트엔드가
+    그것만 채팅 버블에 렌더한다.
+
+    `reason`은 학생용이 아니다 — `StudentState.state_summary`(3인칭 내부 분석문)에
+    지도 방식을 덧붙인 **교육자/타임라인용 근거**다. 이 함수가 한동안 그
+    `reason`을 학생에게 보여줄 유일한 문구처럼 내보내고 있었고(프런트엔드가
+    `reason`을 렌더했다), 그래서 학생이 이런 걸 읽었다:
+
+        loop 부분을 같이 보면 좋겠어요. 학생은 함수의 기본 구조를 이해하지 못한
+        채 31분 넘게 완전히 막혀 있습니다. ... 힌트를 6회 요청했지만 ...
+        (지도 방식: 단계별 구조 안내 + 구체적 예시 제공/explain)
+
+    지금은 (1) 파이프라인이 학생용 문장을 따로 만들고, (2) 그 문장이 없으면
+    내부 판단문으로 폴백하지 않고 WAIT하며, (3) 프런트엔드가 `activity.message`를
+    우선 렌더한다. 세 지점 중 하나만 고치면 재발하기 쉬우므로 셋 다 고쳐 뒀다.
     """
     student_state = getattr(result, "student_state", None)
     action_plan = getattr(result, "action_plan", None)
     guidance_plan = getattr(result, "guidance_plan", None)
-    evaluation = getattr(result, "evaluation", None)
+    tutor_message = getattr(result, "tutor_message", None)
 
     summary = str(getattr(student_state, "state_summary", "") or "")
     state = _state_label(ctx, fallback=summary)
@@ -377,11 +431,35 @@ def to_agent_decision(result: "PipelineResult", ctx: Any) -> AgentDecision:
 
     approach = str(getattr(guidance_plan, "approach", "") or "")
     hint_level = str(getattr(guidance_plan, "hint_level", "") or "")
-    message = str(getattr(guidance_plan, "message_draft", "") or "")
     payload = _as_dict(getattr(action_plan, "payload", {}))
+
+    # 학생이 읽는 문구는 응답 생성 에이전트(`tutor_message_agent`)가 만든 것
+    # **하나뿐이다.** 이게 비어 있으면 개입을 포기하고 WAIT으로 내려간다 (아래).
+    message = str(getattr(tutor_message, "message", "") or "")
     if not message:
         message = str(payload.get("message", "") or "")
 
+    if not message.strip():
+        # 예전에는 이 자리에서 `state_summary`(3인칭 내부 분석문)로 폴백했다.
+        # 그게 "학생은 31분 넘게 막혀 있습니다 (지도 방식: .../explain)"가 학생
+        # 화면에 뜬 경로다. 보여줄 말이 없으면 아무 말도 하지 않는 게 맞다 —
+        # 내부 판단문을 대신 내보내는 것보다 낫다.
+        log.warning(
+            "개입하기로 했지만 학생에게 보낼 메시지가 비어 있습니다. WAIT으로 폴백합니다. "
+            "(approach=%r action_type=%r)",
+            approach,
+            action_type,
+        )
+        return AgentDecision(
+            state=state,
+            concept=concept,
+            action=AgentAction.WAIT,
+            reason="학생에게 전달할 메시지를 만들지 못해 개입하지 않고 기다립니다.",
+        )
+
+    # `reason`은 **교육자/타임라인용 내부 근거**다 (학생 화면에 렌더되지 않는다).
+    # 학생에게 가는 것은 `activity["message"]`뿐이다 — frontend
+    # `AiTutorPanel.formatAgentDecision()` 참고.
     reason = summary or "학생이 막혀 있다고 판단했습니다."
     if approach:
         reason = f"{reason} (지도 방식: {approach}"
@@ -389,8 +467,12 @@ def to_agent_decision(result: "PipelineResult", ctx: Any) -> AgentDecision:
 
     activity: dict[str, Any] = {
         "kind": "hint",
-        # 학생에게 실제로 보여줄 문구.
+        # 학생에게 실제로 보여줄 문구. **이 값만 학생에게 노출된다.**
         "message": message,
+        # 학생의 답을 기다리는 질문인지. frontend가 이 값으로 입력창을 열고,
+        # backend가 학생 답변을 평가할 때 "무엇을 물었는지"로 `question`을 쓴다.
+        "expects_reply": bool(getattr(tutor_message, "expects_reply", False)),
+        "question": str(getattr(tutor_message, "question", "") or ""),
         "hint_level": hint_level,
         "approach": approach,
         # agent 쪽 원본 어휘도 같이 남긴다. HINT로 뭉갠 정보를 나중에 세분화
@@ -402,16 +484,9 @@ def to_agent_decision(result: "PipelineResult", ctx: Any) -> AgentDecision:
         "struggle_signals": _as_str_list(
             getattr(student_state, "struggle_signals", [])
         ),
+        # 내부 판단 근거. 교육자 화면/분석용이며 학생에게 보여주면 안 된다.
         "state_summary": summary,
     }
-    if evaluation is not None:
-        activity["evaluation"] = {
-            "effectiveness_score": _as_float(
-                getattr(evaluation, "effectiveness_score", 0.0)
-            ),
-            "notes": str(getattr(evaluation, "notes", "") or ""),
-            "follow_up_needed": bool(getattr(evaluation, "follow_up_needed", False)),
-        }
 
     return AgentDecision(
         state=state,
@@ -501,6 +576,60 @@ class TutorAgentAdapter:
                 _wait_decision(ctx, "Agent 결과를 해석하지 못해 개입하지 않고 기다립니다."),
                 None,
             )
+
+    def respond(self, ctx: Any, answer: str, question: str = "") -> AgentReply:
+        """학생이 보낸 답변을 평가하고 이어서 할 말을 만든다. **예외를 던지지 않는다.**
+
+        `decide()`가 "튜터가 먼저 말을 거는" 경로라면 이쪽은 "학생이 답했다"
+        경로다. 학생 답변 평가(`evaluation_agent`) → 응답 생성
+        (`tutor_message_agent`) 두 단계를 거친다.
+
+        Args:
+            ctx: backend `AgentContext`(또는 같은 필드를 가진 dict).
+            answer: 학생이 입력한 답변 원문.
+            question: 튜터가 직전에 던진 질문. **서버가 개입 기록에서 찾아
+                채운다** — 학생 클라이언트가 주장하는 값을 그대로 믿으면 질문을
+                바꿔 보내 평가를 통과시킬 수 있다.
+
+        Returns:
+            `AgentReply`. 실패 시 `message`에 사람이 읽을 수 있는 폴백 문구가
+            담긴다 — 학생이 말을 걸었는데 아무 응답도 없는 것이 최악이므로,
+            이 경로는 WAIT(=침묵)로 떨어지지 않는다.
+        """
+        answer = (answer or "").strip()
+        if not answer:
+            return _fallback_reply("답변이 비어 있어요. 어떤 부분이 어려운지 한 줄만 적어줄래요?")
+
+        try:
+            session_ctx = to_session_context(ctx)
+        except Exception:
+            log.exception("backend AgentContext 변환 실패 (학생 답변 경로).")
+            return _fallback_reply(REPLY_FALLBACK_MESSAGE)
+
+        try:
+            from .schemas import StudentReply
+
+            result = self._get_pipeline().respond_to_student(
+                session_ctx, StudentReply(answer=answer, question=question or "")
+            )
+        except Exception:
+            log.exception("학생 답변 응답 파이프라인 실행 실패.")
+            return _fallback_reply(REPLY_FALLBACK_MESSAGE)
+
+        message = str(getattr(result.tutor_message, "message", "") or "").strip()
+        evaluation = result.evaluation
+        return AgentReply(
+            message=message or REPLY_FALLBACK_MESSAGE,
+            expects_reply=bool(getattr(result.tutor_message, "expects_reply", False)),
+            question=str(getattr(result.tutor_message, "question", "") or ""),
+            # 아래는 전부 내부 판단이다 (교육자 화면/분석용). 학생에게 보여주지 않는다.
+            understanding=str(getattr(evaluation, "understanding", "") or ""),
+            is_correct=bool(getattr(evaluation, "is_correct", False)),
+            follow_up_needed=bool(getattr(evaluation, "follow_up_needed", True)),
+            misconceptions=_as_str_list(getattr(evaluation, "misconceptions", [])),
+            evidence=str(getattr(evaluation, "evidence", "") or ""),
+            next_focus=str(getattr(evaluation, "next_focus", "") or ""),
+        )
 
 
 @lru_cache(maxsize=1)

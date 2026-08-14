@@ -113,7 +113,7 @@ def test_message_never_accuses_the_student_of_pasting() -> None:
         assert "복사" not in message
 
 
-# --- plan() 계약 ------------------------------------------------------------
+# --- plan() / write() 계약 --------------------------------------------------
 
 
 def test_plan_returns_guided_action_shape() -> None:
@@ -126,15 +126,35 @@ def test_plan_returns_guided_action_shape() -> None:
     assert guided.approach == comprehension_check.APPROACH
     assert guided.hint_level == "nudge"
     assert guided.action_type == "send_message"
-    # backend_adapter는 message_draft가 비면 payload["message"]로 폴백한다.
-    # 둘이 어긋나면 학생이 보는 문구가 경로에 따라 달라진다.
-    assert guided.payload["message"] == guided.message_draft
     assert guided.payload["line_start"] == 1
+    # 이해도 확인은 답을 받아야 의미가 있다. 이 값이 프런트의 입력창을 열고,
+    # 학생 답변을 응답 파이프라인(evaluation_agent)으로 들여보낸다.
+    assert guided.expects_student_reply is True
 
 
 def test_plan_without_anchor_omits_line_payload() -> None:
     ctx = SessionContext(student_id="s1", problem_id="p1", code="x = 1\n")
     guided = comprehension_check.plan(ctx)
 
-    assert guided.message_draft
+    assert guided.payload["message"]
     assert "line_start" not in guided.payload
+
+
+def test_write_returns_the_student_facing_message() -> None:
+    """작문은 `TutorMessage`가 담당한다 (판단/작문 분리 이후).
+
+    `payload["message"]`와 어긋나면 학생이 보는 문구가 경로에 따라 달라진다 —
+    backend_adapter가 전자를 폴백으로 쓰기 때문이다.
+    """
+    ctx = SessionContext(
+        student_id="s1", problem_id="p1", code="i = 0\nwhile i < 3:\n    i += 1\n"
+    )
+    guided = comprehension_check.plan(ctx)
+    message = comprehension_check.write(ctx)
+
+    assert message.message == guided.payload["message"]
+    assert message.expects_reply is True
+    # question은 도입부 없는 질문 한 문장이다 (평가 단계가 "무엇을 물었나"로 쓴다).
+    assert message.question
+    assert message.question in message.message
+    assert not message.question.startswith("코드가 한 번에 많이 바뀌었네요")

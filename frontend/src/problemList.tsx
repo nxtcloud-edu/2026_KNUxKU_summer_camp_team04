@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Sparkles, Terminal } from 'lucide-react'
+import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Terminal } from 'lucide-react'
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
+import AcornIcon from './AcornIcon'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 const PROBLEMS_PER_PAGE = 10
@@ -26,13 +28,19 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
     return () => controller.abort()
   }, [])
 
-  const filtered = useMemo(() => problems.filter((problem) => {
-    const type = problem.problem_id.startsWith('func_') ? 'function_call' : 'stdout_match'
-    const matchesFilter = filter === 'all' || type === filter
-    const keyword = query.trim().toLocaleLowerCase()
-    const matchesQuery = !keyword || `${problem.title} ${problem.problem_id} ${problem.concept.join(' ')}`.toLocaleLowerCase().includes(keyword)
-    return matchesFilter && matchesQuery
-  }), [filter, problems, query])
+  const filtered = useMemo(() => problems
+    .filter((problem) => {
+      const type = problem.problem_id.startsWith('func_') ? 'function_call' : 'stdout_match'
+      const matchesFilter = filter === 'all' || type === filter
+      const keyword = query.trim().toLocaleLowerCase()
+      const matchesQuery = !keyword || `${problem.title} ${problem.problem_id} ${problem.concept.join(' ')}`.toLocaleLowerCase().includes(keyword)
+      return matchesFilter && matchesQuery
+    })
+    .sort((a, b) => {
+      const aInProgress = getLearningProgress(a.problem_id)?.status === 'IN_PROGRESS'
+      const bInProgress = getLearningProgress(b.problem_id)?.status === 'IN_PROGRESS'
+      return Number(bInProgress) - Number(aInProgress)
+    }), [filter, problems, query])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PROBLEMS_PER_PAGE))
   const visibleProblems = useMemo(() => {
@@ -60,13 +68,20 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
       <div className="problem-list-container">
         <div className="home-utility"><span className={`data-source ${source}`}>{source === 'api' ? '학습 데이터 연결됨' : '로컬 학습 모드'}</span></div>
         <div className="problem-list-heading home-heading">
-          <div><span>GOOD TO SEE YOU</span><h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1><p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p></div>
+          <div className="home-squirrel-message">
+            <img src={squirrelTutor} alt="" />
+            <div className="home-speech-bubble">
+              <span>GOOD TO SEE YOU</span>
+              <h1>오늘도 한 문제씩,<br />차근차근 시작해 볼까요?</h1>
+              <p>현재 학습 흐름에 잘 맞는 문제부터 골라봤어요.</p>
+            </div>
+          </div>
           <div className="problem-count"><strong>{problems.length}</strong><span>개의 문제</span></div>
         </div>
 
         {!loading && !error && recommendations.length > 0 && (
           <section className="recommended-section">
-            <div className="home-section-title"><div><Sparkles size={16} /><strong>추천 문제</strong></div><span>Checkpoint와 기초 학습 순서를 반영했어요</span></div>
+            <div className="home-section-title"><div><strong>추천 문제</strong></div><span>Checkpoint와 기초 학습 순서를 반영했어요</span></div>
             <div className="recommended-grid">
               {recommendations.map((problem, index) => <RecommendedProblem key={problem.problem_id} problem={problem} rank={index + 1} onClick={() => onSelect(problem)} />)}
             </div>
@@ -123,8 +138,9 @@ function RecommendedProblem({ problem, rank, onClick }: { problem: ProblemSummar
       <span className="recommendation-label">{rank === 1 ? '지금 풀기 좋아요' : rank === 2 ? '이어서 도전' : '기초 다지기'}</span>
       <span className="recommendation-icon">{functionType ? <Braces /> : <Terminal />}</span>
       <strong>{problem.title}</strong>
-      <small>{functionType ? '함수와 반복문을 함께 연습해요' : '입력과 출력의 흐름을 익혀요'}</small>
-      <span className="recommendation-action">문제 풀기 <ArrowRight size={15} /></span>
+      <small>{rank === 1 ? '최근 학습 흐름과 딱 맞아요' : functionType ? '함수와 반복문을 함께 연습해요' : '입력과 출력의 흐름을 익혀요'}</small>
+      <span className="problem-reward"><AcornIcon /> 도토리 {problem.acorn_reward}개</span>
+      <span className="recommendation-action">{rank === 1 ? '지금 풀기' : '문제 풀기'} <ArrowRight size={15} /></span>
     </button>
   )
 }
@@ -139,6 +155,7 @@ function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; num
         <strong>{problem.title}</strong>
         <small>{functionType ? '함수형' : '입출력형'} · {problem.concept.length ? problem.concept.join(' · ') : 'Python 기초'}</small>
       </span>
+      <span className="problem-reward row"><AcornIcon /> {problem.acorn_reward}개</span>
       {progress && <span className={`checkpoint-state ${progress.status === 'COMPLETED' ? 'completed' : ''}`}><CheckCircle2 size={14} /> {progress.status === 'COMPLETED' ? '학습 완료' : '학습 중'}</span>}
       <ChevronRight className="problem-arrow" size={17} />
     </button>

@@ -31,10 +31,18 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-from ..schemas import GuidedAction, SessionContext
+from ..schemas import GuidedAction, SessionContext, TutorMessage
 
 #: 이 분기의 지도 방식. LLM이 고르던 값을 상수로 고정한다 (모듈 docstring 참고).
 APPROACH = "이해도 확인"
+
+#: `GuidancePlan.focus` — 이번 개입에서 다룰 대상. 앵커를 찾으면 그 구조로 채운다.
+_FOCUS_FALLBACK = "붙여넣은 코드의 실행 순서"
+
+#: 내부 지시문. 이 분기는 작문 LLM을 부르지 않으므로 실제로 문장에 반영되는 건
+#: 아니고, 교육자 타임라인/로그에 "무슨 의도의 개입이었나"를 남기는 몫이다.
+_TALKING_POINTS = ["학생이 코드의 동작을 자기 말로 설명하게 만든다"]
+_AVOID = ["코드 수정 제안", "정답 코드", "붙여넣기라는 단정"]
 
 
 @dataclass(frozen=True)
@@ -125,12 +133,22 @@ def find_anchor(code: str) -> CodeAnchor | None:
     return None
 
 
-def build_message(code: str) -> tuple[str, CodeAnchor | None]:
-    """학생에게 보낼 문구와, 그 문구가 가리키는 앵커를 함께 돌려준다."""
+def build_question(code: str) -> tuple[str, CodeAnchor | None]:
+    """도입부 없는 **질문 한 문장**과 그 질문이 가리키는 앵커.
+
+    `TutorMessage.question`에 그대로 들어간다 — 학생이 답을 보내오면 평가
+    에이전트가 "무엇을 물었는지"로 이 값을 다시 쓴다. 그래서 도입부
+    (`_LEAD`)는 여기에 붙이지 않는다: 평가에 필요한 건 질문뿐이다.
+    """
     anchor = find_anchor(code)
     if anchor is None:
-        return _LEAD + _FALLBACK_QUESTION, None
-    question = _QUESTIONS[anchor.kind].format(label=anchor.label, line=anchor.line)
+        return _FALLBACK_QUESTION, None
+    return _QUESTIONS[anchor.kind].format(label=anchor.label, line=anchor.line), anchor
+
+
+def build_message(code: str) -> tuple[str, CodeAnchor | None]:
+    """학생에게 보낼 문구와, 그 문구가 가리키는 앵커를 함께 돌려준다."""
+    question, anchor = build_question(code)
     return _LEAD + question, anchor
 
 
@@ -139,6 +157,15 @@ def plan(ctx: SessionContext) -> GuidedAction:
 
     반환 타입이 같으므로 `orchestrator`의 하류(= `backend_adapter`,
     `PipelineResult` 소비자)는 이 분기를 몰라도 된다.
+
+    **작문은 여기서 하지 않는다** — 파이프라인이 3단계가 된 뒤(판단/작문 분리,
+    `schemas.GuidancePlan` docstring 참고) 학생이 읽는 문장은 `TutorMessage`에만
+    담긴다. 이 분기의 그 몫은 아래 `write()`가 맡는다.
+
+    `expects_student_reply=True`인 이유: 이해도 확인은 답을 받아야 의미가 있다.
+    이 값이 True면 프런트가 입력창을 열고, 학생이 답하면 그 답이 응답
+    파이프라인(`evaluation_agent`)으로 들어간다 — 붙여넣기 분기가 학생 답변
+    평가 루프를 쓰는 대표 경로다.
     """
     message, anchor = build_message(ctx.code)
     payload: dict = {"message": message}
@@ -152,7 +179,23 @@ def plan(ctx: SessionContext) -> GuidedAction:
     return GuidedAction(
         approach=APPROACH,
         hint_level="nudge",
-        message_draft=message,
+        focus=f"{anchor.label} ({anchor.kind})" if anchor else _FOCUS_FALLBACK,
+        talking_points=_TALKING_POINTS,
+        avoid=_AVOID,
+        expects_student_reply=True,
         action_type="send_message",
         payload=payload,
     )
+
+
+def write(ctx: SessionContext) -> TutorMessage:
+    """`tutor_message_agent.write_intervention()`과 같은 자리에 꽂히는 대체 구현.
+
+    `plan()`과 같은 `build_message()`에서 문구를 만들므로 두 값이 어긋날 수
+    없다 (순수 함수 + 같은 입력). 그래서 `payload["message"]`와
+    `TutorMessage.message`는 항상 같다 — backend_adapter가 전자를 폴백으로
+    쓰는데, 둘이 다르면 학생이 보는 문구가 경로에 따라 달라진다.
+    """
+    message, _ = build_message(ctx.code)
+    question, _ = build_question(ctx.code)
+    return TutorMessage(message=message, question=question, expects_reply=True)

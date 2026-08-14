@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   Check,
   ChevronDown,
@@ -19,20 +20,21 @@ import {
   Sun,
   Terminal,
   UserRound,
-  Waypoints,
 } from 'lucide-react'
 import AiTutorPanel from './AiTutorPanel'
 import { onUnauthorized } from './api'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 import EducatorPage from './EducatorPage'
 import LandingPage from './LandingPage'
 import LoginPage from './LoginPage'
 import MyPage from './MyPage'
 import ReviewProblemCard from './ReviewProblemCard'
-import { preparePython, runPython } from './pythonRunner'
+import { preparePython, runPython, runPythonWithStdin } from './pythonRunner'
 import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
-import { getLearningProgress, saveCompleted, saveInProgress } from './learningProgress'
-import { getProblemDetail, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { getLearningProgress, saveCompleted, saveInProgress, saveRecentWrongHint } from './learningProgress'
+import { getProblemDetail, getProblems, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { awardLocalProblemReward } from './problemRewards'
 import { isJudgeUnavailable, runJudge } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
@@ -111,6 +113,10 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [problemError, setProblemError] = useState('')
   const [code, setCode] = useState('')
   const [result, setResult] = useState<JudgeResult | null>(null)
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalOutput, setTerminalOutput] = useState('')
+  const [terminalError, setTerminalError] = useState('')
+  const [isTerminalRunning, setIsTerminalRunning] = useState(false)
   const [judgeError, setJudgeError] = useState('')
   const [mode, setMode] = useState<RunMode>('run')
   const [isRunning, setIsRunning] = useState(false)
@@ -121,6 +127,10 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [isDark, setIsDark] = useState(false)
   const [activity, setActivity] = useState<'landing' | 'problem' | 'trace' | 'list' | 'mypage' | 'educator'>(() => userRole === 'educator' ? 'educator' : userRole ? 'list' : 'landing')
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null)
+  const [submissionComplete, setSubmissionComplete] = useState(false)
+  const [awardedAcorns, setAwardedAcorns] = useState(0)
+  const [submissionFailure, setSubmissionFailure] = useState<JudgeResult['status'] | null>(null)
+  const [nextProblemLoading, setNextProblemLoading] = useState(false)
   const [profileAvatar, setProfileAvatar] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('tutory:profile') ?? '{}').avatar as string || ''
@@ -156,6 +166,9 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         const savedProgress = getLearningProgress(detail.problem_id)
         setCode(savedProgress?.code ?? localStorage.getItem(`codetrace:checkpoint:${detail.problem_id}`) ?? detail.code_template)
         setResult(null)
+        setTerminalInput(detail.public_test_cases.find((test) => typeof test.stdin === 'string')?.stdin ?? '')
+        setTerminalOutput('')
+        setTerminalError('')
         setJudgeError('')
       })
       .catch((caught) => {
@@ -228,17 +241,25 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setResult(null)
     setJudgeError('')
 
-    const applyJudgeResult = (judgeResult: JudgeResult) => {
+    const applyJudgeResult = (judgeResult: JudgeResult, locallyJudged = false) => {
       setResult(judgeResult)
       if (nextMode === 'submit' && judgeResult.status === 'ACCEPTED') {
         saveCompleted(problem.problem_id, problem.title, code)
+        setAwardedAcorns(judgeResult.awarded_acorns ?? (locallyJudged ? awardLocalProblemReward(problem.problem_id, problem.acorn_reward) : 0))
+        setSubmissionFailure(null)
+        setSubmissionComplete(true)
+      } else if (judgeResult.status !== 'ACCEPTED') {
+        saveRecentWrongHint(problem.problem_id, problem.title, judgeResult.status, makeRecentWrongHint(judgeResult))
+        if (nextMode === 'submit') setSubmissionFailure(judgeResult.status)
+      } else if (nextMode === 'submit') {
+        setSubmissionFailure(judgeResult.status)
       }
     }
 
     // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
     // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
     const judgeInBrowser = async () => {
-      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode))
+      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode), true)
     }
 
     try {
@@ -286,6 +307,37 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
   }
 
+  useEffect(() => {
+    const saveWithShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      saveCheckpoint()
+    }
+
+    window.addEventListener('keydown', saveWithShortcut)
+    return () => window.removeEventListener('keydown', saveWithShortcut)
+  }, [problem, code])
+
+  const runInteractiveTerminal = async () => {
+    if (!userRole) {
+      setLoginPrompt('터미널 실행')
+      return
+    }
+    if (!problem || isTerminalRunning) return
+    setIsTerminalRunning(true)
+    setTerminalError('')
+    setTerminalOutput('')
+    try {
+      const execution = await runPythonWithStdin(code, terminalInput)
+      if (execution.error) setTerminalError(execution.error.message)
+      else setTerminalOutput(execution.stdout)
+    } catch (caught) {
+      setTerminalError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setIsTerminalRunning(false)
+    }
+  }
+
   const restoreCheckpoint = () => {
     if (!problem) return
     const checkpoint = localStorage.getItem(`codetrace:checkpoint:${problem.problem_id}`)
@@ -307,6 +359,25 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setActivity('problem')
   }
 
+  const openNextRecommendedProblem = async () => {
+    if (!problem || nextProblemLoading) return
+    setNextProblemLoading(true)
+    try {
+      const { problems } = await getProblems()
+      const currentIndex = problems.findIndex((item) => item.problem_id === problem.problem_id)
+      const ordered = currentIndex >= 0
+        ? [...problems.slice(currentIndex + 1), ...problems.slice(0, currentIndex)]
+        : problems
+      const nextProblem = ordered.find((item) => getLearningProgress(item.problem_id)?.status !== 'COMPLETED')
+        ?? ordered[0]
+      setSubmissionComplete(false)
+      if (nextProblem) selectProblem(nextProblem)
+      else setActivity('list')
+    } finally {
+      setNextProblemLoading(false)
+    }
+  }
+
   const leaveProblem = () => {
     if (!problem) {
       setActivity('list')
@@ -317,15 +388,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       localStorage.setItem(`codetrace:checkpoint:${problem.problem_id}`, code)
     }
     setActivity('list')
-  }
-
-  const openRestrictedActivity = (service: string, nextActivity: 'trace' | 'mypage') => {
-    if (!userRole) {
-      setLoginPrompt(service)
-      return
-    }
-    if (nextActivity === 'trace') trace.recordEvent('ACTIVITY_OPENED', { activity_type: 'TRACE' })
-    setActivity(nextActivity)
   }
 
   const handleEditorMount: OnMount = (editor) => {
@@ -385,7 +447,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
 
       {activity === 'landing' ? (
         <LandingPage
-          onStart={() => (userRole ? setActivity('list') : onSignup())}
+          onStart={() => setActivity('list')}
         />
       )
         : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
@@ -420,7 +482,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         <section className="editor-panel panel">
           <div className="panel-header">
             <div className="file-tab"><Code2 size={16} /><span>solution.py</span></div>
-            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>Checkpoint</button><button className="icon-text-button" onClick={restoreCheckpoint}>Restore</button></div>
+            <div className="editor-tools"><button className="icon-text-button" onClick={saveCheckpoint}>임시저장</button><button className="icon-text-button" onClick={restoreCheckpoint}>복원</button></div>
           </div>
           <div className="editor-wrap">
             <Editor
@@ -468,6 +530,17 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
               <div className="empty-state"><Play /><strong>준비가 되었어요</strong><p>코드를 작성하고 실행해 보세요.</p></div>
             ) : <JudgeResultView result={result} mode={mode} />}
 
+            {problem && (
+              <InteractiveTerminal
+                input={terminalInput}
+                output={terminalOutput}
+                error={terminalError}
+                running={isTerminalRunning}
+                onInputChange={setTerminalInput}
+                onRun={runInteractiveTerminal}
+              />
+            )}
+
             {/*
               복습 문제 카드는 **통과했을 때만** 띄운다. 아직 틀리고 있는 학생에게
               "비슷한 문제 하나 더"를 권하는 건 도움이 아니라 방해다 — 지금 문제를
@@ -484,9 +557,6 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
           </div>
 
           <div className="action-bar">
-            <button className="trace-button" onClick={() => openRestrictedActivity('TRACE 학습', 'trace')} disabled={isRunning || runtimeStatus !== 'ready'}>
-              <Waypoints size={17} /> TRACE 학습
-            </button>
             <button
               className="run-button"
               onClick={() => execute('run')}
@@ -503,15 +573,69 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
               {isRunning && mode === 'submit' ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
               제출하기
             </button>
-            <p>실행은 공개 테스트만 확인해요. · TRACE에서 코드의 실행 흐름을 연습할 수 있어요.</p>
+            <p>실행은 공개 테스트만 확인하고, 제출은 전체 테스트로 채점해요.</p>
           </div>
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} intervention={trace.intervention} tutorPending={trace.tutorPending} />
+        {/* onHintRequest는 넘기지 않는다 — SOS 중복 응답 수정 이후 HINT_REQUEST는
+            backend가 /agent/decide에서 한 번만 기록한다 (AiTutorPanel 주석 참고). */}
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} intervention={trace.intervention} tutorPending={trace.tutorPending} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
+      {submissionComplete && problem && <SubmissionCompleteModal problemTitle={problem.title} reward={problem.acorn_reward} awarded={awardedAcorns} loading={nextProblemLoading} onNext={openNextRecommendedProblem} onList={() => { setSubmissionComplete(false); setActivity('list') }} />}
+      {submissionFailure && <SubmissionFailureModal status={submissionFailure} onRetry={() => { setSubmissionFailure(null); window.setTimeout(() => editorRef.current?.focus(), 0) }} />}
+    </div>
+  )
+}
+
+function SubmissionFailureModal({ status, onRetry }: { status: JudgeResult['status']; onRetry: () => void }) {
+  const message = {
+    WRONG_ANSWER: '아직 통과하지 못한 테스트가 있어요. 입력과 중간값을 다시 따라가 볼까요?',
+    RUNTIME_ERROR: '실행 중 오류가 발생했어요. 변수와 인덱스 범위를 차근차근 확인해 보세요.',
+    SYNTAX_ERROR: '문법 오류가 있어요. 괄호와 콜론, 들여쓰기를 먼저 살펴보세요.',
+    TIME_LIMIT: '실행 시간이 너무 오래 걸렸어요. 반복 횟수와 종료 조건을 확인해 보세요.',
+    INTERNAL_ERROR: '채점 중 문제가 발생했어요. 잠시 후 다시 제출해 주세요.',
+    ACCEPTED: '',
+  }[status]
+
+  return (
+    <div className="submission-success-backdrop">
+      <div className="submission-success-modal failure" role="dialog" aria-modal="true" aria-labelledby="submission-failure-title">
+        <img src={squirrelTutor} alt="응원하는 다람쥐 튜터" />
+        <div className="submission-success-copy">
+          <span><CircleAlert size={15} /> {status}</span>
+          <h2 id="submission-failure-title">조금만 더 확인해 볼까요?</h2>
+          <p>{message}<br />괜찮아요. 지금 과정도 실력이 되고 있어요.</p>
+        </div>
+        <div className="submission-success-actions single">
+          <button className="modal-primary-button" type="button" onClick={onRetry}>코드 다시 확인하기</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SubmissionCompleteModal({ problemTitle, reward, awarded, loading, onNext, onList }: { problemTitle: string; reward: number; awarded: number; loading: boolean; onNext: () => void; onList: () => void }) {
+  return (
+    <div className="submission-success-backdrop">
+      <div className="submission-success-modal" role="dialog" aria-modal="true" aria-labelledby="submission-success-title">
+        <img src={squirrelTutor} alt="도토리를 든 다람쥐 튜터" />
+        <div className="submission-success-copy">
+          <span><Check size={15} /> ACCEPTED</span>
+          <h2 id="submission-success-title">제출이 완료됐어요!</h2>
+          <p><strong>{problemTitle}</strong> 문제를 멋지게 해결했어요.<br />다음 문제도 이어서 도전해볼까요?</p>
+          <div className="submission-reward"><span>🌰</span><strong>{awarded > 0 ? `도토리 ${awarded}개 획득!` : `도토리 ${reward}개는 이미 받았어요`}</strong></div>
+        </div>
+        <div className="submission-success-actions">
+          <button className="modal-secondary-button" type="button" onClick={onList}>문제 목록</button>
+          <button className="modal-primary-button" type="button" onClick={onNext} disabled={loading}>
+            {loading ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={15} />}
+            다음 추천 문제
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -551,6 +675,16 @@ function buildJudgeMessage(execution: Awaited<ReturnType<typeof runPython>>) {
   if (!failed) return execution.stdout || null
   if (failed.error) return failed.error
   return `expected ${JSON.stringify(failed.expected ?? failed.expected_stdout)}, got ${JSON.stringify(failed.actual)}`
+}
+
+function makeRecentWrongHint(result: JudgeResult) {
+  if (result.agent_decision?.reason) return result.agent_decision.reason
+  if (result.message) return result.message
+  if (result.status === 'SYNTAX_ERROR') return '문법 오류가 있어요. 괄호, 콜론(:), 들여쓰기 위치를 먼저 확인해보세요.'
+  if (result.status === 'RUNTIME_ERROR') return '실행 중 오류가 났어요. 변수 이름과 리스트 인덱스 범위를 차근차근 확인해보세요.'
+  if (result.status === 'TIME_LIMIT') return '시간 초과가 났어요. 반복문이 끝나는 조건과 불필요하게 반복되는 부분을 확인해보세요.'
+  if (result.status === 'INTERNAL_ERROR') return '채점 중 문제가 있었어요. 잠시 뒤 다시 실행해보고 같은 문제가 반복되면 코드보다 실행 환경을 확인해보세요.'
+  return '답이 조금 달라요. 예시 입력을 손으로 따라가며 중간값이 어떻게 변하는지 적어보세요.'
 }
 
 function LoginRequiredModal({ service, onClose, onLogin, onSignup }: { service: string; onClose: () => void; onLogin: () => void; onSignup: () => void }) {
@@ -618,6 +752,40 @@ function JudgeResultView({ result, mode }: { result: JudgeResult; mode: RunMode 
       <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
       {result.message && <div className="judge-message"><strong>{result.status}</strong><pre>{result.message}</pre></div>}
       {result.failed_categories?.length ? <div className="failed-categories"><strong>다시 살펴볼 유형</strong><div>{result.failed_categories.map((category) => <span key={category}>{category}</span>)}</div></div> : null}
+    </div>
+  )
+}
+
+function InteractiveTerminal({ input, output, error, running, onInputChange, onRun }: {
+  input: string
+  output: string
+  error: string
+  running: boolean
+  onInputChange: (value: string) => void
+  onRun: () => void
+}) {
+  return (
+    <div className="execution-terminal">
+      <div className="terminal-title">
+        <Terminal size={14} />
+        <strong>터미널</strong>
+        <button type="button" onClick={onRun} disabled={running}>
+          {running ? <LoaderCircle className="spin" size={13} /> : <Play size={13} fill="currentColor" />}
+          실행
+        </button>
+      </div>
+      <div className="terminal-case">
+        <label htmlFor="custom-terminal-input">입력</label>
+        <textarea
+          id="custom-terminal-input"
+          value={input}
+          onChange={(event) => onInputChange(event.target.value)}
+          spellCheck={false}
+          placeholder="예: 3 5"
+        />
+        <span>출력</span>
+        <pre>{running ? '실행 중...' : error || output || '아직 실행 결과가 없어요.'}</pre>
+      </div>
     </div>
   )
 }

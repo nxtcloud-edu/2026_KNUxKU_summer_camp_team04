@@ -15,8 +15,13 @@
 붙여넣기(`paste_detected`)는 "막힘" 신호와 성격이 달라(외부에서 답을 그대로
 복사했을 수도 있음), 다른 신호와 조합해 판단하지 않고 게이트에서 그 자체로
 `paste` 분기로 통과시킨다. 이 경우도 "지금 막혔는가"를 LLM에게 묻는 게 아니라
-바로 "이해도 확인" 상태로 처리하므로 LLM을 호출하지 않는다 (실제 힌트 문구는
-다음 단계인 GuidanceAgent가 만든다).
+바로 "이해도 확인" 상태로 처리하므로 LLM을 호출하지 않는다 (실제 학생에게 갈
+문구는 두 단계 뒤의 `tutor_message_agent`가 만든다).
+
+**이 모듈의 출력은 내부용이다.** `StudentState.state_summary`는 "학생은 ~하고
+있습니다" 같은 3인칭 분석문이라 학생에게 보여줄 수 없다. 한동안
+`backend_adapter`가 이 값을 학생 화면으로 흘려보내고 있었다 —
+`agents/tutor_message_agent.py` docstring 참고.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from typing import Literal
 
 from strands import Agent
 
+from ..llm_runtime import structured_output
 from ..models import get_model
 from ..schemas import SessionContext, StudentState
 from ..tools.code_context import summarize_run_history
@@ -235,7 +241,7 @@ def _assess_via_llm(ctx: SessionContext, agent: Agent | None, signals: list[str]
         f"다음 신호로 LLM 평가로 넘어왔습니다: {signal_note}.\n\n"
         f"다음 세션 상태를 보고 학생 상태와 개입시점을 판단하세요:\n\n{ctx.model_dump_json(indent=2)}"
     )
-    state = agent.structured_output(StudentState, prompt)
+    state = structured_output(agent, StudentState, prompt)
     state.entry_branch = "struggle"
     return state
 

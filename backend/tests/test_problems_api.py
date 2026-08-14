@@ -50,6 +50,8 @@ ALLOWED_DETAIL_KEYS = {
     "hidden_test_categories",
     "time_limit_sec",
     "memory_limit_mb",
+    "points",
+    "acorn_reward",
 }
 
 
@@ -64,7 +66,16 @@ REQUIRED_DETAIL_KEYS = {
     "public_test_cases",
     "hidden_test_case_count",
     "hidden_test_categories",
+    "points",
+    "acorn_reward",
 }
+
+
+def test_problem_rewards_follow_kuics_points(client):
+    rewards = {p["problem_id"]: (p["points"], p["acorn_reward"]) for p in client.get("/problems").json()}
+    assert rewards["stdout_bigger_number"] == (30, 3)
+    assert rewards["stdout_divisorcount"] == (50, 5)
+    assert rewards["stdout_bit_is_on"] == (80, 8)
 
 
 def test_problem_detail_has_no_field_capable_of_holding_hidden_data(client):

@@ -38,12 +38,13 @@
 붙여넣기(`paste_detected`)는 "막힘" 신호가 아니라 성격이 달라(외부에서 답을 그대로
 복사했을 수도 있음), 힌트 분기가 아닌 **"이해도 확인" 분기**로 별도 처리합니다.
 이 분기는 **LLM을 한 번도 호출하지 않습니다.** `state_agent.assess()`가 규칙만으로
-`entry_branch="paste"`인 `StudentState`를 만들고, 질문 문구는
-`agents/comprehension_check.py`가 붙여넣은 코드를 `ast`로 파싱해 만듭니다.
+`entry_branch="paste"`인 `StudentState`를 만들고, 지도 계획(`GuidedAction`)과 학생이
+읽을 질문(`TutorMessage`) 모두 `agents/comprehension_check.py`가 붙여넣은 코드를
+`ast`로 파싱해 만듭니다.
 
-예전에는 여기서도 `guided_action_agent`(LLM)를 불렀는데, 시스템 프롬프트가
-approach/hint_level/action_type을 전부 값까지 못박아 둔 탓에 LLM에 남은 자유도는
-문장 표현뿐이었습니다. 그 한 줄 때문에 학생이 5~6초를 더 기다렸습니다.
+예전에는 여기서도 판단·작문 LLM을 불렀는데, `guided_action_agent`의 시스템
+프롬프트가 approach/hint_level/action_type을 전부 값까지 못박아 둔 탓에 LLM에 남은
+자유도는 문장 표현뿐이었습니다. 그 한 줄 때문에 학생이 5~6초를 더 기다렸습니다.
 
 규칙으로 만들면서 질문도 오히려 구체해졌습니다 — 코드에서 **설명을 가장 요구할
 만한 구조**(재귀 > 컴프리헨션 > `while` > `for` > 분기 > 함수 정의 순)를 하나 골라
@@ -55,7 +56,16 @@ approach/hint_level/action_type을 전부 값까지 못박아 둔 탓에 LLM에 
 (빠르게 타이핑한 초안도 걸립니다), "복사했죠?"로 읽히면 정직하게 작성한 학생에게
 모욕이 됩니다. 그래서 도입부는 관측 사실("코드가 한 번에 많이 바뀌었네요")에 머뭅니다.
 
+지도 계획은 `expects_student_reply=true`로 잡습니다 — 이해도 확인은 답을 받아야
+의미가 있으므로, 학생이 답하면 그 답이 아래 **응답 파이프라인**으로 들어가
+평가 에이전트가 이해했는지 판단합니다. 이 분기가 학생 답변 평가 루프를 실제로
+쓰는 대표 경로입니다.
+
 ### 지금 구조 (커밋 기준)
+
+파이프라인이 **두 개**입니다. 튜터가 먼저 말을 거는 쪽과, 학생이 답을 보낸 쪽.
+
+#### 1. 개입 파이프라인 — 튜터가 먼저 말을 건다 (`TutorPipeline.run()`)
 
 ```mermaid
 flowchart TD
@@ -63,35 +73,131 @@ flowchart TD
     B -->|"세션 종료 / 쿨다운 / 신호 부족<br/>(LLM 미호출)"| STOP1((종료))
     B -->|"paste_detected<br/>(LLM 미호출)"| P["이해도 확인 질문 생성<br/>comprehension_check<br/>(ast 파싱, LLM 미호출)"]
     B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=False"| STOP2((종료: 관찰만))
-    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 + 행동 결정 에이전트<br/>GuidedActionAgent"]
-    C -.응답 반환 후 백그라운드.-> F["평가 에이전트<br/>EvaluationAgent<br/>(로그만, 응답 안 기다림)"]
+    B -->|"신호 2개 이상, LLM 평가 결과<br/>should_intervene=True"| C["지도 방법 + 행동 결정 에이전트<br/>GuidedActionAgent<br/>(내부 지시문만 만든다)"]
+    C -->|"action_type=no_op<br/>(작문 생략)"| STOP3((종료: 아무 말 안 함))
+    C -->|"GuidancePlan"| D["응답 생성 에이전트<br/>TutorMessageAgent<br/>← 학생이 읽는 문장은 여기서만 나온다"]
+    D --> E(["학생 화면<br/>activity.message"])
 ```
 
+<<<<<<< HEAD
 | 단계 | 모듈 | 역할 | 출력(Pydantic) |
 |---|---|---|---|
 | 1 | `agents/state_agent.py` | 규칙 기반 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` |
-| 2a | `agents/comprehension_check.py` | **붙여넣기 분기 전용.** 코드를 `ast`로 파싱해 이해도 확인 질문 생성 (LLM 미호출) | `GuidedAction` |
-| 2b | `agents/guided_action_agent.py` | 그 외 개입: 어떻게 지도할지 + 구체적으로 뭘 할지를 한 번에 결정 | `GuidedAction` |
-| (백그라운드) | `agents/evaluation_agent.py` | 방금 결정이 적절했는지 평가 (응답 반환 후, `service.py`가 `BackgroundTasks`로 호출) | `Evaluation` |
+#### 2. 응답 파이프라인 — 학생이 답을 보냈다 (`TutorPipeline.respond_to_student()`)
 
-2a와 2b는 **같은 타입(`GuidedAction`)을 반환합니다** — 그래서 `backend_adapter.py`
-이하 하류는 어느 쪽이 돌았는지 몰라도 됩니다.
+```mermaid
+flowchart TD
+    S(["학생이 입력창에 답/질문을 보냄"]) --> V["학생 답변 평가 에이전트<br/>EvaluationAgent<br/>이해했나? none/partial/solid"]
+    V -->|"AnswerEvaluation"| D["응답 생성 에이전트<br/>TutorMessageAgent<br/>이해도에 맞춰 다음 말을 만든다"]
+    D --> E(["학생 화면"])
+```
 
-원래는 `guidance_agent.py`(어떻게 가르칠지) → `action_agent.py`(뭘 할지)를
-LLM 호출 2번으로 나눠 물었는데, 강하게 결합된 하나의 판단이라 합쳤습니다
-(레이턴시 절감 — 아래 "backend 연결" 절의 "지연 시간" 참고).
-`orchestrator.py`가 `GuidedAction`을 `GuidancePlan`/`ActionPlan`으로 다시
-쪼개므로 `PipelineResult`의 모양과 `backend_adapter.py`는 이 변경을 모릅니다.
-두 모듈(`guidance_agent.py`, `action_agent.py`) 자체는 남겨뒀습니다(재사용/롤백용).
+| 단계 | 모듈 | 역할 | 출력(Pydantic) | 학생이 보는가 |
+|---|---|---|---|---|
+| 1 | `agents/state_agent.py` | 규칙 게이트로 먼저 거르고, 통과 시에만 LLM으로 학생 상태 파악 + 개입시점 결정 | `StudentState` | ✗ |
+| 2 | `agents/guided_action_agent.py` | 개입한다면 **어떻게 지도할지**와 시스템이 실행할 행동을 결정 | `GuidedAction` | ✗ |
+| 2·3 대체 | `agents/comprehension_check.py` | **붙여넣기 분기 전용.** 2단계와 3단계를 **LLM 없이** 대신한다 (`ast` 파싱) | `GuidedAction` + `TutorMessage` | **✓** |
+| 3 | `agents/tutor_message_agent.py` | 그 계획으로 **학생에게 실제로 건넬 문장**을 쓴다 | `TutorMessage` | **✓** |
+| (학생 답변 시) | `agents/evaluation_agent.py` | **학생의 답변**을 보고 이해했는지 평가 | `AnswerEvaluation` | ✗ |
 
-`evaluation_agent.py`는 더 이상 이 파이프라인이 동기로 부르지 않습니다 —
-학생에게 보여줄 결정에 영향이 없는 로깅용 메타데이터였기 때문입니다. 응답을
-반환한 뒤 `service.py`가 백그라운드로 따로 호출합니다.
+**학생에게 전달되는 텍스트는 `TutorMessage.message` 하나뿐입니다.** 나머지는 전부
+내부 판단이며 교육자 타임라인/분석용입니다.
+
+#### 왜 3단계가 되었나 (실제로 났던 사고)
+
+전에는 2단계("어떻게 지도할지" 결정)에서 파이프라인이 끝났습니다. 그 지도를
+실제로 만들어 학생에게 건네는 단계가 없어서, `backend_adapter`가 궁여지책으로
+내부 판단 텍스트(`StudentState.state_summary`)를 학생 화면으로 보냈고, 학생은
+이런 걸 읽었습니다:
+
+> loop 부분을 같이 보면 좋겠어요. 학생은 함수의 기본 구조(카운터 변수, 조건문,
+> 반환값)를 이해하지 못한 채 31분 넘게 완전히 막혀 있습니다. ... 힌트를 6회
+> 요청했지만 이전 두 번의 힌트 개입 이후에도 진전이 없습니다.
+> (지도 방식: 단계별 구조 안내 + 구체적 예시 제공/explain)
+
+교사가 교무실에서 하는 말이 학생 앞에 그대로 튼 셈입니다. 원인이 세 겹이라
+세 군데를 모두 고쳤습니다 (하나만 고치면 재발하기 쉽습니다):
+
+1. **학생용 문장을 만드는 단계가 없었다** → `agents/tutor_message_agent.py` 신설.
+2. **결정 에이전트가 판단과 작문을 겸했다** → `GuidedAction`에서 `message_draft`를
+   빼고 내부 지시문(`focus` / `talking_points` / `avoid` /
+   `expects_student_reply`)만 만들게 했습니다.
+3. **작문 프롬프트에 개입 판단용 텔레메트리가 그대로 들어갔다** (유휴 1879초,
+   힌트 6회, Monitor evidence, 3인칭 상태 요약) → `prompt_context.py`가 작문/평가
+   단계에는 압축된 컨텍스트(문제·코드·채점 결과)만 넣습니다.
+
+추가로 `backend_adapter.to_agent_decision()`은 보낼 문장이 없으면 내부 판단문으로
+폴백하지 않고 **WAIT**합니다. 보여줄 말이 없으면 아무 말도 안 하는 게 맞습니다.
+프런트엔드도 `activity.message`만 렌더하고 `reason`은 쓰지 않습니다.
+
+같은 상황에서 지금 나오는 문구 (실제 실행 결과):
+
+> 지금 for문이 numbers에서 n을 하나씩 꺼내주고 있는데, 그 다음 들여쓴 줄이 비어
+> 있어서 문법 오류가 나고 있어요. 일단 for 아래에 pass라도 써서 문법을
+> 완성해볼까요?
+
+3인칭 분석과 지도 방식 라벨은 사라지지 않고 `reason`(교육자/타임라인용)에 남습니다.
+
+#### 평가 에이전트가 평가하는 대상이 바뀌었습니다
+
+전에는 "방금 **AI가 한 개입**이 적절했는지"를 AI가 스스로 채점했습니다. 실제 로그:
+
+```
+evaluation(백그라운드): score=0.85 follow_up_needed=True
+notes=매우 적절한 개입. 학생이 31분(1879초) 동안 정체되어 있고 ... 격려 톤도 적절.
+```
+
+문제가 세 겹이었습니다: (1) 평가 대상이 틀렸습니다 — 튜터가 질문을 던졌으면
+평가해야 하는 것은 **학생의 답**입니다. (2) 결과가 `log.info` 한 줄로 끝나
+아무 동작도 바꾸지 않았습니다. (3) 개입을 만든 모델과 평가하는 모델이 같은
+컨텍스트·기준을 쓰므로 구조적으로 후한 점수가 나옵니다.
+
+지금은 튜터가 던진 질문 + 학생이 쓴 답을 받아 이해도를 판단하고
+(`AnswerEvaluation`), 그 결과가 `tutor_message_agent.write_follow_up()`의 입력이
+되어 **다음 응답을 실제로 바꿉니다**: solid면 다음 단계로, partial이면 빠진
+조각만, none이면 더 쉬운 질문으로. 즉 평가가 지도를 바꾸는 경로에 연결되어
+있습니다.
+
+"무엇을 물었는지"는 학생 클라이언트가 보내지 않습니다. backend가 자기가 남긴
+개입 기록(`AGENT_INTERVENTION` 이벤트의 `activity.question`)에서 직접 찾습니다
+(`backend/app/agent/context.py::last_tutor_question`) — 클라이언트가 질문을 바꿔
+보내면 교육자 화면에 남는 이해도 판단이 거짓이 됩니다.
+
+`guidance_agent.py` / `action_agent.py`는 삭제했습니다 — `guided_action_agent`로
+합쳐진 뒤 한 번도 import되지 않았고, 스키마가 바뀌어 동작하지도 않았으며,
+남겨두면 "지도 결정"과 "작문"의 새 경계를 흐립니다.
 
 공통 입력은 `schemas.py`의 `SessionContext`(학생 id, 문제 id, 현재 코드, 실행 기록,
 경과/유휴 시간, 마지막 에러 등)이며, 각 단계는 이전 단계의 구조화된 출력을 이어받습니다.
 `StudentState.entry_branch`(`struggle` / `paste` / `skip`)를 보면 이 판단이 규칙
 게이트의 어느 경로로 나왔는지 알 수 있습니다.
+
+### LLM 호출은 반드시 `llm_runtime.structured_output()`을 경유하세요
+
+`agent.structured_output(...)`을 **직접 부르면 안 됩니다.** strands의 동기 API는
+호출마다 새 이벤트 루프를 만들고 닫는데(`asyncio.run` in a thread), 우리는
+프로세스 내내 하나의 `Agent`(=하나의 `AsyncAnthropic`/httpx 연결 풀)를
+재사용합니다. httpx/anyio의 커넥션은 처음 쓴 루프에 묶이므로 그 조합이 깨집니다.
+특히 `/decide` 두 건이 겹치면(FastAPI는 sync 엔드포인트를 워커 스레드풀에서
+돌립니다) 서로 다른 루프가 같은 풀을 동시에 건드립니다.
+
+실측 (캐시된 `Agent` 하나를 4스레드가 공유, Anthropic 다이렉트 API):
+
+| 호출 방식 | 결과 |
+|---|---|
+| `agent.structured_output()` | 1라운드(4회) 성공 후 **2라운드에서 무한 대기** (7분 넘게 진행 없음) |
+| `llm_runtime.structured_output()` | 3라운드 12회 **전부 성공**, 75초 내 완료 |
+
+증상은 두 갈래로 나옵니다 — `RuntimeError: Event loop is closed`로 터지거나 아예
+멈춥니다. 어느 쪽이든 `backend_adapter`의 `except`에 삼켜져 **WAIT 폴백**이 되고
+(멈추는 쪽은 backend 읽기 타임아웃 30초가 끊습니다), WAIT은 개입으로 기록되지
+않으므로 학생에게는 "힌트가 그냥 안 나온다"로만 보입니다. 원인은 agent 서비스
+stderr에만 남습니다.
+
+`src/tutor_agent/llm_runtime.py`가 프로세스에 하나뿐인 데몬 스레드에서 이벤트
+루프를 계속 살려두고 모든 LLM 호출을 거기로 보냅니다. 연결 재사용과 진짜 동시성도
+같이 얻습니다. 한 호출의 상한은 `LLM_CALL_TIMEOUT_SECONDS`(기본 120초)입니다.
+자세한 경위는 그 파일 docstring에 있습니다.
 
 ### `state_agent.py`의 규칙 기반 게이트 조건
 
@@ -179,11 +285,27 @@ PYTHONPATH=../agent/src python -m uvicorn tutor_agent.backend_entry:app --port 8
 |---|---|---|---|
 | GET | `/health` | — | `{"status":"ok","service":"tutor_agent","agent":"tutor_agent"}` |
 | POST | `/decide` | backend `AgentContext` 필드 그대로 | backend `AgentDecision` (`action`은 문자열) |
+| POST | `/respond` | `AgentContext` + `answer` + `question` | `RespondResponse` (학생용 `message` + 답변 평가) |
 | POST | `/generate-problem` | `ReviewRequest` | `ValidationReport` (judge 검증 통과분만) |
 
 `/decide`는 **5xx를 내지 않습니다.** 파이프라인이 어떻게 실패하든 파싱 가능한
 WAIT 결정을 돌려줍니다. 전 필드에 기본값이 있어 backend가 `AgentContext`에
 필드를 추가해도 422로 떨어지지 않습니다.
+
+`/respond`는 학생이 튜터에게 답/질문을 보냈을 때 부릅니다 (backend
+`POST /agent/respond`가 이걸 감쌉니다). `/decide`와 계약이 하나 다릅니다:
+**침묵으로 폴백하지 않습니다.** `/decide`는 실패하면 WAIT(=아무 말 안 함)이
+맞지만, 학생이 직접 입력창에 뭔가를 써서 보낸 상황에서 무응답은 "튜터가 내 말을
+씹었다"가 됩니다. 그래서 어떤 실패에서도 사람이 읽을 수 있는 문구를 돌려줍니다
+(`backend_adapter.REPLY_FALLBACK_MESSAGE`).
+
+요청 본문이 `/decide`와 같은 `AgentContext`인 이유: 학생 답변을 평가하려면 답변만으로는
+부족하고 문제·코드 맥락이 필요합니다 ("0으로요"가 정답인지 아닌지는 질문과 코드를
+봐야 압니다). 같은 컨텍스트를 재사용하므로 계약이 하나 더 늘지 않습니다.
+
+응답의 `message`만 학생에게 보여주고, 나머지(`understanding`, `misconceptions`,
+`evidence`, `next_focus`)는 내부 판단입니다. backend가 그것들을 trace 이벤트에만
+남기고 학생 브라우저로는 내려보내지 않습니다 (`AgentReplyRead`).
 
 `/generate-problem`은 실시간 개입 경로가 **아닙니다** (오답 기반 복습 문제 생성).
 LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 경로에 끼워넣지 마세요.
@@ -205,35 +327,53 @@ LLM 생성 + judge 샌드박스 실행이라 오래 걸리므로 채점 응답 �
 | 상황 | `POST /sessions/{id}/submit` 응답 시간 |
 |---|---|
 | 평범한 제출 (Monitor 미발화) | **3.3 ~ 3.5초** (agent 호출 없음) |
-| Monitor 발화 → agent 호출 (개선 전, LLM 4회 순차) | ~~32초~~ |
-| Monitor 발화 → agent 호출 (지금, LLM 2회 순차) | **16 ~ 18초** |
-| 붙여넣기 분기 (`UNDERSTANDING_UNCERTAIN`, LLM 0회) | **즉시** (`comprehension_check`, 순수 `ast` 파싱) |
+| Monitor 발화 (초기 구조, LLM 4회 순차) | ~~32초~~ |
+| Monitor 발화 (guidance+action 병합 후, LLM 2회 순차) | 16 ~ 18초 |
+| Monitor 발화 (**지금**, LLM 3회 순차: state → guided_action → tutor_message) | 16 ~ 18초 + 작문 1회 |
+| 붙여넣기 분기 (`UNDERSTANDING_UNCERTAIN`, **LLM 0회**) | **즉시** (`comprehension_check`, 순수 `ast` 파싱) |
 
-처음엔 파이프라인이 LLM을 4번 순차 호출(state → guidance → action →
-evaluation)해서 28~30초가 걸렸다. 두 가지를 고쳤다:
+경위: 처음엔 LLM을 4번 순차 호출(state → guidance → action → evaluation)해서
+28~30초가 걸렸다. 세 번 손댔다.
 
 1. **guidance + action을 한 번의 LLM 호출로 합쳤다**
    (`agents/guided_action_agent.py`, `schemas.GuidedAction`). "어떻게
-   가르칠지"와 "그래서 뭘 할지"는 강하게 결합된 하나의 판단이라 나눠 물을
-   이유가 약했다. `orchestrator.py`가 결과를 `GuidancePlan`/`ActionPlan`으로
+   가르칠지"와 "그래서 화면에서 뭘 할지"는 강하게 결합된 하나의 판단이라 나눠
+   물을 이유가 약했다. `orchestrator.py`가 결과를 `GuidancePlan`/`ActionPlan`으로
    다시 쪼개므로 `backend_adapter.py` 이하는 이 변경을 모른다.
-2. **evaluation을 응답 경로에서 뺐다.** 학생에게 보여줄 결정(action/reason)에
-   전혀 영향을 안 주는 로깅용 메타데이터였다(`backend_adapter.to_agent_decision`
-   참고). `orchestrator.TutorPipeline.run()`은 이제 이걸 동기로 안 부르고,
-   `service.py`의 `/decide`가 응답을 반환한 **뒤에** `BackgroundTasks`로
-   돌려서 로그만 남긴다 (`_log_evaluation`). 응답 시간에 전혀 안 들어간다 —
-   실제로 로그 타임스탬프가 "200 OK" 응답보다 몇 초 뒤에 찍히는 것까지 확인함.
+2. **evaluation을 응답 경로에서 뺐다.** 그리고 나중에 아예 없앴다 — 그 evaluation은
+   자기 개입을 자기가 채점하는 것이었고 아무 동작도 바꾸지 않았다 (위 "평가
+   에이전트가 평가하는 대상이 바뀌었습니다" 참고). 지금 평가는 학생이 답을
+   보낸 `/respond` 경로에서만 일어나므로 `/decide` 지연 시간과 무관하다.
+3. **작문 단계를 새로 추가했다** (`agents/tutor_message_agent.py`). 이건 지연
+   시간을 **늘리는** 변경이다. 그 대가로 학생이 내부 분석 리포트 대신 사람이 쓴
+   것 같은 문장을 읽는다 — 안 하면 기능 자체가 잘못된 것이므로 트레이드오프가
+   아니라 필수 비용에 가깝다.
 
-**남은 병목**: 4번 -> 2번으로 줄었지만 여전히 순차 호출 2번(state,
-guided_action)이라 16~18초가 걸린다. 더 줄이려면 state까지 합쳐서 1번으로
-만드는 방법이 있는데, 이건 "학생 상태 판단"과 "지도 방법 결정"을 하나의
-프롬프트/구조화 출력으로 묻는 거라 판단이 더 뭉쳐진다 (트레이드오프는 이
-README를 고친 커밋의 논의 참고). 근본적으로는 **"채점 결과는 즉시 반환하고
-agent 결정은 별도 채널로 나중에 전달"**이 맞는데, backend 라우터와 frontend
-수신부를 같이 고쳐야 해서 agent/ 혼자 정할 수 없다.
+**작문 단계 비용을 줄이는 방법**: 이 단계는 판단이 아니라 문장 생성이고,
+`prompt_context.py`가 압축한 컨텍스트만 받으므로(전체 `SessionContext` JSON을
+넣지 않는다) 가장 가볍다. `.env`에서 이 역할만 작은 모델로 내리면 된다:
+
+```bash
+ANTHROPIC_MODEL_ID_TUTOR_MESSAGE=claude-haiku-4-5   # 작문만 빠른 모델로
+```
+
+`action_type="no_op"`(아무 말 안 하기로 한 경우)이면 작문 호출을 아예 건너뛴다.
+`should_intervene=False`면 LLM 호출은 1번으로 끝난다.
+
+**남은 병목**: 여전히 순차 호출이다. 더 줄이려면 state까지 합쳐서 판단을 1번으로
+만드는 방법이 있는데, "학생 상태 판단"과 "지도 방법 결정"을 하나의 프롬프트로
+묻는 거라 판단이 더 뭉쳐진다. 근본적으로는 **"채점 결과는 즉시 반환하고 agent
+결정은 별도 채널로 나중에 전달"**이 맞는데, 실시간 유휴 하트비트
+(`useCodingTrace`의 개입 폴링)가 이미 그 형태이므로 제출 경로도 그쪽으로 옮길
+수 있다. backend 라우터와 frontend 수신부를 같이 고쳐야 해서 agent/ 혼자 정할 수 없다.
 
 `AGENT_SERVICE_TIMEOUT_SECONDS`를 낮추면 "느리면 그냥 WAIT"로 흘려보낼 수도
-있다 — 개입을 포기하는 대신 응답 속도를 지키는 선택.
+있다 — 개입을 포기하는 대신 응답 속도를 지키는 선택. 반대로 LLM 호출 하나가
+너무 오래 걸리는 걸 막는 상한은 agent 프로세스 쪽 `LLM_CALL_TIMEOUT_SECONDS`
+(기본 120초)다.
+
+학생과의 대화(`/respond`)는 LLM 2회(답변 평가 → 작문)이며 채점 응답 경로가
+아니라 학생이 채팅을 보낸 뒤 기다리는 시간이다.
 
 ### 연결 방법 A: backend에서 한 줄 (⛔ 지금은 불가 — 위 의존성 충돌 참고)
 
@@ -365,11 +505,22 @@ A는 최종 배선입니다. `install(app, respect_setting=True)`로 부르면 B
 |---|---|---|
 | `should_intervene=False` | `action=WAIT`, `activity=None` | |
 | `action_type="no_op"` | `action=WAIT` | |
+| `TutorMessage.message`가 비어 있음 | `action=WAIT` | 보낼 말이 없으면 **내부 판단문으로 폴백하지 않고** 침묵합니다 (아래 주의) |
 | `action_type="send_message"` / `"highlight_code"` / `"show_example"` | `action=HINT` | 표에 없는 값도 HINT로 수렴 |
 | — | `state` | agent 문장이 아니라 **backend `ProcessStatus` 값**(`ctx.process_status`)을 그대로 돌려줍니다. timeline/교육자 화면이 파싱할 수 있어야 하므로 |
 | `problem["concepts"][0]` | `concept` | |
-| `StudentState.state_summary` (+ 지도 방식) | `reason` | |
-| `GuidancePlan` / `ActionPlan` / `Evaluation` | `activity` | `{"kind": "hint", "message": ..., "hint_level": ..., "action_type": ..., "payload": ..., "urgency": ..., "evaluation": {...}}` — 학생에게 보여줄 문구는 `activity["message"]` |
+| `StudentState.state_summary` (+ 지도 방식) | `reason` | **내부 근거입니다. 학생에게 보여주지 마세요** (아래 주의) |
+| `TutorMessage` / `GuidancePlan` / `ActionPlan` | `activity` | `{"kind": "hint", "message": ..., "expects_reply": ..., "question": ..., "hint_level": ..., "approach": ..., "action_type": ..., "payload": ..., "urgency": ..., "state_summary": ...}` |
+
+> ⚠️ **학생에게 가는 텍스트는 `activity["message"]` 하나뿐입니다.**
+>
+> `reason`은 `StudentState.state_summary`("학생은 ... 막혀 있습니다")에 지도 방식을
+> 덧붙인 **교육자/타임라인용 근거**입니다. 한동안 프런트엔드가 이 `reason`을
+> 채팅 버블에 렌더해서 학생이 자기 분석 리포트를 읽었습니다 (위 "왜 3단계가
+> 되었나" 참고). 지금은 `activity["message"]`만 렌더합니다.
+>
+> `expects_reply`가 `true`면 학생의 답을 기다리는 질문입니다. `question`에 그 질문이
+> 들어가고, backend가 학생 답변을 평가할 때 "무엇을 물었는지"로 이 값을 다시 씁니다.
 
 `TRACE`/`PREDICT`/`DEBUG`/`VERIFY`는 아직 매핑하지 않습니다. agent/에 해당 학습
 활동(Activity)을 생성하는 로직이 없어서, 없는 활동을 만들어 보내는 대신 실제 개입을
@@ -395,33 +546,41 @@ A는 최종 배선입니다. `install(app, respect_setting=True)`로 부르면 B
 agent/
 ├── src/tutor_agent/
 │   ├── schemas.py        # 파이프라인 전체가 공유하는 Pydantic 모델
-│   ├── models.py         # 모델 프로바이더 스위치 (env var 기반, 미정 상태 대응)
-│   ├── orchestrator.py   # 2개 에이전트를 잇는 TutorPipeline (state -> guided_action)
+│   ├── models.py         # 모델 프로바이더/모델 id 스위치 (역할별 오버라이드 지원)
+│   ├── llm_runtime.py    # ★ 모든 LLM 호출을 영속 이벤트 루프 하나에서 실행 (필수 경유지)
+│   ├── prompt_context.py # ★ 작문/평가용 압축 컨텍스트 (텔레메트리 유출 차단)
+│   ├── orchestrator.py   # TutorPipeline: run()(개입) + respond_to_student()(학생 답변)
 │   ├── service.py         # ★ agent를 별도 프로세스로 노출하는 HTTP 서비스 (현재 배선)
 │   ├── http_client.py     # ★ backend가 위 서비스를 부르는 AgentProtocol 클라이언트
 │   ├── backend_adapter.py # backend AgentProtocol 어댑터 (계약 미러 + 변환 + WAIT 폴백)
 │   ├── backend_entry.py   # backend 무수정 진입점 (get_agent를 위 둘 중 하나로 치환)
 │   ├── agents/            # 에이전트별 시스템 프롬프트 + build_agent()/실행 함수
 │   │   ├── state_agent.py         # 규칙 기반 진입 게이트(LLM 없음) + 학생 상태 파악(LLM)
-│   │   ├── guided_action_agent.py # 지도 방법+행동 결정 (guidance+action 병합, 레이턴시 절감)
-│   │   ├── guidance_agent.py      # (더 이상 파이프라인이 안 씀, 재사용/롤백용으로 보존)
-│   │   ├── action_agent.py        # (더 이상 파이프라인이 안 씀, 재사용/롤백용으로 보존)
-│   │   ├── evaluation_agent.py    # 응답 반환 후 service.py가 백그라운드로만 호출
+│   │   ├── guided_action_agent.py # 지도 방법+행동 결정 (계획만, 작문은 안 함)
+│   │   ├── tutor_message_agent.py # ★ 학생이 읽는 문장을 만드는 유일한 곳
+│   │   ├── evaluation_agent.py    # ★ 학생 답변 이해도 평가 (AI 자기 채점 아님)
 │   │   └── problem_generator_agent.py  # 오답/복습 기반 문제 생성 (judge로 검증)
 │   └── tools/             # 에이전트가 쓸 Strands @tool 함수
+│       ├── code_context.py             # 실행 기록 요약 도구
 │       └── judge_validator.py          # judge 샌드박스로 생성 문제 검증
 ├── examples/run_session_demo.py   # 전체 파이프라인 실행 예시 (struggle/skip/paste 3종)
 ├── tests/
+│   ├── test_llm_runtime.py      # 루프가 하나뿐이고 안 닫히는지, 동시 호출, 타임아웃
 │   ├── test_state_agent.py      # 규칙 게이트 + assess() 분기 테스트 (LLM 없음, mock)
-│   ├── test_guided_action_agent.py  # guided_action_agent 스모크 테스트 (mock)
-│   ├── test_orchestrator.py     # 분기 로직 스모크 테스트 (LLM 호출 없이 mock)
+│   ├── test_guided_action_agent.py  # 계획만 만들고 작문은 안 하는지 (mock)
+│   ├── test_tutor_message_agent.py  # ★ 작문 프롬프트에 텔레메트리가 안 들어가는지 (회귀)
+│   ├── test_evaluation_agent.py     # 질문+답변이 평가 프롬프트에 들어가는지
+│   ├── test_orchestrator.py     # 두 파이프라인의 분기/캐시 (LLM 호출 없이 mock)
 │   ├── test_backend_adapter.py  # backend 계약 변환/폴백 + 미러 드리프트 검사 (mock)
-│   ├── test_service.py          # HTTP 서비스 계약 (5xx 안 냄, 필드 누락 허용, 백그라운드 evaluation)
-│   ├── test_http_client.py      # 모든 실패 모드 -> WAIT 폴백 (MockTransport)
+│   ├── test_models.py           # 프로바이더/역할별 모델 id 스위치
+│   ├── test_service.py          # HTTP 서비스 계약 (5xx 안 냄, 필드 누락 허용, /respond)
+│   ├── test_http_client.py      # 모든 실패 모드 -> WAIT / 폴백 문구 (MockTransport)
 │   └── test_problem_generator*.py  # 문제 생성 (mock + 실제 judge/Docker 통합)
 ├── pyproject.toml
 └── .env.example
 ```
+
+`guidance_agent.py` / `action_agent.py`는 삭제됐습니다 (위 "지금 구조" 참고).
 
 ## 실행
 
@@ -496,6 +655,19 @@ SDK가 그 extra에 들어 있습니다). AWS 계정을 쓰기로 팀에서 정�
 포함되어 있습니다), Strands 자체 기본 프로바이더를 쓰고 싶다면 `MODEL_PROVIDER=none`으로
 두세요.
 
+지금 쓰이는 role 값은 `state`, `guided_action`, `tutor_message`, `evaluation`,
+`problem_generator`입니다. **모델 id도 역할별로 덮어쓸 수 있습니다**
+(`ANTHROPIC_MODEL_ID_{ROLE}` → `ANTHROPIC_MODEL_ID` → 기본값 순):
+
+```bash
+ANTHROPIC_MODEL_ID=claude-sonnet-4-5                 # 공통
+ANTHROPIC_MODEL_ID_TUTOR_MESSAGE=claude-haiku-4-5    # 작문만 빠른 모델로
+```
+
+단계마다 성격이 다르기 때문입니다 — 학생 상태 판단은 추론이 필요하지만, 응답
+생성은 작문이고 압축된 컨텍스트만 받으므로 더 작은 모델로 충분한 경우가 많습니다
+(위 "지연 시간" 참고).
+
 ## TODO / 확인 필요
 
 - [ ] Notion(`Agent`, `CodeTrace MVP`)의 원래 설계와 이 파이프라인 해석이 맞는지 확인
@@ -512,5 +684,15 @@ SDK가 그 extra에 들어 있습니다). AWS 계정을 쓰기로 팀에서 정�
 - [ ] `AgentAction`의 `TRACE`/`PREDICT`/`DEBUG`/`VERIFY` 활동 생성 로직 — 지금은
       실제 개입을 전부 `HINT`로 모으고 있습니다
 - [ ] 사용자가 문제를 해결할 때 실시간으로 에이전트가 호출되야함
-- [ ] "힌트 버튼"(학생 직접 요청) 경로를 backend/frontend에 구현 — state_agent의
-      규칙 게이트와 무관하게 항상 열려 있어야 함
+- [x] "힌트 버튼"(학생 직접 요청) 경로를 backend/frontend에 구현 — SOS 버튼이
+      `POST /agent/decide`를, 채팅 입력창이 `POST /agent/respond`를 부릅니다.
+      둘 다 state_agent의 규칙 게이트와 무관하게 항상 열려 있습니다
+- [x] 학생에게 줄 답변을 실제로 생성하는 단계 — `agents/tutor_message_agent.py`
+- [x] 평가 에이전트가 **학생 답변**을 평가하고 그 결과가 다음 응답을 바꾸도록 연결
+      (`respond_to_student()` → `POST /respond` → backend `POST /agent/respond`)
+- [ ] 학생 답변 평가 결과(`understanding`, `misconceptions`)를 교육자 화면에
+      노출 — 지금은 `AGENT_INTERVENTION` 이벤트의 `activity`에만 쌓입니다
+      (`activity.kind == "chat"`으로 자동 개입과 구분 가능)
+- [ ] 작문 프롬프트 톤 튜닝 — `hint_level="explain"`일 때 응답이 다소 길고
+      완성 코드에 가까운 로드맵을 주는 경향이 있습니다. `GuidedAction.avoid`를
+      모델이 더 적극적으로 채우게 유도할 필요가 있습니다

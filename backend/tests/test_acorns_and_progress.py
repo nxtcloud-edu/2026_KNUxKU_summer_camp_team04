@@ -32,7 +32,7 @@ def wrong(passed: int = 3, total: int = 5) -> JudgeResult:
     return JudgeResult(status=JudgeStatus.WRONG_ANSWER, passed=passed, total=total)
 
 
-def solve(client, problem_id: str = "func_sum_list", code: str = LOOP_V2, mode: str = "run"):
+def solve(client, problem_id: str = "func_sum_list", code: str = LOOP_V2, mode: str = "submit"):
     sid = client.post("/sessions", json={"problem_id": problem_id}).json()["session_id"]
     return client.post(f"/sessions/{sid}/{mode}", json={"code": code})
 
@@ -45,8 +45,8 @@ def test_first_accepted_awards_acorns(client):
     solve(client)
 
     body = client.get("/users/me/acorns").json()
-    assert body["balance"] == 10  # BEGINNER 기본값
-    assert body["total_earned"] == 10
+    assert body["balance"] == 3  # KUICS 30p → 도토리 3개
+    assert body["total_earned"] == 3
 
 
 def test_same_problem_solved_twice_awards_only_once(client):
@@ -55,7 +55,7 @@ def test_same_problem_solved_twice_awards_only_once(client):
     solve(client)
     solve(client)
 
-    assert client.get("/users/me/acorns").json()["balance"] == 10
+    assert client.get("/users/me/acorns").json()["balance"] == 3
 
 
 def test_wrong_answer_awards_nothing(client):
@@ -68,7 +68,7 @@ def test_different_problems_award_separately(client):
     use_judge(accepted(), accepted())
     solve(client, "func_sum_list")
     solve(client, "func_find_max")
-    assert client.get("/users/me/acorns").json()["balance"] == 20
+    assert client.get("/users/me/acorns").json()["balance"] == 6
 
 
 def test_transaction_ledger_records_the_award(client):
@@ -78,8 +78,8 @@ def test_transaction_ledger_records_the_award(client):
     body = client.get("/users/me/acorns/transactions").json()
     assert body["total"] == 1
     tx = body["transactions"][0]
-    assert tx["amount"] == 10
-    assert tx["balance_after"] == 10
+    assert tx["amount"] == 3
+    assert tx["balance_after"] == 3
     assert tx["type"] == AcornTransactionType.PROBLEM_SOLVED.value
     assert tx["problem_id"] == "func_sum_list"
 
@@ -172,7 +172,7 @@ def test_solved_problems_list(client):
     item = body["items"][0]
     assert item["problem_id"] == "func_sum_list"
     assert item["title"] == "리스트 합 구하기"
-    assert item["acorns_earned"] == 10
+    assert item["acorns_earned"] == 3
     assert item["attempt_count"] == 1
 
 
@@ -181,13 +181,13 @@ def test_solved_problems_list(client):
 
 def test_nickname_change_costs_acorns(client):
     use_judge(accepted())
-    solve(client)  # 10개 확보
+    solve(client, "stdout_bit_is_on")  # KUICS 80p → 도토리 8개 확보
 
     r = client.patch("/users/me/nickname", json={"nickname": "새이름"})
     assert r.status_code == 200
     assert r.json()["nickname"] == "새이름"
     assert r.json()["acorns_spent"] == 5
-    assert r.json()["acorn_balance"] == 5
+    assert r.json()["acorn_balance"] == 3
 
 
 def test_nickname_change_without_enough_acorns_is_rejected(client):
@@ -239,6 +239,6 @@ def test_badge_reflects_total_earned(client):
         solve(client, pid)
 
     body = client.get("/users/me/profile").json()
-    assert body["total_acorns_earned"] == 30
+    assert body["total_acorns_earned"] == 9
     assert body["current_badge"]["code"] == "SEED"  # 50 미만
     assert body["next_badge"]["code"] == "SPROUT"

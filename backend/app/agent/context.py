@@ -36,6 +36,36 @@ def _first_prose_line(description: str) -> str:
     return ""
 
 
+def last_tutor_question(db: DbSession, session_id: str) -> str:
+    """튜터가 이 세션에서 **가장 마지막에 던진 질문**을 찾는다. 없으면 빈 문자열.
+
+    학생 답변을 평가하려면 "무엇을 물었는지"가 필요한데, 그 값을 학생
+    클라이언트가 보내게 하면 안 된다 -- 질문을 바꿔 보내서 평가를 통과시킬 수
+    있다 (본인 학습 기록을 조작하는 것이라 남의 데이터를 보는 문제는 아니지만,
+    교육자 화면에 남는 이해도 판단이 거짓이 된다). 그래서 서버가 자기가 남긴
+    `AGENT_INTERVENTION` 기록에서 직접 읽는다.
+
+    `activity.question`은 `tutor_agent`의 응답 생성 에이전트가 "이 메시지는
+    학생의 답을 기다린다"고 표시할 때만 채워진다
+    (`backend_adapter.to_agent_decision`). 그래서 질문이 아닌 개입(단순 힌트)
+    뒤에 학생이 말을 걸면 여기서 빈 문자열이 나오고, agent는 그 경우를
+    "학생이 먼저 말을 걸었다"로 취급한다.
+    """
+    for e in reversed(trace_service.all_events(db, session_id)):
+        if EventType(e.type) is not EventType.AGENT_INTERVENTION:
+            continue
+        activity = (e.payload or {}).get("activity")
+        if not isinstance(activity, dict):
+            continue
+        question = activity.get("question")
+        if isinstance(question, str) and question.strip():
+            return question.strip()
+        # 질문 없는 개입을 만나면 더 뒤로 가지 않는다. 그보다 앞선 질문은 이미
+        # 다른 개입으로 덮여서, 학생이 지금 답하는 대상이 아니다.
+        return ""
+    return ""
+
+
 def build_context(
     db: DbSession,
     session_id: str,
@@ -63,6 +93,7 @@ def build_context(
         etype = EventType(e.type)
         if etype in (EventType.AGENT_TRIGGER, EventType.AGENT_INTERVENTION):
             p = e.payload or {}
+            activity = p.get("activity") if isinstance(p.get("activity"), dict) else {}
             previous.append(
                 {
                     "seq": e.seq,
@@ -70,6 +101,11 @@ def build_context(
                     "trigger": p.get("trigger"),
                     "action": p.get("action"),
                     "reason": p.get("reason"),
+                    # **학생에게 실제로 한 말**도 같이 넘긴다. reason은 내부 근거
+                    # ("학생이 while 조건을 오해하고 있습니다")라서, 이것만 주면
+                    # agent가 자기가 무슨 말을 했는지 모른 채 같은 힌트를 다시
+                    # 만든다. 실제로 힌트가 반복되는 원인이었다.
+                    "message": activity.get("message"),
                 }
             )
 

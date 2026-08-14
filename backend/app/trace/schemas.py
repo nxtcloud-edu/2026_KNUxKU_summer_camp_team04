@@ -180,10 +180,27 @@ class AgentDecisionRead(BaseModel):
     activity: dict[str, Any] | None = None
 
 
+class AgentReplyRead(BaseModel):
+    """`POST /agent/respond` 응답 -- 학생이 보낸 말에 대한 튜터의 답장.
+
+    **일부러 좁다.** agent 쪽 `AgentReply`에는 학생 답변 평가 결과
+    (understanding, misconceptions, evidence, next_focus)가 같이 들어 있지만,
+    그건 내부 판단이라 학생 브라우저로 내려보내지 않는다 -- 교육자 화면은
+    trace 이벤트에서 읽고, 학생에게 "이해도: none"을 보여줄 이유는 없다.
+
+    `expects_reply`가 true면 프런트엔드가 입력창을 열어 둔 채로 답을 기다린다.
+    """
+
+    message: str
+    expects_reply: bool = False
+    question: str = ""
+
+
 class ResultIngestResponse(BaseModel):
     event: EventRead
     process_state: ProcessStateResponse
     agent_decision: AgentDecisionRead | None = None
+    awarded_acorns: int = 0
 
 
 # ---------------------------------------------------------------- Timeline
