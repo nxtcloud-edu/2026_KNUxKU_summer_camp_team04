@@ -1,4 +1,4 @@
-import { loadPyodide, type PyodideInterface } from 'pyodide'
+import { loadPyodide, version as pyodideVersion, type PyodideInterface } from 'pyodide'
 import type { ProblemDetail, PublicTestCase } from './problemService'
 
 export type TestResult = PublicTestCase & {
@@ -24,8 +24,15 @@ let runtimePromise: Promise<PyodideInterface> | null = null
 
 export function preparePython() {
   if (!runtimePromise) {
+    // **버전을 하드코딩하지 않는다.** JS 래퍼(npm 패키지)와 CDN에서 받는 WASM
+    // 자산의 버전이 다르면 Pyodide가 로드 자체를 거부한다:
+    //   "Pyodide version does not match: '0.27.7' <==> '0.27.2'"
+    // 예전에는 이 URL에 v0.27.2가 박혀 있었는데 package.json이 "^0.27.2"라
+    // npm이 0.27.7을 설치하면서 어긋났다 -- 새로 `npm install` 한 사람은
+    // 전부 실행/제출이 죽고 "채점 서버에 연결할 수 없어요"만 봤다.
+    // 패키지가 export하는 자기 버전으로 URL을 만들면 둘은 영원히 같이 움직인다.
     runtimePromise = loadPyodide({
-      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/',
+      indexURL: `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/`,
     })
   }
   return runtimePromise
