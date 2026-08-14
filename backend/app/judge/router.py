@@ -14,6 +14,7 @@ from sqlmodel import Session as DbSession
 from app.agent import AgentProtocol, get_agent
 from app.agent.context import build_context
 from app.clock import utcnow
+from app.config import get_settings
 from app.enums import AgentAction, EventSource
 from app.errors import InvalidCodeVersion, SnapshotNotFound
 from app.judge import JudgeMode, JudgeProtocol, get_judge
@@ -111,7 +112,10 @@ def _execute(
     educator_service.recalculate_for_student(db, student=user, problem_id=problem.problem_id, repo=repo)
     db.commit()
 
-    state = monitor.evaluate_and_record(db, session, now=now)
+    # cfg를 반드시 넘긴다. 생략하면 monitor가 DEFAULT_MONITOR_CONFIG(코드에 박힌
+    # 기본값)로 떨어져서 MONITOR_* 환경변수가 통째로 무시된다 -- config.py의
+    # Settings.monitor는 값으로 주입받으라고 만든 것이다.
+    state = monitor.evaluate_and_record(db, session, now=now, cfg=get_settings().monitor)
 
     decision: AgentDecisionRead | None = None
     if state.triggered:
