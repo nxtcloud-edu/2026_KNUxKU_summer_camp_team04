@@ -2,8 +2,13 @@
 
 실제 LLM이나 Docker는 쓰지 않는다 — judge_service를 가짜(fake) 모듈로
 대체해서 judge_validator.validate_template()의 분기만 검증하고,
-problem_generator_agent.generate()는 agent.structured_output()과
-validate_template()을 모두 mock해서 재시도 루프만 검증한다.
+problem_generator_agent.generate()는 LLM 호출과 validate_template()을 모두
+mock해서 재시도 루프만 검증한다.
+
+에이전트 코드는 `agent.structured_output()`을 직접 부르지 않고
+`llm_runtime.structured_output()`을 경유한다 (이유는 그 모듈 docstring 참고 —
+캐시된 클라이언트를 매번 새 이벤트 루프에서 쓰다가 멈추거나 터지는 문제).
+그래서 mock도 `structured_output_async` 쪽에 건다.
 """
 
 from __future__ import annotations
@@ -119,7 +124,7 @@ def test_validate_template_rejects_duplicate_categories_before_calling_judge():
 def test_generate_returns_first_success_without_retrying():
     request = ReviewRequest(student_id="s1", concept="loop")
     fake_agent = MagicMock()
-    fake_agent.structured_output.return_value = _template()
+    fake_agent.structured_output_async.return_value = _template()
 
     with patch.object(
         problem_generator_agent,
@@ -129,14 +134,14 @@ def test_generate_returns_first_success_without_retrying():
         report = problem_generator_agent.generate(request, fake_agent)
 
     assert report.is_valid is True
-    assert fake_agent.structured_output.call_count == 1
+    assert fake_agent.structured_output_async.call_count == 1
     assert mock_validate.call_count == 1
 
 
 def test_generate_retries_up_to_max_then_returns_last_failure():
     request = ReviewRequest(student_id="s1", concept="loop")
     fake_agent = MagicMock()
-    fake_agent.structured_output.return_value = _template()
+    fake_agent.structured_output_async.return_value = _template()
 
     with patch.object(
         problem_generator_agent,
@@ -146,7 +151,7 @@ def test_generate_retries_up_to_max_then_returns_last_failure():
         report = problem_generator_agent.generate(request, fake_agent)
 
     assert report.is_valid is False
-    assert fake_agent.structured_output.call_count == problem_generator_agent.MAX_RETRIES + 1
+    assert fake_agent.structured_output_async.call_count == problem_generator_agent.MAX_RETRIES + 1
 
 
 def test_generate_survives_structured_output_raising():
@@ -156,7 +161,7 @@ def test_generate_survives_structured_output_raising():
     그냥 죽어서 재시도 루프가 통째로 무의미해진다."""
     request = ReviewRequest(student_id="s1", concept="loop")
     fake_agent = MagicMock()
-    fake_agent.structured_output.side_effect = [
+    fake_agent.structured_output_async.side_effect = [
         ValueError("1 validation error for ProblemTemplate: test_case_inputs must be a list"),
         _template(),
     ]
@@ -165,7 +170,7 @@ def test_generate_survives_structured_output_raising():
         report = problem_generator_agent.generate(request, fake_agent)
 
     assert report.is_valid is True
-    assert fake_agent.structured_output.call_count == 2
+    assert fake_agent.structured_output_async.call_count == 2
 
 
 def test_generate_recovers_on_a_later_attempt():
@@ -173,7 +178,7 @@ def test_generate_recovers_on_a_later_attempt():
     (항상 즉시 성공/항상 실패만 테스트하면 중간 회복 경로가 안 잡힘)."""
     request = ReviewRequest(student_id="s1", concept="loop")
     fake_agent = MagicMock()
-    fake_agent.structured_output.return_value = _template()
+    fake_agent.structured_output_async.return_value = _template()
 
     failure = ValidationReport(is_valid=False, error_message="레퍼런스 코드 실행 실패")
     success = ValidationReport(is_valid=True, problem_json={"title": "고쳐진 문제"})
@@ -183,7 +188,7 @@ def test_generate_recovers_on_a_later_attempt():
 
     assert report.is_valid is True
     assert report.problem_json["title"] == "고쳐진 문제"
-    assert fake_agent.structured_output.call_count == 2
+    assert fake_agent.structured_output_async.call_count == 2
     assert mock_validate.call_count == 2
 
 
@@ -192,7 +197,7 @@ def test_generate_feeds_failure_reason_back_into_retry_prompt():
     호출 횟수만 맞아도 이 피드백이 실제로 안 들어가면 재시도가 무의미해진다."""
     request = ReviewRequest(student_id="s1", concept="loop")
     fake_agent = MagicMock()
-    fake_agent.structured_output.return_value = _template()
+    fake_agent.structured_output_async.return_value = _template()
 
     failure = ValidationReport(
         is_valid=False, error_message="레퍼런스 코드 실행 실패 (SYNTAX_ERROR)", failed_categories=["c2"]
@@ -200,6 +205,6 @@ def test_generate_feeds_failure_reason_back_into_retry_prompt():
     with patch.object(problem_generator_agent, "validate_template", return_value=failure):
         problem_generator_agent.generate(request, fake_agent)
 
-    second_call_prompt = fake_agent.structured_output.call_args_list[1].args[1]
+    second_call_prompt = fake_agent.structured_output_async.call_args_list[1].args[1]
     assert "SYNTAX_ERROR" in second_call_prompt
     assert "c2" in second_call_prompt

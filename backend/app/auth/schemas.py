@@ -50,6 +50,8 @@ class SignupRequest(BaseModel):
     # EDUCATOR 는 기관 초대 코드가 필수다 (auth/service.resolve_organization).
     role: UserRole = UserRole.STUDENT
     invite_code: str | None = Field(default=None, max_length=64)
+    # 학생이 교수자에게 받은 강의 코드. 가입 성공과 수강 등록을 한 트랜잭션으로 처리한다.
+    course_invite_code: str | None = Field(default=None, max_length=64)
     # 8자 미만은 거부한다. 상한은 bcrypt pre-hash 때문에 기술적으로는 불필요하지만
     # 비정상적으로 긴 입력을 해싱하는 비용을 막는다.
     password: str = Field(min_length=8, max_length=128)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from strands import Agent
 
+from ..llm_runtime import structured_output
 from ..models import get_model
 from ..schemas import ProblemTemplate, ReviewRequest, ValidationReport
 from ..tools.judge_validator import validate_template
@@ -71,7 +72,7 @@ def generate(request: ReviewRequest, agent: Agent | None = None) -> ValidationRe
     report: ValidationReport | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            template: ProblemTemplate = agent.structured_output(ProblemTemplate, prompt)
+            template: ProblemTemplate = structured_output(agent, ProblemTemplate, prompt)
         except Exception as exc:
             # 실제로 관찰된 실패 모드: LLM이 test_case_inputs를 리스트가 아니라
             # (파이썬 range() 표현식이 섞인) 문자열로 반환해 Pydantic 검증 자체가

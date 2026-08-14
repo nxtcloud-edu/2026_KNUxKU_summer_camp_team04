@@ -13,7 +13,7 @@ from sqlmodel import Session as DbSession
 from sqlmodel import col, select
 
 from app.auth import service as auth_service
-from app.auth.deps import require_educator
+from app.auth.deps import get_current_user, require_educator
 from app.db import get_db
 from app.educator import service
 from app.educator.schemas import (
@@ -21,12 +21,14 @@ from app.educator.schemas import (
     AttentionListRead,
     CourseBrief,
     CourseCreate,
+    CourseJoinRequest,
     CourseRead,
     DashboardMetrics,
     DashboardRead,
     EnrollRequest,
     ProblemActivity,
     StudentBrief,
+    StudentCourseRead,
     StudentDetailRead,
     StudentListRead,
     StudentRow,
@@ -35,10 +37,67 @@ from app.educator.schemas import (
 )
 from app.enums import CodeVisibility, LearningStatus, ProgressStatus
 from app.errors import StudentNotInCourse, UserNotFound
-from app.models import StudentCourseStats, User, UserProblemProgress
+from app.models import Course, Enrollment, StudentCourseStats, User, UserProblemProgress
+from app.enums import EnrollmentStatus, UserRole
 from app.problems.service import ProblemRepository, get_problem_repository
 
 router = APIRouter(tags=["educator"])
+
+
+# --------------------------------------------------------------------- 학생의 강의 참여
+
+
+@router.get("/student/courses", response_model=list[StudentCourseRead], tags=["student"])
+def student_courses(
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> list[StudentCourseRead]:
+    if UserRole(user.role) is not UserRole.STUDENT:
+        return []
+    enrollments = db.exec(
+        select(Enrollment)
+        .where(Enrollment.student_id == user.id)
+        .where(Enrollment.status == EnrollmentStatus.ACTIVE)
+    ).all()
+    out: list[StudentCourseRead] = []
+    for enrollment in enrollments:
+        course = db.get(Course, enrollment.course_id)
+        if course is None or not course.is_active:
+            continue
+        educator = db.get(User, course.educator_id)
+        out.append(StudentCourseRead(
+            id=course.id,
+            title=course.title,
+            term=course.term,
+            educator_name=educator.name if educator else "교수자",
+            assigned_problem_count=len(service.assigned_problem_ids(db, course, repo)),
+        ))
+    return out
+
+
+@router.post("/student/courses/join", response_model=StudentCourseRead, status_code=status.HTTP_201_CREATED, tags=["student"])
+def join_course(
+    body: CourseJoinRequest,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+) -> StudentCourseRead:
+    if UserRole(user.role) is not UserRole.STUDENT:
+        raise StudentNotInCourse(user.id)
+    course = db.exec(select(Course).where(Course.invite_code == body.invite_code.strip())).first()
+    if course is None or not course.is_active:
+        from app.errors import InvalidInviteCode
+        raise InvalidInviteCode("강의 초대 코드가 올바르지 않습니다.")
+    service.enroll_student(db, course, user)
+    service.recalculate_stats(db, course=course, student=user, repo=repo)
+    db.commit()
+    educator = db.get(User, course.educator_id)
+    return StudentCourseRead(
+        id=course.id, title=course.title, term=course.term,
+        educator_name=educator.name if educator else "교수자",
+        assigned_problem_count=len(service.assigned_problem_ids(db, course, repo)),
+    )
 
 
 def _stats_map(db: DbSession, course_id: str) -> dict[str, StudentCourseStats]:

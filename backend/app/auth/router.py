@@ -37,6 +37,7 @@ def signup(body: SignupRequest, db: DbSession = Depends(get_db)) -> AuthResponse
         password=body.password,
         role=body.role,
         invite_code=body.invite_code,
+        course_invite_code=body.course_invite_code,
     )
     db.commit()
     db.refresh(user)

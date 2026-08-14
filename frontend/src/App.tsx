@@ -446,13 +446,13 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
 
       {activity === 'landing' ? (
         <LandingPage
-          onStart={() => (userRole ? setActivity('list') : onLogin())}
+          onStart={() => setActivity('list')}
         />
       )
         : activity === 'trace' ? <TraceActivity onExit={() => setActivity('problem')} />
         : activity === 'educator' ? <EducatorPage />
         : activity === 'mypage' ? <MyPage onAvatarChange={setProfileAvatar} onProblemSelect={(problemId) => { setSelectedProblemId(problemId); setActivity('problem') }} />
-        : activity === 'list' ? <ProblemList onSelect={selectProblem} /> : (
+        : activity === 'list' ? <ProblemList onSelect={selectProblem} canJoinCourse={userRole === 'student'} /> : (
 
       <main className="workspace">
         <section className={`problem-panel panel ${problemOpen ? '' : 'collapsed'}`}>
@@ -562,7 +562,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
         </section>
         </div>
 
-        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} onHintRequest={() => trace.recordEvent('HINT_REQUEST')} intervention={trace.intervention} />
+        <AiTutorPanel problem={problem} result={result} judgeError={judgeError} sessionId={trace.sessionId} isAuthenticated={Boolean(userRole)} onRequireLogin={() => setLoginPrompt('AI 튜터링')} intervention={trace.intervention} />
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}

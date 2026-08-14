@@ -180,6 +180,55 @@ def test_enroll_and_list_students(anon_client, educator, course_with_student):
     assert body["items"][0]["name"] == "김민서"
 
 
+def test_student_signup_with_course_code_enrolls_immediately(anon_client, educator):
+    course = make_course(anon_client, educator).json()
+    response = anon_client.post("/auth/signup", json={
+        "name": "초대학생",
+        "email": "invited@x.com",
+        "password": "password123",
+        "role": "STUDENT",
+        "course_invite_code": course["invite_code"],
+    })
+    assert response.status_code == 201
+    student_token = response.json()["access_token"]
+
+    enrolled = anon_client.get("/student/courses", headers=h(student_token)).json()
+    assert len(enrolled) == 1
+    assert enrolled[0]["id"] == course["id"]
+
+    roster = anon_client.get(
+        f"/educator/courses/{course['id']}/students", headers=h(educator)
+    ).json()
+    assert roster["total"] == 1
+    assert roster["items"][0]["email"] == "invited@x.com"
+
+
+def test_wrong_course_code_rejects_student_signup(anon_client, org):
+    response = anon_client.post("/auth/signup", json={
+        "name": "초대학생", "email": "bad-code@x.com", "password": "password123",
+        "role": "STUDENT", "course_invite_code": "NOT-A-COURSE",
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_INVITE_CODE"
+
+
+def test_existing_student_can_join_multiple_courses(anon_client, educator):
+    first = make_course(anon_client, educator, title="Python 1").json()
+    second = make_course(anon_client, educator, title="Python 2").json()
+    student_token = token_of(signup(anon_client, "multi@x.com", name="다강의"))
+
+    for course in (first, second):
+        response = anon_client.post(
+            "/student/courses/join",
+            json={"invite_code": course["invite_code"]},
+            headers=h(student_token),
+        )
+        assert response.status_code == 201
+
+    courses = anon_client.get("/student/courses", headers=h(student_token)).json()
+    assert {course["id"] for course in courses} == {first["id"], second["id"]}
+
+
 def test_duplicate_enroll_is_409(anon_client, educator, course_with_student):
     cid, _, _ = course_with_student
     r = anon_client.post(

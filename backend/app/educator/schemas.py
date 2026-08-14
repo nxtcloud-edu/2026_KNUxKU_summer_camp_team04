@@ -60,6 +60,18 @@ class EnrollRequest(BaseModel):
     email: str = Field(max_length=255)
 
 
+class CourseJoinRequest(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class StudentCourseRead(BaseModel):
+    id: str
+    title: str
+    term: str
+    educator_name: str
+    assigned_problem_count: int
+
+
 # --------------------------------------------------------------------- 대시보드
 
 
