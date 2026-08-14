@@ -10,7 +10,7 @@ from sqlmodel import col, func, select
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.clock import utcnow
 from app.config import get_settings
-from app.enums import UserRole
+from app.enums import EnrollmentStatus, UserRole
 from app.errors import (
     EmailAlreadyRegistered,
     InvalidCredentials,
@@ -18,7 +18,7 @@ from app.errors import (
     InvalidNickname,
     NicknameTaken,
 )
-from app.models import Organization, User
+from app.models import Course, Enrollment, Organization, User
 
 
 def normalize_email(email: str) -> str:
@@ -123,6 +123,7 @@ def signup(
     password: str,
     role: UserRole = UserRole.STUDENT,
     invite_code: str | None = None,
+    course_invite_code: str | None = None,
 ) -> tuple[User, str]:
     """회원가입. 반환값 (user, access_token). commit은 호출자가 한다."""
     normalized = normalize_email(email)
@@ -133,7 +134,19 @@ def signup(
     if role is UserRole.ADMIN:
         raise InvalidInviteCode("관리자 계정은 가입으로 만들 수 없습니다.")
 
+    course = None
+    if course_invite_code:
+        if role is not UserRole.STUDENT:
+            raise InvalidInviteCode("강의 초대 코드는 학생 계정에만 사용할 수 있습니다.")
+        course = db.exec(
+            select(Course).where(Course.invite_code == course_invite_code.strip())
+        ).first()
+        if course is None or not course.is_active:
+            raise InvalidInviteCode("강의 초대 코드가 올바르지 않습니다.")
+
     org = resolve_organization(db, role=role, invite_code=invite_code, email=normalized)
+    if course is not None:
+        org = db.get(Organization, course.organization_id)
 
     user = User(
         email=normalized,
@@ -151,6 +164,10 @@ def signup(
         # 동시 가입 경합. UNIQUE 제약이 최종 방어선이다.
         db.rollback()
         raise EmailAlreadyRegistered() from None
+
+    if course is not None:
+        db.add(Enrollment(course_id=course.id, student_id=user.id, status=EnrollmentStatus.ACTIVE))
+        db.flush()
 
     return user, create_access_token(user.id)
 

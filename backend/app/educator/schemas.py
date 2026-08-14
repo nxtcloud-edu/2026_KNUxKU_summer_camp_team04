@@ -60,6 +60,45 @@ class EnrollRequest(BaseModel):
     email: str = Field(max_length=255)
 
 
+class CourseJoinRequest(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class StudentCourseRead(BaseModel):
+    id: str
+    title: str
+    term: str
+    educator_name: str
+    assigned_problem_count: int
+
+
+class AssignmentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=128)
+    description: str = Field(default="", max_length=500)
+    problem_ids: list[str] = Field(min_length=1, max_length=100)
+    due_at: UtcDatetime | None = None
+
+
+class AssignmentProblemRead(BaseModel):
+    problem_id: str
+    title: str
+    status: str
+
+
+class AssignmentRead(BaseModel):
+    id: str
+    course_id: str
+    course_title: str
+    title: str
+    description: str
+    due_at: UtcDatetime | None
+    problems: list[AssignmentProblemRead]
+    completed_students: int
+    total_students: int
+    completed_problems: int = 0
+    total_problems: int = 0
+
+
 # --------------------------------------------------------------------- 대시보드
 
 

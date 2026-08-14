@@ -110,13 +110,13 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
           </label>
 
           <label className="auth-field">
-            <span>{isInviteCodeRequired ? '기관 초대 코드' : '기관 초대 코드 (선택)'}</span>
+            <span>{isInviteCodeRequired ? '기관 초대 코드' : '강의 초대 코드 (선택)'}</span>
             <div>
               <KeyRound size={17} />
               <input
                 type="text"
                 name="invite_code"
-                placeholder={isInviteCodeRequired ? '소속 기관에서 받은 코드' : '없으면 비워두세요'}
+                placeholder={isInviteCodeRequired ? '소속 기관에서 받은 코드' : '교수자에게 받은 강의 코드'}
                 value={inviteCode}
                 onChange={(event) => setInviteCode(event.target.value)}
                 autoComplete="off"
@@ -127,7 +127,7 @@ function SignupPage({ onSignup, onLoginClick, onBack }: SignupPageProps) {
           <p className="auth-hint">
             {isInviteCodeRequired
               ? '교수자 계정은 기관 확인이 필요해요. 코드는 소속 기관 담당자에게 받을 수 있습니다.'
-              : '기관 코드가 있으면 입력해 주세요. 없어도 학생으로 가입할 수 있어요.'}
+              : '교수자에게 받은 강의 코드를 입력하면 가입과 동시에 수강 등록돼요. 없어도 가입할 수 있습니다.'}
           </p>
 
           <label className="auth-field">

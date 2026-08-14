@@ -28,8 +28,15 @@ export async function loginUser(email: string, password: string, role: UserRole)
     auth: false,
     body: JSON.stringify({ email, password, role: role.toUpperCase() }),
   })
+  const user = normalizeUser(response.user, email, role)
+  if (user.role !== role) {
+    setAccessToken('')
+    throw new Error(role === 'educator'
+      ? '이 이메일은 학생 계정입니다. 학생으로 로그인하거나 교수자 계정을 확인해 주세요.'
+      : '이 이메일은 교수자 계정입니다. 교수자로 로그인해 주세요.')
+  }
   persistToken(response)
-  return normalizeUser(response.user, email, role)
+  return user
 }
 
 /**
@@ -65,7 +72,11 @@ export async function signupUser(
       email,
       password,
       role: role.toUpperCase(),
-      ...(trimmedInviteCode ? { invite_code: trimmedInviteCode } : {}),
+      ...(trimmedInviteCode
+        ? role === 'educator'
+          ? { invite_code: trimmedInviteCode }
+          : { course_invite_code: trimmedInviteCode }
+        : {}),
     }),
   })
   persistToken(response)

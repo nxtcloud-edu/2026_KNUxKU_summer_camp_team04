@@ -167,6 +167,20 @@ class CourseProblem(SQLModel, table=True):
     )
 
 
+class Assignment(SQLModel, table=True):
+    """교수자가 강의에 배정한 문제 묶음."""
+
+    __tablename__ = "assignments"
+
+    id: str = Field(default_factory=_id("assign"), primary_key=True, max_length=64)
+    course_id: str = Field(foreign_key="courses.id", index=True, max_length=64)
+    title: str = Field(max_length=128, nullable=False)
+    description: str = Field(default="", max_length=500)
+    problem_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    due_at: datetime | None = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+
+
 class Enrollment(SQLModel, table=True):
     __tablename__ = "enrollments"
 

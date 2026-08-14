@@ -180,6 +180,89 @@ def test_enroll_and_list_students(anon_client, educator, course_with_student):
     assert body["items"][0]["name"] == "김민서"
 
 
+def test_student_signup_with_course_code_enrolls_immediately(anon_client, educator):
+    course = make_course(anon_client, educator).json()
+    response = anon_client.post("/auth/signup", json={
+        "name": "초대학생",
+        "email": "invited@x.com",
+        "password": "password123",
+        "role": "STUDENT",
+        "course_invite_code": course["invite_code"],
+    })
+    assert response.status_code == 201
+    student_token = response.json()["access_token"]
+
+    enrolled = anon_client.get("/student/courses", headers=h(student_token)).json()
+    assert len(enrolled) == 1
+    assert enrolled[0]["id"] == course["id"]
+
+    roster = anon_client.get(
+        f"/educator/courses/{course['id']}/students", headers=h(educator)
+    ).json()
+    assert roster["total"] == 1
+    assert roster["items"][0]["email"] == "invited@x.com"
+
+
+def test_wrong_course_code_rejects_student_signup(anon_client, org):
+    response = anon_client.post("/auth/signup", json={
+        "name": "초대학생", "email": "bad-code@x.com", "password": "password123",
+        "role": "STUDENT", "course_invite_code": "NOT-A-COURSE",
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_INVITE_CODE"
+
+
+def test_existing_student_can_join_multiple_courses(anon_client, educator):
+    first = make_course(anon_client, educator, title="Python 1").json()
+    second = make_course(anon_client, educator, title="Python 2").json()
+    student_token = token_of(signup(anon_client, "multi@x.com", name="다강의"))
+
+    for course in (first, second):
+        response = anon_client.post(
+            "/student/courses/join",
+            json={"invite_code": course["invite_code"]},
+            headers=h(student_token),
+        )
+        assert response.status_code == 201
+
+    courses = anon_client.get("/student/courses", headers=h(student_token)).json()
+    assert {course["id"] for course in courses} == {first["id"], second["id"]}
+
+
+def test_educator_assigns_problems_and_student_reads_them(anon_client, educator, course_with_student):
+    cid, student_token, _ = course_with_student
+    created = anon_client.post(
+        f"/educator/courses/{cid}/assignments",
+        json={
+            "title": "함수 기초 과제",
+            "description": "두 문제를 해결하세요.",
+            "problem_ids": ["func_sum_list", "func_find_max"],
+            "due_at": "2026-08-31T14:00:00Z",
+        },
+        headers=h(educator),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["total_students"] == 1
+    assert len(created.json()["problems"]) == 2
+
+    student_view = anon_client.get("/student/assignments", headers=h(student_token))
+    assert student_view.status_code == 200
+    assignment = student_view.json()[0]
+    assert assignment["title"] == "함수 기초 과제"
+    assert assignment["completed_problems"] == 0
+    assert assignment["total_problems"] == 2
+
+
+def test_assignment_rejects_unknown_problem(anon_client, educator):
+    cid = make_course(anon_client, educator).json()["id"]
+    response = anon_client.post(
+        f"/educator/courses/{cid}/assignments",
+        json={"title": "잘못된 과제", "problem_ids": ["missing_problem"]},
+        headers=h(educator),
+    )
+    assert response.status_code == 422
+
+
 def test_duplicate_enroll_is_409(anon_client, educator, course_with_student):
     cid, _, _ = course_with_student
     r = anon_client.post(
