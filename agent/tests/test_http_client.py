@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -187,3 +188,81 @@ def test_bad_timeout_env_falls_back_to_default(monkeypatch) -> None:
     from tutor_agent.http_client import DEFAULT_READ_TIMEOUT_SECONDS
 
     assert HttpAgentClient()._read_timeout == DEFAULT_READ_TIMEOUT_SECONDS
+
+
+# --- respond() (학생이 답을 보낸 경로) ---------------------------------------
+#
+# `decide()`와 계약이 하나 다르다: **침묵으로 폴백하지 않는다.** 학생이 직접
+# 입력창에 뭔가를 써서 보낸 상황이라, WAIT(=아무 말 없음)로 떨어지면 "튜터가 내
+# 말을 씹었다"가 된다. 그래서 모든 실패 모드에서 사람이 읽을 수 있는 문구가
+# 담긴 AgentReply를 돌려줘야 한다.
+
+
+def test_respond_happy_path_returns_message_and_evaluation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/respond"
+        body = json.loads(request.content)
+        # 답변과 질문이 컨텍스트와 함께 실려 나간다.
+        assert body["answer"] == "0으로요"
+        assert body["question"] == "언제 초기화해야 할까요?"
+        assert body["session_id"] == "sess_1"
+        return httpx.Response(
+            200,
+            json={
+                "message": "맞아요! 그 줄은 어디에 있어야 할까요?",
+                "expects_reply": True,
+                "question": "그 줄은 어디에 있어야 할까요?",
+                "understanding": "partial",
+                "is_correct": True,
+                "follow_up_needed": True,
+                "misconceptions": ["초기화 위치를 오해"],
+                "evidence": "초기값은 맞혔습니다.",
+                "next_focus": "초기화 위치",
+            },
+        )
+
+    reply = _client(handler).respond(_ctx(), answer="0으로요", question="언제 초기화해야 할까요?")
+
+    assert reply.message == "맞아요! 그 줄은 어디에 있어야 할까요?"
+    assert reply.expects_reply is True
+    assert reply.understanding == "partial"
+    assert reply.misconceptions == ["초기화 위치를 오해"]
+    assert reply.next_focus == "초기화 위치"
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        pytest.param(lambda request: httpx.Response(500, text="boom"), id="5xx"),
+        pytest.param(lambda request: httpx.Response(200, text="JSON이 아님"), id="not-json"),
+        pytest.param(lambda request: httpx.Response(200, json=["리스트"]), id="not-a-dict"),
+        pytest.param(lambda request: httpx.Response(200, json={}), id="no-message"),
+        pytest.param(lambda request: httpx.Response(200, json={"message": "   "}), id="blank-message"),
+    ],
+)
+def test_respond_always_returns_a_readable_message(handler) -> None:
+    reply = _client(handler).respond(_ctx(), answer="모르겠어요")
+
+    assert reply.message.strip(), "학생이 말을 걸었는데 빈 응답을 돌려줬다"
+    assert reply.understanding == ""  # 판정하지 못했음을 빈 값으로 표현
+
+
+def test_respond_survives_a_dead_service() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("연결 거부", request=request)
+
+    reply = _client(handler).respond(_ctx(), answer="모르겠어요")
+
+    assert reply.message.strip()
+
+
+def test_respond_ignores_unknown_extra_fields() -> None:
+    """서비스가 필드를 늘려도 backend가 깨지지 않는다 (아는 필드만 골라 담는다)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": "좋아요", "미래에_추가된_필드": 42})
+
+    reply = _client(handler).respond(_ctx(), answer="0으로요")
+
+    assert reply.message == "좋아요"
+    assert reply.follow_up_needed is True  # 빠진 필드는 기본값

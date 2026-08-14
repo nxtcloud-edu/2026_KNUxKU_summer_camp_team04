@@ -20,8 +20,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from tutor_agent import service  # noqa: E402
 from tutor_agent.backend_adapter import TutorAgentAdapter, get_backend_agent  # noqa: E402
-from tutor_agent.orchestrator import PipelineResult  # noqa: E402
-from tutor_agent.schemas import ActionPlan, GuidancePlan, StudentState  # noqa: E402
+from tutor_agent.orchestrator import PipelineResult, ReplyResult  # noqa: E402
+from tutor_agent.schemas import (  # noqa: E402
+    ActionPlan,
+    AnswerEvaluation,
+    GuidancePlan,
+    StudentState,
+    TutorMessage,
+)
 
 CONTEXT = {
     "session_id": "sess_1",
@@ -67,16 +73,11 @@ def test_decide_returns_a_hint_when_the_pipeline_intervenes(client, monkeypatch)
             should_intervene=True,
             urgency="high",
         ),
-        guidance_plan=GuidancePlan(approach="직접 힌트", message_draft="인덱스를 확인해보세요"),
+        guidance_plan=GuidancePlan(approach="직접 힌트", focus="인덱스 범위"),
         action_plan=ActionPlan(action_type="send_message", payload={}),
+        tutor_message=TutorMessage(message="인덱스를 확인해보세요"),
     )
     _wire_pipeline(monkeypatch, pipeline)
-    # action_plan이 있으면 백그라운드 evaluation이 걸린다 (아래
-    # test_decide_schedules_background_evaluation_without_blocking_response 참고)
-    # — 여기서는 그게 진짜 LLM을 부르지 않게만 막는다 (응답 검증이 이 테스트의 목적).
-    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
-
-    monkeypatch.setattr(evaluation_agent_module, "evaluate", MagicMock())
 
     response = client.post("/decide", json=CONTEXT)
 
@@ -86,6 +87,8 @@ def test_decide_returns_a_hint_when_the_pipeline_intervenes(client, monkeypatch)
     assert body["state"] == "STUCK"
     assert body["concept"] == "loop"
     assert body["activity"]["message"] == "인덱스를 확인해보세요"
+    # 학생 화면에 갈 문구에 내부 판단문이 섞여 있지 않다.
+    assert "같은 오류를 반복하고 있습니다" not in body["activity"]["message"]
 
 
 def test_decide_returns_wait_when_the_pipeline_declines(client, monkeypatch) -> None:
@@ -101,52 +104,115 @@ def test_decide_returns_wait_when_the_pipeline_declines(client, monkeypatch) -> 
     assert body["activity"] is None
 
 
-def test_decide_schedules_background_evaluation_without_blocking_response(
-    client, monkeypatch
-) -> None:
-    """evaluation은 응답에 영향을 안 주지만, action_plan이 있으면 백그라운드로는
-    실제로 걸려야 한다 (완전히 빼먹은 게 아니라 "안 기다리는" 것이어야 함)."""
-    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
-    from tutor_agent.schemas import Evaluation
+def test_decide_does_not_grade_its_own_intervention(client, monkeypatch) -> None:
+    """회귀 방지: `/decide`는 evaluation을 부르지 않는다.
 
-    mock_evaluate = MagicMock(
-        return_value=Evaluation(effectiveness_score=0.9, notes="적절함", follow_up_needed=False)
-    )
-    monkeypatch.setattr(evaluation_agent_module, "evaluate", mock_evaluate)
+    예전에는 응답을 반환한 뒤 백그라운드로 "방금 내 개입이 적절했는지"를 스스로
+    채점했다 (`score=0.85 notes=매우 적절한 개입...`). 평가 대상이 틀렸고
+    (평가해야 할 것은 학생의 답변), 결과는 로그로만 남아 아무 동작도 바꾸지
+    않았다. 지금 평가는 `/respond`에서만 일어나고, 거기서는 결과가 실제로 다음
+    응답 문장을 바꾼다.
+    """
+    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
+
+    mock_evaluate = MagicMock()
+    monkeypatch.setattr(evaluation_agent_module, "evaluate_answer", mock_evaluate)
 
     pipeline = MagicMock()
     pipeline.run.return_value = PipelineResult(
         student_state=StudentState(state_summary="같은 오류 반복", should_intervene=True),
-        guidance_plan=GuidancePlan(approach="직접 힌트", message_draft="확인해보세요"),
+        guidance_plan=GuidancePlan(approach="직접 힌트"),
         action_plan=ActionPlan(action_type="send_message", payload={}),
+        tutor_message=TutorMessage(message="확인해보세요"),
     )
     _wire_pipeline(monkeypatch, pipeline)
 
     response = client.post("/decide", json=CONTEXT)
 
-    assert response.status_code == 200
-    assert response.json()["action"] == "HINT"  # 응답은 evaluation과 무관하게 즉시 나온다
-    mock_evaluate.assert_called_once()  # 그래도 백그라운드로는 실제로 호출됐다
+    assert response.json()["action"] == "HINT"
+    mock_evaluate.assert_not_called()
 
 
-def test_decide_skips_background_evaluation_when_there_is_no_action_plan(
+# --- POST /respond (학생이 답을 보낸 경로) -----------------------------------
+
+
+def _reply_result() -> ReplyResult:
+    return ReplyResult(
+        evaluation=AnswerEvaluation(
+            understanding="partial",
+            is_correct=False,
+            misconceptions=["초기화 위치를 오해"],
+            follow_up_needed=True,
+            next_focus="초기화 위치",
+        ),
+        tutor_message=TutorMessage(
+            message="0으로 두는 건 맞아요! 그 줄이 반복문 안에 있으면 어떻게 될까요?",
+            question="그 줄이 반복문 안에 있으면 어떻게 될까요?",
+            expects_reply=True,
+        ),
+    )
+
+
+def test_respond_evaluates_the_student_answer_and_returns_a_message(
     client, monkeypatch
 ) -> None:
-    """WAIT라서 action_plan이 없으면 평가할 대상 자체가 없다 — 호출하지 않는다."""
-    import tutor_agent.agents.evaluation_agent as evaluation_agent_module
-
-    mock_evaluate = MagicMock()
-    monkeypatch.setattr(evaluation_agent_module, "evaluate", mock_evaluate)
-
     pipeline = MagicMock()
-    pipeline.run.return_value = PipelineResult(
-        student_state=StudentState(state_summary="순조롭습니다", should_intervene=False),
-    )
+    pipeline.respond_to_student.return_value = _reply_result()
     _wire_pipeline(monkeypatch, pipeline)
 
-    client.post("/decide", json=CONTEXT)
+    response = client.post(
+        "/respond",
+        json={**CONTEXT, "answer": "0으로요. 반복문 안에서요.", "question": "언제 초기화해야 할까요?"},
+    )
 
-    mock_evaluate.assert_not_called()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"].startswith("0으로 두는 건 맞아요")
+    assert body["expects_reply"] is True
+    assert body["understanding"] == "partial"
+    assert body["misconceptions"] == ["초기화 위치를 오해"]
+
+    # 질문과 답변이 파이프라인까지 실제로 전달됐다.
+    _session_ctx, student_reply = pipeline.respond_to_student.call_args.args
+    assert student_reply.answer == "0으로요. 반복문 안에서요."
+    assert student_reply.question == "언제 초기화해야 할까요?"
+
+
+def test_respond_never_returns_an_empty_message_when_the_pipeline_explodes(
+    client, monkeypatch
+) -> None:
+    """학생이 말을 걸었으면 실패해도 말은 걸어준다 (WAIT=침묵으로 떨어지지 않는다)."""
+    pipeline = MagicMock()
+    pipeline.respond_to_student.side_effect = RuntimeError("LLM provider is down")
+    _wire_pipeline(monkeypatch, pipeline)
+
+    response = client.post("/respond", json={**CONTEXT, "answer": "모르겠어요"})
+
+    assert response.status_code == 200
+    assert response.json()["message"].strip()
+
+
+def test_respond_tolerates_a_minimal_body(client, monkeypatch) -> None:
+    pipeline = MagicMock()
+    pipeline.respond_to_student.return_value = _reply_result()
+    _wire_pipeline(monkeypatch, pipeline)
+
+    response = client.post("/respond", json={"answer": "0으로요"})
+
+    assert response.status_code == 200
+    assert response.json()["message"]
+
+
+def test_respond_rejects_nothing_but_still_answers_an_empty_body(client, monkeypatch) -> None:
+    """answer가 비어도 422가 아니라 사람이 읽을 수 있는 문구로 돌려준다."""
+    pipeline = MagicMock()
+    _wire_pipeline(monkeypatch, pipeline)
+
+    response = client.post("/respond", json={})
+
+    assert response.status_code == 200
+    assert response.json()["message"].strip()
+    pipeline.respond_to_student.assert_not_called()
 
 
 def test_decide_returns_wait_instead_of_500_when_the_pipeline_explodes(
