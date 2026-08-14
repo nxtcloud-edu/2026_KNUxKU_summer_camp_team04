@@ -36,7 +36,7 @@ const FEATURES = [
   {
     icon: Lightbulb,
     title: [
-      '정답 대신',
+      '정답 대신\n',
       '다음 한 걸음',
     ],
     body: [
@@ -58,7 +58,7 @@ const FEATURES = [
   {
     icon: LineChart,
     title: [
-      '결과가 아니라',
+      '결과가 아니라\n',
       '과정의 기록',
     ],
     body: [
