@@ -5,12 +5,12 @@
  * 섹션 단위 스크롤 + 색을 아끼고 한 곳(브랜드 CTA)에만 쓰기. 반응형은
  * 모바일 우선이고, 폰트/여백은 미디어쿼리 대신 clamp()로 연속적으로 커진다.
  *
- * 히어로의 다람쥐(assets/squirrel-tutor.png)가 이 페이지의 주인공이고,
+ * 히어로의 다람쥐(assets/squirrel-tutor-v2.png)가 이 페이지의 주인공이고,
  * 말풍선이 코딩 튜터 말투로 몇 문장을 돌아가며 보여준다.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Activity, ArrowRight, GraduationCap, Lightbulb, LineChart, Waypoints } from 'lucide-react'
-import squirrelTutor from './assets/squirrel-tutor.png'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
 /** 말풍선 문구. "정답을 주지 않는다"는 서비스 원칙이 말투에도 드러나야 한다.
  *  줄바꿈(\n)은 .lp-bubble의 white-space: pre-line 이 그대로 렌더한다. */
@@ -112,8 +112,8 @@ export default function LandingPage({
             className="lp-squirrel"
             src={squirrelTutor}
             alt="도토리를 든 다람쥐 튜터 캐릭터"
-            width={512}
-            height={512}
+            width={1236}
+            height={1272}
             loading="eager"
             decoding="async"
           />
