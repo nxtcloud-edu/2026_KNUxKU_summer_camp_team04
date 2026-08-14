@@ -328,3 +328,49 @@ def record_judge_result(
     db.refresh(event)
     db.refresh(session)
     return event
+
+
+# --------------------------------------------------------------------- Agent 개입
+
+
+def record_agent_intervention(
+    db: DbSession,
+    session_id: str,
+    *,
+    state: str,
+    concept: str | None,
+    action: str,
+    reason: str,
+    activity: dict[str, Any] | None,
+    trigger: str | None,
+    now: datetime | None = None,
+) -> Event:
+    """AGENT_INTERVENTION을 쓰는 유일한 경로.
+
+    `agent.decide()`가 WAIT가 **아닌** 실제 개입을 반환했을 때만 부른다 (WAIT는
+    "안 함"이라 남길 이벤트가 없다 -- AGENT_TRIGGER만으로 "Monitor가 부르긴
+    했다"는 기록은 이미 충분하다).
+
+    `app/agent/context.py::build_context()`의 `previous_interventions`가 이
+    payload에서 trigger/action/reason을 그대로 읽으므로 이 셋의 키 이름은
+    거기 맞춰 고정이다 -- 바꾸면 agent가 자기가 과거에 뭘 했는지 잊는다.
+    """
+    payload = {
+        "state": state,
+        "concept": concept,
+        "action": action,
+        "reason": reason,
+        "activity": activity,
+        "trigger": trigger,
+    }
+    event = append_event(
+        db,
+        session_id=session_id,
+        type=EventType.AGENT_INTERVENTION,
+        source=EventSource.SERVER,
+        payload=payload,
+        at=now or utcnow(),
+    )
+    db.commit()
+    db.refresh(event)
+    return event

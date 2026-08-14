@@ -26,19 +26,37 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 log = logging.getLogger(__name__)
 
+#: 어떤 전송 방식으로 파이프라인에 닿을지. `AGENT_WIRING` 환경변수로 바꾼다.
+#:
+#: * `"http"` (기본) — 별도 프로세스로 띄운 `service.py`에 HTTP로 물어본다.
+#: * `"inprocess"` — `backend_adapter.TutorAgentAdapter`를 같은 프로세스에서 쓴다.
+#:
+#: **기본값이 http인 이유**: in-process는 backend venv에 `strands-agents`가
+#: 있어야 하는데, 그게 끌어오는 `starlette 1.6.0`이 backend의
+#: `fastapi 0.115.6`(`starlette<0.42.0`)과 충돌해서 **같이 설치될 수 없다**
+#: (실제로 설치해서 backend가 깨지는 것까지 확인함). 설치하지 않으면 첫
+#: `decide()`에서 `ModuleNotFoundError: No module named 'strands'`가 나고
+#: 어댑터 폴백에 걸려 항상 WAIT만 나온다. 자세한 건 `service.py` 상단 참고.
+#:
+#: `inprocess`는 그 의존성 충돌이 해소되는 날을 위해 남겨둔다.
+DEFAULT_WIRING = "http"
 
-def install(app: Any, *, respect_setting: bool = False) -> Any:
-    """이미 만들어진 FastAPI 앱의 `get_agent` 의존성을 어댑터로 치환한다.
+
+def install(app: Any, *, respect_setting: bool = False, wiring: str | None = None) -> Any:
+    """이미 만들어진 FastAPI 앱의 `get_agent` 의존성을 tutor_agent로 치환한다.
 
     Args:
         app: backend가 만든 FastAPI 인스턴스.
         respect_setting: True면 backend 설정 `AGENT_BACKEND`가 `"llm"`일 때만
             치환한다. 기본값 False — 이 진입점을 쓴다는 것 자체가 이미
             "LLM 에이전트로 돌린다"는 의사표시라고 본다.
+        wiring: `"http"` | `"inprocess"`. None이면 `AGENT_WIRING` 환경변수,
+            그것도 없으면 `DEFAULT_WIRING`.
 
     Returns:
         같은 `app` 객체 (치환에 실패해도 앱은 그대로 반환한다 — 기동을 막지 않는다).
@@ -54,10 +72,33 @@ def install(app: Any, *, respect_setting: bool = False) -> Any:
             )
             return app
 
-        from .backend_adapter import get_backend_agent
+        mode = (wiring or os.getenv("AGENT_WIRING") or DEFAULT_WIRING).strip().lower()
 
-        app.dependency_overrides[get_agent] = get_backend_agent
-        log.info("tutor_agent.backend_adapter.TutorAgentAdapter를 get_agent에 연결했습니다.")
+        if mode == "inprocess":
+            from .backend_adapter import get_backend_agent
+
+            app.dependency_overrides[get_agent] = get_backend_agent
+            log.info("tutor_agent.backend_adapter.TutorAgentAdapter를 get_agent에 연결했습니다.")
+            return app
+
+        if mode != "http":
+            log.warning("알 수 없는 AGENT_WIRING=%r. http로 진행합니다.", mode)
+
+        from .http_client import HttpAgentClient
+
+        # 인스턴스를 여기서 한 번 만들어 재사용한다. get_agent는 요청마다 평가되는
+        # Depends라, 매번 새로 만들면 httpx 연결 풀도 매번 새로 생긴다.
+        client = HttpAgentClient()
+        app.dependency_overrides[get_agent] = lambda: client
+        log.info("tutor_agent 서비스(%s)를 get_agent에 연결했습니다.", client.base_url)
+        if not client.is_available():
+            # 치명적이지 않다 — 서비스가 나중에 떠도 되고, 그동안은 WAIT로 폴백한다.
+            log.warning(
+                "Agent 서비스(%s)가 아직 응답하지 않습니다. "
+                "`python -m uvicorn tutor_agent.service:app --port 8100`으로 띄우세요. "
+                "그때까지 개입 결정은 WAIT로 폴백합니다.",
+                client.base_url,
+            )
     except Exception:
         # 여기서 던지면 backend가 아예 기동하지 못한다. Agent 없이라도 떠야 한다.
         log.exception("tutor_agent 연결 실패. backend는 WaitAgent로 계속 동작합니다.")

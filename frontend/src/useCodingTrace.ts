@@ -17,11 +17,13 @@ import {
   MAX_EVENTS_PER_BATCH,
   beaconEvents,
   createSession,
+  getEvents,
   getSession,
   isRetriable,
   isUnauthorized,
   newEventId,
   postEvents,
+  postHeartbeat,
   type SessionInfo,
   type TraceEvent,
   type TraceEventType,
@@ -35,8 +37,29 @@ const FLUSH_BATCH_SIZE = 5
 /** flush 가 이보다 오래 걸리면 그냥 진행한다. 학생을 기다리게 하지 않는다. */
 const FLUSH_TIMEOUT_MS = 2000
 const RETRY_DELAYS_MS = [1000, 2000, 4000]
+/**
+ * 유휴 감지 하트비트 주기. backend monitor.py 의 cooldown(30초)보다 짧아야 한다 --
+ * 안 그러면 트리거 하나를 하트비트 두 틱이 나눠 쓰는 게 아니라, 한 틱이 통째로
+ * 놓치는 경우가 생긴다 (agent/README.md, backend PR #16 "실시간 유휴 감지" 참고).
+ */
+const HEARTBEAT_INTERVAL_MS = 12000
 
 const sessionKey = (problemId: string) => `codetrace:session:${problemId}`
+
+/**
+ * 하트비트가 트리거되어 서버가 백그라운드로 만든 agent 개입.
+ *
+ * `seq` 는 dedupe 용이다 -- AiTutorPanel 은 이 값이 바뀔 때만 새 채팅 메시지를 추가해야
+ * 같은 개입이 리렌더마다 다시 쌓이지 않는다.
+ */
+export type AgentIntervention = {
+  seq: number
+  state: string
+  concept: string | null
+  action: string
+  reason: string
+  activity: Record<string, unknown> | null
+}
 
 export type CodingTrace = {
   /** 편집 1건. 800ms debounce 후 CODE_SNAPSHOT 으로 큐에 들어간다. */
@@ -62,6 +85,11 @@ export type CodingTrace = {
    */
   sessionId: string
   getSessionId: () => string
+  /**
+   * 하트비트 폴링이 방금 받아온 agent 개입. 학생이 가만히 있어서(제출 없이) 서버가
+   * 스스로 발견한 힌트다 -- 아직 안 왔거나 새로 볼 게 없으면 null.
+   */
+  intervention: AgentIntervention | null
 }
 
 export type CodingTraceOptions = {
@@ -81,6 +109,13 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
   const [sessionId, setSessionId] = useState('')
   const sessionIdRef = useRef('')
   const inFlightSessionRef = useRef<Promise<string> | null>(null)
+  const [intervention, setIntervention] = useState<AgentIntervention | null>(null)
+  // 폴링이 마지막으로 본 이벤트 seq. 세션이 바뀌면 리셋한다 -- 남의(또는 이전) 세션의
+  // seq 를 기준으로 두면 새 세션의 이벤트를 전부 "새 것"으로 오인하거나 놓친다.
+  const lastSeenEventSeqRef = useRef(0)
+  // 세션당 첫 폴링은 baseline 만 맞춘다. 안 그러면 새로고침 복구 직후, 예전에 이미
+  // (submit 응답으로) 봤던 AGENT_INTERVENTION 을 "새 개입"으로 다시 띄워버린다.
+  const primedRef = useRef(false)
   const queueRef = useRef<TraceEvent[]>([])
   const pendingCodeRef = useRef<string | null>(null)
   const debounceTimerRef = useRef<number | null>(null)
@@ -98,6 +133,8 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
     inFlightSessionRef.current = null
     queueRef.current = []
     pendingCodeRef.current = null
+    // 이전 문제/세션의 개입이 새 세션의 튜터 패널에 새로 온 것처럼 남으면 안 된다.
+    setIntervention(null)
     if (debounceTimerRef.current !== null) {
       window.clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = null
@@ -257,6 +294,64 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
     }
   }, [send])
 
+  // 실시간 유휴 감지 하트비트 + 개입 폴링 (backend PR #16 "실시간 유휴 감지 하트비트").
+  //
+  // 세션이 아직 없으면 아무것도 하지 않는다 -- 하트비트가 세션을 만들지는 않는다
+  // (문제를 구경만 하고 떠난 학생의 세션이 쌓이면 안 된다는 원칙은 ensureSession과 같다).
+  useEffect(() => {
+    if (!active || !sessionId) return
+
+    lastSeenEventSeqRef.current = 0
+    primedRef.current = false
+    let cancelled = false
+
+    const pollEvents = async () => {
+      try {
+        const result = await getEvents(sessionId, lastSeenEventSeqRef.current)
+        if (cancelled) return
+        // 첫 폴링은 baseline 만 맞춘다 (위 primedRef 주석 참고).
+        if (primedRef.current) {
+          const latest = [...result.events].reverse().find((e) => e.type === 'AGENT_INTERVENTION')
+          if (latest) {
+            setIntervention({
+              seq: latest.seq,
+              state: typeof latest.payload.state === 'string' ? latest.payload.state : '',
+              concept: typeof latest.payload.concept === 'string' ? latest.payload.concept : null,
+              action: typeof latest.payload.action === 'string' ? latest.payload.action : '',
+              reason: typeof latest.payload.reason === 'string' ? latest.payload.reason : '',
+              activity:
+                latest.payload.activity && typeof latest.payload.activity === 'object'
+                  ? (latest.payload.activity as Record<string, unknown>)
+                  : null,
+            })
+          }
+        }
+        primedRef.current = true
+        lastSeenEventSeqRef.current = Math.max(lastSeenEventSeqRef.current, result.last_event_seq)
+      } catch (error) {
+        console.warn('agent 개입 이벤트 폴링 실패. 다음 주기에 재시도합니다.', error)
+      }
+    }
+
+    const beat = async () => {
+      try {
+        await postHeartbeat(sessionId)
+      } catch (error) {
+        // 하트비트 실패는 학생 작업에 영향이 없다 -- 다음 틱에 다시 시도한다.
+        console.warn('하트비트 전송 실패.', error)
+      }
+      if (!cancelled) await pollEvents()
+    }
+
+    // baseline 을 즉시 잡는다 -- 첫 하트비트까지 12초를 그냥 흘려보내지 않는다.
+    void pollEvents()
+    const timer = window.setInterval(() => void beat(), HEARTBEAT_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [active, sessionId])
+
   const recordEdit = useCallback(
     (code: string) => {
       if (!activeRef.current) return
@@ -309,5 +404,5 @@ export function useCodingTrace(problemId: string | null, options: CodingTraceOpt
 
   const getSessionId = useCallback(() => sessionIdRef.current, [])
 
-  return { recordEdit, recordEvent, flush, ensureSession, resume, sessionId, getSessionId }
+  return { recordEdit, recordEvent, flush, ensureSession, resume, sessionId, getSessionId, intervention }
 }

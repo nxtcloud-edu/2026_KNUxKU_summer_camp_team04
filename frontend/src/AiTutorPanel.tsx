@@ -3,6 +3,7 @@ import { MessageCircle, Send, Sparkles } from 'lucide-react'
 import AcornIcon from './AcornIcon'
 import squirrelTutor from './assets/squirrel-tutor-v2.png'
 import { decideTutorHelp, type AgentDecision, type JudgeResult, type ProblemDetail } from './problemService'
+import type { AgentIntervention } from './useCodingTrace'
 
 type AiTutorPanelProps = {
   problem: ProblemDetail | null
@@ -18,6 +19,13 @@ type AiTutorPanelProps = {
    * useCodingTrace)이 기록해야 다른 이벤트와의 순서가 보장되고 재시도도 얻는다.
    */
   onHintRequest?: () => void
+  /**
+   * 학생이 제출 없이 가만히 있어서(유휴) 하트비트가 백그라운드로 받아온 개입.
+   *
+   * `seq` 가 바뀔 때만 새 채팅 메시지로 추가한다 -- useCodingTrace 의 하트비트
+   * 폴링이 몇 초마다 도므로, 같은 개입을 매 폴링마다 다시 쌓으면 안 된다.
+   */
+  intervention?: AgentIntervention | null
 }
 
 type ChatMessage = {
@@ -31,7 +39,7 @@ type TutorOffer = 'idle' | 'asking' | 'dismissed'
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
-function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest }: AiTutorPanelProps) {
+function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated, onRequireLogin, onHintRequest, intervention }: AiTutorPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [offerState, setOfferState] = useState<TutorOffer>('idle')
   const [nextMessageId, setNextMessageId] = useState(1)
@@ -59,6 +67,18 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     setMessages((current) => [...current, { id: nextMessageId, sender, text }])
     setNextMessageId((current) => current + 1)
   }
+
+  // 유휴 하트비트가 받아온 개입을 튜터가 먼저 말 거는 것처럼 채팅에 얹는다.
+  // seq 로 dedupe 한다 -- intervention 객체 참조는 폴링마다 새로 만들어지지만
+  // 같은 개입이면 seq 가 같으므로, ref 로 "이미 보여준 seq"를 기억해 중복을 막는다.
+  const shownInterventionSeqRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!intervention) return
+    if (shownInterventionSeqRef.current === intervention.seq) return
+    shownInterventionSeqRef.current = intervention.seq
+    addMessage('tutor', formatAgentDecision(intervention))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervention])
 
   const acceptOffer = () => {
     addMessage('student', '네, 도움이 필요해요.')

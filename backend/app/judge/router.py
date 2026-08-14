@@ -14,7 +14,7 @@ from sqlmodel import Session as DbSession
 from app.agent import AgentProtocol, get_agent
 from app.agent.context import build_context
 from app.clock import utcnow
-from app.enums import EventSource
+from app.enums import AgentAction, EventSource
 from app.errors import InvalidCodeVersion, SnapshotNotFound
 from app.judge import JudgeMode, JudgeProtocol, get_judge
 from app.auth.deps import get_current_user
@@ -125,6 +125,26 @@ def _execute(
                 reason=d.reason,
                 activity=d.activity,
             )
+            # WAIT는 "안 함"이라 남길 이벤트가 없다. 실제 개입만 AGENT_INTERVENTION으로
+            # 남겨서 (1) 프론트가 GET /events 폴링으로 힌트를 받을 수 있게 하고
+            # (2) build_context()의 previous_interventions가 다음 판단에 참고할 수 있게 한다.
+            # 여기서 실패해도 이미 만든 decision은 그대로 반환한다 -- 기록 실패가
+            # 학생이 받는 힌트를 막으면 안 된다.
+            if d.action is not AgentAction.WAIT:
+                try:
+                    trace_service.record_agent_intervention(
+                        db,
+                        session_id,
+                        state=d.state,
+                        concept=d.concept,
+                        action=d.action.value,
+                        reason=d.reason,
+                        activity=d.activity,
+                        trigger=state.trigger.value if state.trigger else None,
+                        now=now,
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("agent intervention 기록 실패 (session=%s)", session_id)
         except Exception:  # noqa: BLE001
             log.exception("agent decide 실패 (session=%s)", session_id)
 

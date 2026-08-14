@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from sqlalchemy.engine import Engine
 from sqlmodel import Session as DbSession
 
 from app.agent import AgentProtocol, get_agent
 from app.agent.context import build_context
 from app.clock import to_naive_utc, utcnow
 from app.auth.deps import get_current_user
-from app.db import get_db
-from app.enums import SessionStatus
+from app.db import get_db, get_engine
+from app.enums import AgentAction, SessionStatus
 from app.models import User
 from app.errors import SnapshotNotFound
 from app.problems.service import ProblemRepository, get_problem_repository
@@ -110,6 +112,97 @@ def post_events(
         # 아무도 안 볼 데이터 위생과 맞바꿔 무대에 빨간 배너를 띄울 이유가 없다.
         session_finished=SessionStatus(session.status) is SessionStatus.FINISHED,
     )
+
+
+@router.post(
+    "/sessions/{session_id}/heartbeat",
+    response_model=ProcessStateResponse,
+)
+def heartbeat(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+    repo: ProblemRepository = Depends(get_problem_repository),
+    agent: AgentProtocol = Depends(get_agent),
+    engine: Engine = Depends(get_engine),
+) -> ProcessStateResponse:
+    """실시간 유휴 감지용 하트비트. 프론트가 활동 여부와 무관하게 몇 초마다 부른다.
+
+    **왜 필요한가.** `POST /events`는 보낼 이벤트가 없으면 프론트가 아예 안 부른다
+    (`traceClient.postEvents`가 빈 배치를 걸러낸다). 그래서 학생이 코드를 안 만지고
+    가만히 있는 바로 그 상황(유휴 90초 = R7 NO_PROGRESS)에서는 Monitor가 재평가될
+    계기 자체가 없었다 -- 다음 제출 때가 돼서야 "그동안 90초 지났네"를 계산했다.
+    이 엔드포인트가 그 계기를 만든다.
+
+    **`GET /process-state`와 다른 점.** 그건 읽기 전용(`evaluate()`만, cooldown을
+    안 쓴다 -- monitor.py 상단 docstring 참고)이라 데모 패널이 자유롭게 폴링해도
+    안전하지만, 트리거돼도 agent를 부르지 않는다. 이 엔드포인트는 POST라 실제로
+    기록하고(`evaluate_and_record()`, AGENT_TRIGGER 이벤트 + cooldown 갱신) 트리거되면
+    agent도 부른다 -- 그래서 하트비트 간격은 cooldown보다 촘촘하면 안 된다(같은
+    트리거를 두 번 소진하지 않게).
+
+    **agent 호출은 응답에 안 실린다.** `agent.decide()`가 최대 16~18초 걸리는데
+    (agent/README.md "지연 시간" 참고), 몇 초마다 오는 하트비트를 그만큼씩 막으면
+    하트비트가 무의미해진다. 트리거되면 `background_tasks`로 넘기고 즉시 응답한다.
+    결과는 WAIT가 아닐 때만 `AGENT_INTERVENTION` 이벤트로 남으므로, 프론트는
+    `GET /sessions/{id}/events?since_seq=...`를 폴링해서 새 이벤트로 힌트를 받는다.
+    """
+    session = store.require_session(db, session_id, user_id=user.id)
+    now = utcnow()
+    state = monitor.evaluate_and_record(db, session, now=now)
+    db.commit()
+
+    if state.triggered:
+        background_tasks.add_task(
+            _run_agent_in_background, session_id, repo, agent, state, now, engine
+        )
+
+    return _state_response(session_id, state)
+
+
+def _run_agent_in_background(
+    session_id: str,
+    repo: ProblemRepository,
+    agent: AgentProtocol,
+    state: monitor.ProcessState,
+    now: datetime,
+    engine: Engine,
+) -> None:
+    """하트비트가 트리거를 감지했을 때 agent를 부르고, WAIT가 아니면 기록한다.
+
+    응답이 이미 나간 뒤 실행되므로 여기서 얼마나 걸리든(agent 서비스가 LLM
+    파이프라인을 도는 중이라도) 학생은 기다리지 않는다.
+
+    **새 DB 세션을 직접 연다.** `Depends(get_db)`로 받은 요청 스코프 세션은
+    응답이 나가면 닫혀서(`app/db.py::get_db`) 백그라운드에서 재사용할 수 없다.
+    `engine`은 (직접 `get_engine()`을 부르지 않고) `Depends(get_engine)`으로
+    받는다 -- 테스트가 `app.dependency_overrides[get_db]`로 인메모리 DB를
+    꽂아도, 이 함수가 `get_engine()`을 직접 호출하면 그 override를 못 보고
+    **실제 DB 파일**에 접근해버린다 (`app.dependency_overrides`는 FastAPI의
+    `Depends` 해석에만 적용되고, 일반 함수 호출은 안 거친다). `engine`도
+    같은 방식으로 주입받으면 테스트에서 `get_engine`까지 override해서 완전히
+    격리할 수 있다. `repo`/`agent`는 상태가 없거나(파일 읽기, httpx 연결 풀)
+    재사용이 안전해서 그대로 넘겨 받는다.
+    """
+    try:
+        with DbSession(engine) as db:
+            ctx = build_context(db, session_id, repo, state=state, now=now)
+            d = agent.decide(ctx)
+            if d.action is not AgentAction.WAIT:
+                trace_service.record_agent_intervention(
+                    db,
+                    session_id,
+                    state=d.state,
+                    concept=d.concept,
+                    action=d.action.value,
+                    reason=d.reason,
+                    activity=d.activity,
+                    trigger=state.trigger.value if state.trigger else None,
+                    now=now,
+                )
+    except Exception:  # noqa: BLE001
+        log.exception("하트비트 백그라운드 agent 처리 실패 (session=%s)", session_id)
 
 
 @router.get("/sessions/{session_id}/events", response_model=EventListResponse)

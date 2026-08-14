@@ -36,19 +36,63 @@ def _fake_backend(monkeypatch, *, agent_backend: str = "none"):
     return get_agent
 
 
-def test_install_overrides_get_agent_with_the_adapter(monkeypatch) -> None:
+def _silence_health_check(monkeypatch) -> None:
+    """`install`의 기동 헬스체크가 테스트에서 실제 네트워크를 건드리지 않게 한다."""
+    from tutor_agent.http_client import HttpAgentClient
+
+    monkeypatch.setattr(HttpAgentClient, "is_available", lambda self: True)
+
+
+def test_install_overrides_get_agent_with_the_http_client(monkeypatch) -> None:
+    """기본 배선은 HTTP다 (in-process는 starlette 의존성 충돌로 쓸 수 없다 —
+    `backend_entry.DEFAULT_WIRING` 주석 참고)."""
     get_agent = _fake_backend(monkeypatch)
+    _silence_health_check(monkeypatch)
     app = SimpleNamespace(dependency_overrides={})
 
     returned = backend_entry.install(app)
 
     assert returned is app
     # backend의 get_agent 함수 객체가 키다 — FastAPI Depends(get_agent)와 같은 객체.
+    assert app.dependency_overrides[get_agent]().name == "tutor_agent_http"
+
+
+def test_install_reuses_one_client_across_requests(monkeypatch) -> None:
+    """get_agent는 요청마다 평가되는 Depends다. 매번 새 클라이언트를 만들면
+    httpx 연결 풀이 매번 새로 생긴다."""
+    get_agent = _fake_backend(monkeypatch)
+    _silence_health_check(monkeypatch)
+    app = SimpleNamespace(dependency_overrides={})
+
+    backend_entry.install(app)
+    factory = app.dependency_overrides[get_agent]
+
+    assert factory() is factory()
+
+
+def test_install_can_still_wire_in_process(monkeypatch) -> None:
+    """의존성 충돌이 해소되면 쓸 수 있도록 in-process 경로도 남아 있다."""
+    get_agent = _fake_backend(monkeypatch)
+    app = SimpleNamespace(dependency_overrides={})
+
+    backend_entry.install(app, wiring="inprocess")
+
     assert app.dependency_overrides[get_agent] is get_backend_agent
     assert app.dependency_overrides[get_agent]().name == "tutor_agent"
 
 
+def test_install_reads_wiring_from_env(monkeypatch) -> None:
+    get_agent = _fake_backend(monkeypatch)
+    monkeypatch.setenv("AGENT_WIRING", "inprocess")
+    app = SimpleNamespace(dependency_overrides={})
+
+    backend_entry.install(app)
+
+    assert app.dependency_overrides[get_agent] is get_backend_agent
+
+
 def test_install_can_respect_agent_backend_setting(monkeypatch) -> None:
+    _silence_health_check(monkeypatch)
     get_agent = _fake_backend(monkeypatch, agent_backend="none")
     app = SimpleNamespace(dependency_overrides={})
 

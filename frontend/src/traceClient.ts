@@ -92,6 +92,47 @@ export async function postEvents(sessionId: string, events: TraceEvent[]): Promi
   return null
 }
 
+/** 서버가 GET /events 로 돌려주는 이벤트 한 건. 클라이언트가 보내는 TraceEvent 와는 반대 방향. */
+export type TraceEventRead = {
+  seq: number
+  type: string
+  payload: Record<string, unknown>
+}
+
+export type EventListResult = {
+  events: TraceEventRead[]
+  last_event_seq: number
+}
+
+function normalizeEventListResult(payload: unknown): EventListResult {
+  const events = isObject(payload) && Array.isArray(payload.events)
+    ? payload.events.flatMap((item): TraceEventRead[] => {
+      if (!isObject(item) || typeof item.seq !== 'number' || typeof item.type !== 'string') return []
+      return [{ seq: item.seq, type: item.type, payload: isObject(item.payload) ? item.payload : {} }]
+    })
+    : []
+  const last_event_seq = isObject(payload) && typeof payload.last_event_seq === 'number' ? payload.last_event_seq : 0
+  return { events, last_event_seq }
+}
+
+/** `since_seq` 뒤에 쌓인 이벤트를 가져온다. 하트비트 폴링이 `AGENT_INTERVENTION` 을 찾는 용도. */
+export async function getEvents(sessionId: string, sinceSeq: number): Promise<EventListResult> {
+  return normalizeEventListResult(
+    await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/events?since_seq=${sinceSeq}`),
+  )
+}
+
+/**
+ * 실시간 유휴 감지용 하트비트. 활동 여부와 무관하게 몇 초마다 호출한다.
+ *
+ * 응답에 agent 의 힌트는 안 실린다(트리거되면 서버가 백그라운드로 넘긴다) --
+ * 힌트는 이후의 `getEvents` 폴링이 `AGENT_INTERVENTION` 이벤트로 받아온다.
+ * 그래서 여기서는 성공 여부만 신경 쓰면 되고, 실패해도 학생 작업에 영향이 없다.
+ */
+export async function postHeartbeat(sessionId: string): Promise<void> {
+  await apiRequest<unknown>(`/sessions/${encodeURIComponent(sessionId)}/heartbeat`, { method: 'POST' })
+}
+
 /**
  * 채점. `POST /sessions/{id}/run|submit` 하나가
  * **스냅샷 생성 → 채점 → TEST_RESULT 기록 → monitor 평가**를 전부 한다.

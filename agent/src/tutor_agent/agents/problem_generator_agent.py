@@ -45,6 +45,9 @@ SYSTEM_PROMPT = """\
    같은 개념을 다른 맥락/각도로 연습하게 하세요.
 4. public/hidden 테스트케이스를 골고루 섞고, 경계값(0, 음수, 최댓값 등)을
    최소 하나는 hidden으로 포함하세요.
+5. test_case_inputs는 4~8개면 충분합니다. 절대 문자열이 아니라 JSON 배열이어야
+   하고, `range(...)`나 리스트 컴프리헨션 같은 파이썬 표현식을 쓰면 안 됩니다 —
+   각 원소를 실제 값으로 하나씩 직접 쓰세요.
 """
 
 
@@ -67,16 +70,30 @@ def generate(request: ReviewRequest, agent: Agent | None = None) -> ValidationRe
 
     report: ValidationReport | None = None
     for attempt in range(MAX_RETRIES + 1):
-        template: ProblemTemplate = agent.structured_output(ProblemTemplate, prompt)
-        report = validate_template(template)
+        try:
+            template: ProblemTemplate = agent.structured_output(ProblemTemplate, prompt)
+        except Exception as exc:
+            # 실제로 관찰된 실패 모드: LLM이 test_case_inputs를 리스트가 아니라
+            # (파이썬 range() 표현식이 섞인) 문자열로 반환해 Pydantic 검증 자체가
+            # 여기서 터짐. judge 검증 실패와 동일하게 재시도 피드백으로 돌린다 —
+            # 이걸 안 잡으면 generate()가 그냥 예외로 죽어서 재시도 루프가 무의미해짐.
+            report = ValidationReport(
+                is_valid=False,
+                error_message=f"LLM 응답이 ProblemTemplate 스키마에 맞지 않습니다: {exc}",
+            )
+        else:
+            report = validate_template(template)
+
         if report.is_valid:
             return report
 
         prompt = (
-            f"방금 만든 문제가 judge 검증에서 실패했습니다 (시도 {attempt + 1}/{MAX_RETRIES + 1}).\n"
+            f"방금 만든 문제가 검증에서 실패했습니다 (시도 {attempt + 1}/{MAX_RETRIES + 1}).\n"
             f"실패 이유: {report.error_message}\n"
             f"실패한 테스트케이스: {report.failed_categories}\n\n"
-            "위 이유를 참고해서 reference_solution과 문제를 다시 만드세요.\n\n"
+            "위 이유를 참고해서 reference_solution과 문제를 다시 만드세요. "
+            "test_case_inputs는 반드시 JSON 배열이어야 하며, 문자열로 감싸거나 "
+            "range()처럼 파이썬 표현식을 쓰면 안 됩니다.\n\n"
             f"원래 요청:\n{request.model_dump_json(indent=2)}"
         )
 

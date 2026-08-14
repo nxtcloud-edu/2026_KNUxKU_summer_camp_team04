@@ -446,26 +446,45 @@ class TutorAgentAdapter:
 
     def decide(self, ctx: Any) -> AgentDecision:
         """backend가 부르는 단일 진입점. **어떤 경우에도 예외를 던지지 않는다.**"""
+        decision, _result = self.decide_with_pipeline_result(ctx)
+        return decision
+
+    def decide_with_pipeline_result(self, ctx: Any) -> tuple[AgentDecision, Any | None]:
+        """`decide()`와 완전히 같은 로직 + 중간 `PipelineResult`도 같이 반환한다.
+
+        `service.py`가 evaluation을 백그라운드로 돌리려면(응답을 그걸로 늦추지
+        않으려면) 이 결정이 어떤 `action_plan`/`SessionContext`에서 나왔는지가
+        필요한데, `decide()`는 최종 `AgentDecision`만 반환해서 그 중간 값에
+        접근할 수 없었다. `decide()`는 이 메서드를 감싸기만 하므로 동작은
+        완전히 동일하다 (기존 테스트 그대로 통과).
+
+        Returns:
+            `(decision, session_ctx)` 튜플. 실패 지점에 따라 두 번째 값은
+            `to_session_context()`가 성공했을 때만 채워지고, 그 전에 실패하면
+            `None`이다 (그 경우 애초에 evaluation을 돌릴 근거 자체가 없다).
+        """
         try:
             session_ctx = to_session_context(ctx)
         except Exception:
             log.exception("backend AgentContext 변환 실패. WAIT로 폴백합니다.")
-            return _wait_decision(
-                ctx, "세션 컨텍스트를 해석하지 못해 개입하지 않고 기다립니다."
+            return (
+                _wait_decision(ctx, "세션 컨텍스트를 해석하지 못해 개입하지 않고 기다립니다."),
+                None,
             )
 
         try:
             result = self._get_pipeline().run(session_ctx, skip_gate=self._skip_gate)
         except Exception:
             log.exception("tutor_agent 파이프라인 실행 실패. WAIT로 폴백합니다.")
-            return _wait_decision(ctx, WAIT_REASON_FALLBACK)
+            return _wait_decision(ctx, WAIT_REASON_FALLBACK), None
 
         try:
-            return to_agent_decision(result, ctx)
+            return to_agent_decision(result, ctx), (session_ctx, result)
         except Exception:
             log.exception("PipelineResult 변환 실패. WAIT로 폴백합니다.")
-            return _wait_decision(
-                ctx, "Agent 결과를 해석하지 못해 개입하지 않고 기다립니다."
+            return (
+                _wait_decision(ctx, "Agent 결과를 해석하지 못해 개입하지 않고 기다립니다."),
+                None,
             )
 
 
