@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   Award,
-  BarChart3,
   BadgeCheck,
   CalendarDays,
   Check,
@@ -21,6 +20,7 @@ import badgeSapling from './assets/badges/badge-sapling.png'
 import badgeOak from './assets/badges/badge-oak.png'
 import badgeGuardian from './assets/badges/badge-guardian.png'
 import badgeLegend from './assets/badges/badge-legend.png'
+import squirrelTutor from './assets/squirrel-tutor-v2.png'
 
 type Profile = {
   nickname: string
@@ -40,6 +40,10 @@ type MyPageProps = {
   onAvatarChange?: (avatar: string) => void
   onProblemSelect?: (problemId: string) => void
 }
+
+type ProfileConfirmAction =
+  | { type: 'nickname'; cost: number; nickname: string }
+  | { type: 'avatar'; cost: number; file: File }
 
 const PROFILE_KEY = 'tutory:profile'
 const NICKNAME_COST = 5
@@ -66,12 +70,12 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [draftNickname, setDraftNickname] = useState(profile.nickname)
   const [message, setMessage] = useState('')
+  const [confirmAction, setConfirmAction] = useState<ProfileConfirmAction | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const learningProgress = useMemo(() => getAllLearningProgress(), [])
   const inProgressProblems = learningProgress.filter((item) => item.status === 'IN_PROGRESS')
   const completedProblems = learningProgress.filter((item) => item.status === 'COMPLETED')
   const learningStreak = useMemo(() => calculateLearningStreak(learningProgress), [learningProgress])
-  const dailySolvedStats = useMemo(() => buildDailySolvedStats(learningProgress), [learningProgress])
   const recentWrongHint = useMemo(() => getRecentWrongHint(), [])
 
   const currentBadge = useMemo(
@@ -106,8 +110,7 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
       return
     }
     if (!canSpendAcorns(NICKNAME_COST)) return
-    updateProfile({ ...profile, nickname: nextNickname, acorns: profile.acorns - NICKNAME_COST })
-    setMessage(`닉네임이 변경됐어요. 도토리 ${NICKNAME_COST}개를 사용했습니다.`)
+    setConfirmAction({ type: 'nickname', cost: NICKNAME_COST, nickname: nextNickname })
   }
 
   const uploadAvatar = (event: ChangeEvent<HTMLInputElement>) => {
@@ -117,15 +120,34 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
       event.target.value = ''
       return
     }
+    setConfirmAction({ type: 'avatar', cost: AVATAR_COST, file })
+    event.target.value = ''
+  }
 
+  const confirmProfileAction = () => {
+    if (!confirmAction) return
+    if (!canSpendAcorns(confirmAction.cost)) {
+      setConfirmAction(null)
+      return
+    }
+    if (confirmAction.type === 'nickname') {
+      updateProfile({ ...profile, nickname: confirmAction.nickname, acorns: profile.acorns - confirmAction.cost })
+      setMessage(`닉네임이 변경됐어요. 도토리 ${confirmAction.cost}개를 사용했습니다.`)
+      setConfirmAction(null)
+      return
+    }
+
+    const file = confirmAction.file
     const reader = new FileReader()
     reader.onload = () => {
-      updateProfile({ ...profile, avatar: String(reader.result), acorns: profile.acorns - AVATAR_COST })
-      setMessage(`프로필 사진이 변경됐어요. 도토리 ${AVATAR_COST}개를 사용했습니다.`)
-      event.target.value = ''
+      updateProfile({ ...profile, avatar: String(reader.result), acorns: profile.acorns - confirmAction.cost })
+      setMessage(`프로필 사진이 변경됐어요. 도토리 ${confirmAction.cost}개를 사용했습니다.`)
+      setConfirmAction(null)
     }
     reader.readAsDataURL(file)
   }
+
+  const closeProfileConfirm = () => setConfirmAction(null)
 
   return (
     <main className="mypage">
@@ -226,10 +248,13 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
             </div>
             <div className="wrong-hint">
               {recentWrongHint ? (
-                <>
-                  <span>{recentWrongHint.problemTitle}</span>
-                  <p>{recentWrongHint.hint}</p>
-                </>
+                <div className="wrong-hint-chat">
+                  <img src={squirrelTutor} alt="" />
+                  <div>
+                    <span>{recentWrongHint.problemTitle}</span>
+                    <p>{recentWrongHint.hint}</p>
+                  </div>
+                </div>
               ) : (
                 <>
                   <span>최근 오답 기록 없음</span>
@@ -238,14 +263,6 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
               )}
             </div>
           </div>
-        </section>
-
-        <section className="mypage-panel daily-solved-panel">
-          <div className="mypage-panel-title">
-            <BarChart3 size={17} />
-            <strong>일자별 완료 문제</strong>
-          </div>
-          <DailySolvedChart stats={dailySolvedStats} />
         </section>
 
         <section className="mypage-grid learning-history-grid">
@@ -265,6 +282,32 @@ function MyPage({ onAvatarChange, onProblemSelect }: MyPageProps) {
           </div>
         </section>
       </div>
+      {confirmAction && (
+        <div className="profile-confirm-backdrop" role="presentation" onMouseDown={closeProfileConfirm}>
+          <div className="profile-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="profile-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+            <span className="profile-confirm-icon">
+              <AcornIcon size={25} />
+            </span>
+            <span className="section-kicker">ACORN CHECK</span>
+            <h2 id="profile-confirm-title">
+              도토리 {confirmAction.cost}개를 사용해 {confirmAction.type === 'nickname' ? '닉네임을 수정' : '프로필 사진을 업로드'}하시겠습니까?
+            </h2>
+            <p>
+              {confirmAction.type === 'nickname'
+                ? `"${confirmAction.nickname}"으로 닉네임이 변경됩니다.`
+                : `${confirmAction.file.name} 파일로 프로필 사진이 변경됩니다.`}
+            </p>
+            <div className="profile-confirm-wallet">
+              <AcornIcon size={15} />
+              <span>현재 보유 도토리 {profile.acorns}개</span>
+            </div>
+            <div className="profile-confirm-actions">
+              <button className="modal-secondary-button" type="button" onClick={closeProfileConfirm}>아니요</button>
+              <button className="modal-primary-button" type="button" onClick={confirmProfileAction}>네</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -298,36 +341,6 @@ function LearningProblemList({ problems, emptyMessage, onSelect }: { problems: L
         </div>
       )}
     </>
-  )
-}
-
-function DailySolvedChart({ stats }: { stats: DailySolvedStat[] }) {
-  const maxCount = Math.max(1, ...stats.map((item) => item.count))
-  const total = stats.reduce((sum, item) => sum + item.count, 0)
-
-  return (
-    <div className="daily-solved-chart">
-      <div className="daily-chart-summary">
-        <span>최근 7일 완료</span>
-        <strong>{total}문제</strong>
-      </div>
-      <div className="daily-chart-bars" aria-label="최근 7일 일자별 완료 문제 수">
-        {stats.map((item) => (
-          <div className="daily-chart-day" key={item.key}>
-            <div className="daily-chart-bar-wrap">
-              <span
-                className={item.count > 0 ? 'has-count' : ''}
-                style={{ height: `${Math.max(8, (item.count / maxCount) * 100)}%` }}
-                aria-label={`${item.label} ${item.count}문제 완료`}
-              />
-            </div>
-            <strong>{item.count}</strong>
-            <small>{item.label}</small>
-          </div>
-        ))}
-      </div>
-      <p>완료한 문제의 저장 시각을 기준으로 집계해요.</p>
-    </div>
   )
 }
 
@@ -372,35 +385,6 @@ function calculateLearningStreak(progress: LearningProgress[]) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
-
-type DailySolvedStat = {
-  key: string
-  label: string
-  count: number
-}
-
-function buildDailySolvedStats(progress: LearningProgress[]): DailySolvedStat[] {
-  const today = startOfTodayTime()
-  const counts = new Map<number, number>()
-
-  progress
-    .filter((item) => item.status === 'COMPLETED')
-    .forEach((item) => {
-      const day = toLearningDayTime(item.completedAt ?? item.updatedAt)
-      if (day === null) return
-      counts.set(day, (counts.get(day) ?? 0) + 1)
-    })
-
-  return Array.from({ length: 7 }, (_, index) => {
-    const dayTime = today - (6 - index) * DAY_MS
-    const date = new Date(dayTime)
-    return {
-      key: date.toISOString(),
-      label: new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(date),
-      count: counts.get(dayTime) ?? 0,
-    }
-  })
-}
 
 function startOfTodayTime() {
   const now = new Date()

@@ -29,6 +29,11 @@ type ChatMessage = {
 
 type TutorOffer = 'idle' | 'asking' | 'dismissed'
 
+type PendingAutoHelp = {
+  message: string
+  expectsReply: boolean
+}
+
 const PROFILE_KEY = 'tutory:profile'
 const SOS_COST = 3
 
@@ -41,6 +46,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const [sosIntroVisible, setSosIntroVisible] = useState(false)
   const [draft, setDraft] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [pendingAutoHelp, setPendingAutoHelp] = useState<PendingAutoHelp | null>(null)
   // 튜터가 질문을 던져 답을 기다리는 중인지. 입력창 placeholder 만 바꾼다 --
   // 입력 자체는 항상 열어 둔다 (학생이 먼저 묻고 싶을 수도 있다).
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
@@ -52,9 +58,10 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
   const tutorHint = useMemo(() => makeTutorHint(problem, result, judgeError), [problem, result, judgeError])
 
   useEffect(() => {
+    if (pendingAutoHelp) return
     if (shouldOfferHelp && offerState === 'idle') setOfferState('asking')
     if (!shouldOfferHelp && offerState !== 'idle') setOfferState('idle')
-  }, [offerState, shouldOfferHelp])
+  }, [offerState, pendingAutoHelp, shouldOfferHelp])
 
   useEffect(() => {
     const chatThread = chatThreadRef.current
@@ -94,8 +101,11 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
       immediateInterventionMessageRef.current = null
       return
     }
-    addMessage('tutor', message)
-    setAwaitingAnswer(intervention.activity?.expects_reply === true)
+    setPendingAutoHelp({
+      message,
+      expectsReply: intervention.activity?.expects_reply === true,
+    })
+    setOfferState('asking')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervention])
 
@@ -119,6 +129,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     setDraft('')
     setIsSending(true)
     addMessage('student', answer)
+    setPendingAutoHelp(null)
     setOfferState('dismissed')
 
     try {
@@ -144,12 +155,17 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
 
   const acceptOffer = () => {
     addMessage('student', '네, 도움이 필요해요.')
-    addMessage('tutor', tutorHint)
+    const help = pendingAutoHelp ?? { message: tutorHint, expectsReply: false }
+    addMessage('tutor', help.message)
+    setAwaitingAnswer(help.expectsReply)
+    setPendingAutoHelp(null)
     setOfferState('dismissed')
   }
 
   const declineOffer = () => {
     addMessage('student', '아니요. 조금 더 해볼게요.')
+    setPendingAutoHelp(null)
+    setAwaitingAnswer(false)
     setOfferState('dismissed')
   }
 
@@ -187,6 +203,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
       if (help.interventionMessage) immediateInterventionMessageRef.current = help.interventionMessage
       addMessage('tutor', help.message)
       setAwaitingAnswer(help.expectsReply)
+      setPendingAutoHelp(null)
       setOfferState('dismissed')
       setSosConfirmOpen(false)
       setSosError('')
@@ -199,7 +216,7 @@ function AiTutorPanel({ problem, result, judgeError, sessionId, isAuthenticated,
     <div className="tutor-help-offer hero-squirrel">
       <img src={squirrelTutor} alt="" />
       <div>
-        <p>도움이 필요한가요?</p>
+        <p>도움이 필요하신가요?</p>
         <div>
           <button type="button" onClick={isAuthenticated ? acceptOffer : onRequireLogin}>네</button>
           <button type="button" onClick={declineOffer}>아니요</button>

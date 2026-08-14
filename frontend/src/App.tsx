@@ -666,13 +666,9 @@ function buildJudgeMessage(execution: Awaited<ReturnType<typeof runPython>>) {
 }
 
 function makeRecentWrongHint(result: JudgeResult) {
-  if (result.agent_decision?.reason) return result.agent_decision.reason
-  if (result.message) return result.message
-  if (result.status === 'SYNTAX_ERROR') return '문법 오류가 있어요. 괄호, 콜론(:), 들여쓰기 위치를 먼저 확인해보세요.'
-  if (result.status === 'RUNTIME_ERROR') return '실행 중 오류가 났어요. 변수 이름과 리스트 인덱스 범위를 차근차근 확인해보세요.'
-  if (result.status === 'TIME_LIMIT') return '시간 초과가 났어요. 반복문이 끝나는 조건과 불필요하게 반복되는 부분을 확인해보세요.'
-  if (result.status === 'INTERNAL_ERROR') return '채점 중 문제가 있었어요. 잠시 뒤 다시 실행해보고 같은 문제가 반복되면 코드보다 실행 환경을 확인해보세요.'
-  return '답이 조금 달라요. 예시 입력을 손으로 따라가며 중간값이 어떻게 변하는지 적어보세요.'
+  const tutorMessage = result.agent_decision?.activity?.message
+  if (typeof tutorMessage === 'string' && tutorMessage.trim()) return tutorMessage
+  return '문제를 작은 단계로 나눠볼게요. 입력, 처리, 출력 순서로 생각하면 훨씬 쉬워져요.'
 }
 
 function LoginRequiredModal({ service, onClose, onLogin, onSignup }: { service: string; onClose: () => void; onLogin: () => void; onSignup: () => void }) {
