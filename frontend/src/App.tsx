@@ -33,6 +33,7 @@ import { TraceActivity } from './traceActivity'
 import { ProblemList } from './problemList'
 import { getLearningProgress, saveCompleted, saveInProgress } from './learningProgress'
 import { getProblemDetail, getProblems, isJudgeApiConfigured, type JudgeResult, type LocalJudgePayload, type ProblemDetail, type ProblemSummary, type PublicTestCase } from './problemService'
+import { awardLocalProblemReward } from './problemRewards'
 import { isJudgeUnavailable, runJudge } from './traceClient'
 import { useCodingTrace } from './useCodingTrace'
 import SignupPage from './SignupPage'
@@ -122,6 +123,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
   const [activity, setActivity] = useState<'landing' | 'problem' | 'trace' | 'list' | 'mypage' | 'educator'>(() => userRole === 'educator' ? 'educator' : userRole ? 'list' : 'landing')
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null)
   const [submissionComplete, setSubmissionComplete] = useState(false)
+  const [awardedAcorns, setAwardedAcorns] = useState(0)
   const [submissionFailure, setSubmissionFailure] = useState<JudgeResult['status'] | null>(null)
   const [nextProblemLoading, setNextProblemLoading] = useState(false)
   const [profileAvatar, setProfileAvatar] = useState(() => {
@@ -231,10 +233,11 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     setResult(null)
     setJudgeError('')
 
-    const applyJudgeResult = (judgeResult: JudgeResult) => {
+    const applyJudgeResult = (judgeResult: JudgeResult, locallyJudged = false) => {
       setResult(judgeResult)
       if (nextMode === 'submit' && judgeResult.status === 'ACCEPTED') {
         saveCompleted(problem.problem_id, problem.title, code)
+        setAwardedAcorns(judgeResult.awarded_acorns ?? (locallyJudged ? awardLocalProblemReward(problem.problem_id, problem.acorn_reward) : 0))
         setSubmissionFailure(null)
         setSubmissionComplete(true)
       } else if (nextMode === 'submit') {
@@ -245,7 +248,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
     // 브라우저(Pyodide) 채점. 서버 judge 가 없을 때의 폴백이다.
     // 학습 기록은 남지 않지만 학생은 계속 문제를 풀 수 있다.
     const judgeInBrowser = async () => {
-      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode))
+      applyJudgeResult(toJudgePayload(await runPython(code, problem), nextMode), true)
     }
 
     try {
@@ -512,7 +515,7 @@ function LearningWorkspace({ userRole, onLogin, onSignup, onLogout }: { userRole
       </main>
       )}
       {loginPrompt && <LoginRequiredModal service={loginPrompt} onClose={() => setLoginPrompt(null)} onLogin={() => { setLoginPrompt(null); onLogin() }} onSignup={() => { setLoginPrompt(null); onSignup() }} />}
-      {submissionComplete && problem && <SubmissionCompleteModal problemTitle={problem.title} loading={nextProblemLoading} onNext={openNextRecommendedProblem} onList={() => { setSubmissionComplete(false); setActivity('list') }} />}
+      {submissionComplete && problem && <SubmissionCompleteModal problemTitle={problem.title} reward={problem.acorn_reward} awarded={awardedAcorns} loading={nextProblemLoading} onNext={openNextRecommendedProblem} onList={() => { setSubmissionComplete(false); setActivity('list') }} />}
       {submissionFailure && <SubmissionFailureModal status={submissionFailure} onRetry={() => { setSubmissionFailure(null); window.setTimeout(() => editorRef.current?.focus(), 0) }} />}
     </div>
   )
@@ -545,7 +548,7 @@ function SubmissionFailureModal({ status, onRetry }: { status: JudgeResult['stat
   )
 }
 
-function SubmissionCompleteModal({ problemTitle, loading, onNext, onList }: { problemTitle: string; loading: boolean; onNext: () => void; onList: () => void }) {
+function SubmissionCompleteModal({ problemTitle, reward, awarded, loading, onNext, onList }: { problemTitle: string; reward: number; awarded: number; loading: boolean; onNext: () => void; onList: () => void }) {
   return (
     <div className="submission-success-backdrop">
       <div className="submission-success-modal" role="dialog" aria-modal="true" aria-labelledby="submission-success-title">
@@ -554,6 +557,7 @@ function SubmissionCompleteModal({ problemTitle, loading, onNext, onList }: { pr
           <span><Check size={15} /> ACCEPTED</span>
           <h2 id="submission-success-title">제출이 완료됐어요!</h2>
           <p><strong>{problemTitle}</strong> 문제를 멋지게 해결했어요.<br />다음 문제도 이어서 도전해볼까요?</p>
+          <div className="submission-reward"><span>🌰</span><strong>{awarded > 0 ? `도토리 ${awarded}개 획득!` : `도토리 ${reward}개는 이미 받았어요`}</strong></div>
         </div>
         <div className="submission-success-actions">
           <button className="modal-secondary-button" type="button" onClick={onList}>문제 목록</button>

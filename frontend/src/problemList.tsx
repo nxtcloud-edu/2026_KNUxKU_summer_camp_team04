@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Braces, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle, Search, Terminal } from 'lucide-react'
 import { getLearningProgress } from './learningProgress'
 import { getProblems, type ProblemListSource, type ProblemSummary } from './problemService'
+import AcornIcon from './AcornIcon'
 
 type ProblemFilter = 'all' | 'function_call' | 'stdout_match'
 const PROBLEMS_PER_PAGE = 10
@@ -124,6 +125,7 @@ function RecommendedProblem({ problem, rank, onClick }: { problem: ProblemSummar
       <span className="recommendation-icon">{functionType ? <Braces /> : <Terminal />}</span>
       <strong>{problem.title}</strong>
       <small>{functionType ? '함수와 반복문을 함께 연습해요' : '입력과 출력의 흐름을 익혀요'}</small>
+      <span className="problem-reward"><AcornIcon /> 도토리 {problem.acorn_reward}개</span>
       <span className="recommendation-action">문제 풀기 <ArrowRight size={15} /></span>
     </button>
   )
@@ -139,6 +141,7 @@ function ProblemRow({ problem, number, onClick }: { problem: ProblemSummary; num
         <strong>{problem.title}</strong>
         <small>{functionType ? '함수형' : '입출력형'} · {problem.concept.length ? problem.concept.join(' · ') : 'Python 기초'}</small>
       </span>
+      <span className="problem-reward row"><AcornIcon /> {problem.acorn_reward}개</span>
       {progress && <span className={`checkpoint-state ${progress.status === 'COMPLETED' ? 'completed' : ''}`}><CheckCircle2 size={14} /> {progress.status === 'COMPLETED' ? '학습 완료' : '학습 중'}</span>}
       <ChevronRight className="problem-arrow" size={17} />
     </button>

@@ -34,40 +34,46 @@ const BUBBLE_INTERVAL_MS = 4200
 const FEATURES = [
   {
     icon: Activity,
-    title: '막힌 순간을 먼저 알아챕니다',
+    title: [
+      '막힌 순간을',
+      '먼저 알아챕니다'
+    ],
     body: [
-      '편집·실행·제출을 초 단위로 기록해',
-      '같은 오류 반복, 같은 영역만 고치는 정체,',
-      '진전 없는 시간을 신호로 바꿉니다.',
+      '편집·실행·제출을 초 단위로',
+      '기록해 신호로 바꿉니다.',
       '학생이 도움을 요청하지 않아도 개입 시점을 찾아냅니다.',
     ],
   },
   {
     icon: Lightbulb,
-    title: '정답 대신 다음 한 걸음',
+    title: [
+      '정답 대신',
+      '다음 한 걸음',
+    ],
     body: [
-      'AI 튜터는 코드를 대신 써주지 않습니다.',
+      '코드를 대신 써주지 않습니다.',
       '지금 무엇을 확인해야 하는지 질문과 힌트로 되돌려주고,',
-      '필요할 때만 개념을 다시 설명합니다.',
+      '필요할 때 개념을 설명합니다.',
     ],
   },
   {
     icon: Waypoints,
     title: '코드가 흘러가는 길을 눈으로',
     body: [
-      '한 줄씩 실행되는 순서와 변수 변화를 따라가는',
-      '트레이스 활동으로, 왜 그 결과가 나왔는지',
-      '스스로 설명할 수 있게 만듭니다.',
+      '실행 순서와 변수 변화를 따라가는 트레이스 활동으로,',
+      '왜 그 결과가 나왔는지 스스로 설명할 수 있게 만듭니다.',
     ],
   },
   {
     icon: LineChart,
-    title: '결과가 아니라 과정의 기록',
+    title: [
+      '결과가 아니라',
+      '과정의 기록',
+    ],
     body: [
       '맞았는지 틀렸는지가 아니라',
       '어떻게 도달했는지가 남습니다.',
-      '도토리와 배지로 꾸준함을 보상하고,',
-      '타임라인으로 성장을 되돌아봅니다.',
+      '도토리로 꾸준함을 보상하고, 성장 과정을 기록합니다.',
     ],
   },
 ]
@@ -340,21 +346,23 @@ export default function LandingPage({
         <RevealHeading text="결과가 아니라 과정을 봅니다" id="lp-features-title" />
         <div className="lp-grid">
           {FEATURES.map((feature, i) => (
-            <RevealCard key={feature.title} index={i} {...feature} />
+            <RevealCard key={Array.isArray(feature.title) ? feature.title.join(' ') : feature.title} index={i} {...feature} />
           ))}
         </div>
       </section>
 
-      <section className="lp-section lp-section-soft" aria-labelledby="lp-steps-title">
-        <p className="lp-kicker">어떻게 동작하나</p>
-        <h2 className="lp-h2" id="lp-steps-title">
-          세 단계면 충분합니다
-        </h2>
-        <ol className="lp-steps">
-          {STEPS.map((step, i) => (
-            <RevealStep key={step.no} index={i} {...step} />
-          ))}
-        </ol>
+      <section className="lp-section lp-section-soft lp-steps-section" aria-labelledby="lp-steps-title">
+        <div className="lp-steps-inner">
+          <p className="lp-kicker">어떻게 동작하나</p>
+          <h2 className="lp-h2" id="lp-steps-title">
+            세 단계면 충분합니다
+          </h2>
+          <ol className="lp-steps">
+            {STEPS.map((step, i) => (
+              <RevealStep key={step.no} index={i} {...step} />
+            ))}
+          </ol>
+        </div>
       </section>
 
       <section className="lp-section lp-educator" aria-labelledby="lp-educator-title">

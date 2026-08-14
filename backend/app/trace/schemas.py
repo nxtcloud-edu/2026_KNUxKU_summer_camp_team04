@@ -184,6 +184,7 @@ class ResultIngestResponse(BaseModel):
     event: EventRead
     process_state: ProcessStateResponse
     agent_decision: AgentDecisionRead | None = None
+    awarded_acorns: int = 0
 
 
 # ---------------------------------------------------------------- Timeline
