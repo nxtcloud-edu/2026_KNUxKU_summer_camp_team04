@@ -2,7 +2,7 @@
 
 `evaluate_entry_signals()`는 LLM을 전혀 쓰지 않는 순수 함수라 mock 없이 검증한다.
 `assess()`는 게이트가 막거나(skip) 붙여넣기(paste)를 감지하면 LLM(Agent.
-structured_output)을 호출하지 않고 바로 StudentState를 반환해야 하므로, 그
+structured_output_async)을 호출하지 않고 바로 StudentState를 반환해야 하므로, 그
 호출 여부를 MagicMock으로 검증한다. LLM 자체 품질은 검증 대상이 아니다.
 
 아래 값들은 state_agent.py의 기본 임계값(환경변수 미설정 시)을 기준으로 한다:
@@ -89,7 +89,7 @@ def test_assess_skips_llm_when_gate_blocks() -> None:
 
     result = state_agent.assess(ctx, mock_agent)
 
-    mock_agent.structured_output.assert_not_called()
+    mock_agent.structured_output_async.assert_not_called()
     assert result.should_intervene is False
     assert result.entry_branch == "skip"
 
@@ -100,7 +100,7 @@ def test_assess_skips_llm_on_paste_and_routes_to_comprehension_check() -> None:
 
     result = state_agent.assess(ctx, mock_agent)
 
-    mock_agent.structured_output.assert_not_called()
+    mock_agent.structured_output_async.assert_not_called()
     assert result.should_intervene is True
     assert result.entry_branch == "paste"
     assert result.struggle_signals == ["paste_detected"]
@@ -108,14 +108,14 @@ def test_assess_skips_llm_on_paste_and_routes_to_comprehension_check() -> None:
 
 def test_assess_calls_llm_when_gate_passes_with_struggle_signals() -> None:
     mock_agent = MagicMock()
-    mock_agent.structured_output.return_value = StudentState(
+    mock_agent.structured_output_async.return_value = StudentState(
         state_summary="같은 오류 반복", should_intervene=True, urgency="high"
     )
     ctx = _ctx(idle_seconds=120, edit_churn_count=5)  # 신호 2개, 게이트 통과
 
     result = state_agent.assess(ctx, mock_agent)
 
-    mock_agent.structured_output.assert_called_once()
+    mock_agent.structured_output_async.assert_called_once()
     assert result.entry_branch == "struggle"
     assert result.should_intervene is True
 
@@ -126,27 +126,27 @@ def test_assess_calls_llm_when_gate_passes_with_struggle_signals() -> None:
 def test_skip_gate_calls_llm_even_without_any_local_signal() -> None:
     """게이트라면 막았을 신호 0개짜리 ctx도, skip_gate=True면 곧장 LLM으로 간다."""
     mock_agent = MagicMock()
-    mock_agent.structured_output.return_value = StudentState(
+    mock_agent.structured_output_async.return_value = StudentState(
         state_summary="Monitor가 STUCK으로 판단", should_intervene=True, urgency="high"
     )
     ctx = _ctx()  # idle/churn/cursor_stuck 전부 0 -- 일반 게이트라면 스킵됐을 상태
 
     result = state_agent.assess(ctx, mock_agent, skip_gate=True)
 
-    mock_agent.structured_output.assert_called_once()
+    mock_agent.structured_output_async.assert_called_once()
     assert result.entry_branch == "struggle"
 
 
 def test_skip_gate_ignores_cooldown_and_session_ended() -> None:
     mock_agent = MagicMock()
-    mock_agent.structured_output.return_value = StudentState(
+    mock_agent.structured_output_async.return_value = StudentState(
         state_summary="Monitor가 판단", should_intervene=True
     )
     ctx = _ctx(session_ended=True, seconds_since_last_intervention=1)
 
     result = state_agent.assess(ctx, mock_agent, skip_gate=True)
 
-    mock_agent.structured_output.assert_called_once()
+    mock_agent.structured_output_async.assert_called_once()
     assert result.should_intervene is True
 
 
@@ -156,5 +156,5 @@ def test_skip_gate_still_routes_paste_to_comprehension_check_without_llm() -> No
 
     result = state_agent.assess(ctx, mock_agent, skip_gate=True)
 
-    mock_agent.structured_output.assert_not_called()
+    mock_agent.structured_output_async.assert_not_called()
     assert result.entry_branch == "paste"

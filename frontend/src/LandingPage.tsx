@@ -206,7 +206,9 @@ function RevealCard({ icon: Icon, title, body, index }: Feature & { index: numbe
       <span className="lp-card-icon" aria-hidden>
         <Icon size={22} />
       </span>
-      <h3 className="lp-card-title">{title}</h3>
+      <h3 className="lp-card-title">
+        {Array.isArray(title) ? title.map((line) => <span key={line}>{line}</span>) : title}
+      </h3>
       <p className="lp-card-body">{body.map((line) => <span key={line}>{line}</span>)}</p>
     </article>
   )

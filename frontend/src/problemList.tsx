@@ -28,13 +28,19 @@ export function ProblemList({ onSelect }: { onSelect: (problem: ProblemSummary) 
     return () => controller.abort()
   }, [])
 
-  const filtered = useMemo(() => problems.filter((problem) => {
-    const type = problem.problem_id.startsWith('func_') ? 'function_call' : 'stdout_match'
-    const matchesFilter = filter === 'all' || type === filter
-    const keyword = query.trim().toLocaleLowerCase()
-    const matchesQuery = !keyword || `${problem.title} ${problem.problem_id} ${problem.concept.join(' ')}`.toLocaleLowerCase().includes(keyword)
-    return matchesFilter && matchesQuery
-  }), [filter, problems, query])
+  const filtered = useMemo(() => problems
+    .filter((problem) => {
+      const type = problem.problem_id.startsWith('func_') ? 'function_call' : 'stdout_match'
+      const matchesFilter = filter === 'all' || type === filter
+      const keyword = query.trim().toLocaleLowerCase()
+      const matchesQuery = !keyword || `${problem.title} ${problem.problem_id} ${problem.concept.join(' ')}`.toLocaleLowerCase().includes(keyword)
+      return matchesFilter && matchesQuery
+    })
+    .sort((a, b) => {
+      const aInProgress = getLearningProgress(a.problem_id)?.status === 'IN_PROGRESS'
+      const bInProgress = getLearningProgress(b.problem_id)?.status === 'IN_PROGRESS'
+      return Number(bInProgress) - Number(aInProgress)
+    }), [filter, problems, query])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PROBLEMS_PER_PAGE))
   const visibleProblems = useMemo(() => {

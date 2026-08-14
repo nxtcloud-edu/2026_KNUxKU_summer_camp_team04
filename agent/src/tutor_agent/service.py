@@ -31,9 +31,10 @@ backend venv에 `strands-agents`를 설치해야 하는데, **이게 불가능�
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from .backend_adapter import get_backend_agent
@@ -106,27 +107,25 @@ def health() -> dict:
 
 
 @app.post("/decide", response_model=DecideResponse)
-def decide(request: DecideRequest, background_tasks: BackgroundTasks) -> DecideResponse:
-    """Monitor가 개입 시점이라고 판단했을 때 backend가 부르는 단일 진입점.
+def decide(request: DecideRequest) -> DecideResponse:
+    """Monitor가 개입 시점이라고 판단했을 때 backend가 부르는 진입점 (튜터가 먼저 말 걸기).
 
     `TutorAgentAdapter.decide_with_pipeline_result()`는 **어떤 경우에도 예외를
     던지지 않고** 실패를 WAIT로 흘린다. 그래서 이 핸들러도 5xx를 내지 않는다
     — backend는 항상 파싱 가능한 결정을 받는다 (네트워크 자체가 끊긴 경우만
     클라이언트 쪽 폴백이 담당한다).
 
-    evaluation은 응답을 반환한 **뒤에** 백그라운드로 돌린다 (`orchestrator.py`가
-    더 이상 동기로 부르지 않는 이유 참고 — 학생에게 보여줄 결정에 영향이
-    없는데 30초 파이프라인의 1/4을 더 기다리게 할 이유가 없다). 지금은 결과를
-    로그로만 남긴다 — 저장할 곳(분석 DB 등)이 아직 backend에 없어서다. 그게
-    생기면 `_log_evaluation`을 그쪽으로 보내는 걸로 바꾸면 된다.
+    **예전에는 여기서 응답 후 백그라운드로 evaluation을 돌렸다.** 그 evaluation은
+    "방금 내가 한 개입이 적절했는지"를 AI가 스스로 채점하는 것이었고
+    (`score=0.85 notes=매우 적절한 개입...`), 결과는 로그 한 줄로 끝나 아무
+    동작도 바꾸지 않았다. 평가해야 하는 대상은 AI의 개입이 아니라 **학생의
+    답변**이므로, 그 호출을 없애고 `/respond`로 옮겼다 (거기서는 평가 결과가
+    실제로 다음 응답을 바꾼다). 자세한 경위는
+    `agents/evaluation_agent.py` docstring 참고.
     """
-    decision, pipeline_context = get_backend_agent().decide_with_pipeline_result(
+    decision, _pipeline_context = get_backend_agent().decide_with_pipeline_result(
         request.model_dump()
     )
-    if pipeline_context is not None:
-        session_ctx, result = pipeline_context
-        if result.action_plan is not None:
-            background_tasks.add_task(_log_evaluation, session_ctx, result.action_plan)
 
     return DecideResponse(
         state=decision.state,
@@ -138,26 +137,66 @@ def decide(request: DecideRequest, background_tasks: BackgroundTasks) -> DecideR
     )
 
 
-def _log_evaluation(session_ctx: Any, action_plan: Any) -> None:
-    """방금 반환한 결정을 백그라운드에서 평가해 로그로 남긴다.
+class RespondRequest(DecideRequest):
+    """`/respond` 요청 = `AgentContext` + 학생이 보낸 답변.
 
-    응답 경로 밖에서 실행되므로 여기서 걸리는 시간은 학생 대기 시간에
-    전혀 들어가지 않는다. 실패해도 아무 데도 영향 없음 — 로그만 남는다.
+    `DecideRequest`를 상속하는 이유: 학생 답변을 평가하려면 답변만으로는 부족하고
+    문제/코드 맥락이 필요하다 ("0으로요"가 정답인지 아닌지는 질문과 코드를 봐야
+    안다). backend가 `/decide`에 보내는 것과 **같은 컨텍스트**를 보내면 되므로
+    계약이 하나 더 늘지 않는다.
     """
-    # 지연 import: 이 백그라운드 작업이 안 걸리면 evaluation_agent(=strands 호출)를
-    # import 시점에 끌어오지 않는다.
-    from .agents import evaluation_agent
 
-    try:
-        evaluation = evaluation_agent.evaluate(session_ctx, action_plan)
-        log.info(
-            "evaluation(백그라운드): score=%.2f follow_up_needed=%s notes=%s",
-            evaluation.effectiveness_score,
-            evaluation.follow_up_needed,
-            evaluation.notes,
-        )
-    except Exception:
-        log.exception("백그라운드 evaluation 실패 (응답에는 영향 없음)")
+    answer: str = ""
+    #: 튜터가 직전에 던진 질문. backend가 개입 기록(`AGENT_INTERVENTION` 이벤트의
+    #: `activity.question`)에서 찾아 채운다 — 학생 클라이언트가 보내는 값을 그대로
+    #: 믿으면 질문을 바꿔 보내 평가를 통과시킬 수 있다.
+    question: str = ""
+
+
+class RespondResponse(BaseModel):
+    """학생에게 보낼 문장 + 그 답변에 대한 내부 평가.
+
+    `message`만 학생에게 보여준다. 나머지는 교육자 화면/분석용이다 —
+    "당신의 이해도는 partial입니다"는 학생에게 도움이 되지 않는다.
+    """
+
+    message: str
+    expects_reply: bool = False
+    question: str = ""
+    understanding: str = ""
+    is_correct: bool = False
+    follow_up_needed: bool = True
+    misconceptions: list[str] = Field(default_factory=list)
+    evidence: str = ""
+    next_focus: str = ""
+
+
+@app.post("/respond", response_model=RespondResponse)
+def respond(request: RespondRequest) -> RespondResponse:
+    """학생이 튜터의 질문에 답했을 때 backend가 부르는 진입점.
+
+    학생 답변 평가(`evaluation_agent`) → 응답 생성(`tutor_message_agent`)
+    두 단계를 거친다. 평가 결과는 로그로 끝나지 않고 응답 문장을 실제로
+    바꾼다 (이해했으면 다음 단계로, 절반이면 빠진 조각만, 못 했으면 더 쉬운
+    질문으로).
+
+    `/decide`와 달리 **침묵으로 폴백하지 않는다.** 학생이 말을 걸었는데 아무
+    응답이 없으면 "튜터가 내 말을 씹었다"가 되므로, 실패해도 사람이 읽을 수
+    있는 문구를 돌려준다 (`backend_adapter.REPLY_FALLBACK_MESSAGE`).
+    """
+    payload = request.model_dump()
+    answer = str(payload.pop("answer", "") or "")
+    question = str(payload.pop("question", "") or "")
+
+    reply = get_backend_agent().respond(payload, answer=answer, question=question)
+    log.info(
+        "respond: understanding=%s is_correct=%s follow_up=%s next_focus=%s",
+        reply.understanding,
+        reply.is_correct,
+        reply.follow_up_needed,
+        reply.next_focus,
+    )
+    return RespondResponse(**asdict(reply))
 
 
 @app.post("/generate-problem", response_model=ValidationReport)
