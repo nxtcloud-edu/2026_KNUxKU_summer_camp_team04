@@ -11,12 +11,6 @@ TUTORY는 코드를 쓰는 **과정**을 읽고, 지금 필요한 만큼만 도�
 
 🏆 **AWS 특별상** · 강원대 × 고려대 Summer Agentic AI 심화 몰입 캠프 4팀
 
-<br>
-
-<!-- 데모 GIF: docs/images/demo.gif 를 추가하면 아래 주석을 풀어주세요
-<img src="docs/images/demo.gif" width="800" alt="TUTORY 데모">
--->
-
 </div>
 
 ---
@@ -81,21 +75,12 @@ TUTORY는 그 중간을 봅니다. 편집, 되돌리기, 같은 자리를 고치
 
 ## 화면
 
-<!-- 스크린샷을 docs/images/ 에 추가하면 아래 주석을 풀어주세요
+<div align="center">
+<img src="docs/images/home.png" width="820" alt="TUTORY 홈 — 추천 문제와 학습 흐름">
+</div>
 
-| 문제 풀이 + AI 튜터 | 교육자 대시보드 |
-|---|---|
-| <img src="docs/images/solve.png" alt="문제 풀이 화면"> | <img src="docs/images/educator.png" alt="교육자 대시보드"> |
-| 왼쪽에 문제, 가운데 Monaco 에디터, 오른쪽에 튜터 패널. 막히면 말풍선이 먼저 뜬다 | 누가 어디서 막혀 있는지, 어떤 개념에서 반복해 넘어지는지 한 화면에 |
-
-| 트레이스 활동 | 마이페이지 |
-|---|---|
-| <img src="docs/images/trace.png" alt="트레이스 활동"> | <img src="docs/images/mypage.png" alt="마이페이지"> |
-| 실행 순서와 변수 변화를 직접 따라가며 채운다 | 도토리와 배지로 꾸준함을 기록한다 |
-
--->
-
-> 📸 스크린샷 준비 중
+최근 학습 흐름에 맞춰 다음에 풀 문제를 골라줍니다. 문제를 열면 왼쪽에 지문,
+가운데 에디터, 오른쪽에 튜터 패널이 붙습니다.
 
 ---
 
