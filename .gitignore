@@ -20,6 +20,9 @@ venv/
 # macOS Finder metadata
 .DS_Store
 
+# 로컬 실행 로그 (backend_stderr.log 등). 트래킹되는 .log 파일은 없다
+*.log
+
 # SQLite (backend). WAL 모드 사이드카는 *.db 패턴에 안 걸린다
 *.db
 *.db-shm
